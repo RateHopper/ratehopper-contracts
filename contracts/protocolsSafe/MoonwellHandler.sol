@@ -114,7 +114,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
 
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(onBehalfOf);
             require(
-                currentBalance < (collateralAssets[i].amount * 101) / 100,
+                currentBalance * 100 < collateralAssets[i].amount * 101,
                 "Current balance is more than collateral amount + buffer"
             );
 
@@ -149,7 +149,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
             // use balanceOf() because collateral amount is slightly decreased when switching from Fluid
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(address(this));
             require(
-                currentBalance < (collateralAssets[i].amount * 101) / 100,
+                currentBalance * 100 < collateralAssets[i].amount * 101,
                 "Current balance is more than collateral amount + buffer"
             );
 
@@ -210,8 +210,6 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         address mContract = getMContract(asset);
         if (mContract == address(0)) revert TokenNotRegistered();
 
-        IERC20(asset).transfer(onBehalfOf, amount);
-
         bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
             asset,
             0,
@@ -220,6 +218,8 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         );
 
         require(successApprove, "moonwell approve failed");
+
+        IERC20(asset).transfer(onBehalfOf, amount);
 
         bool successMint = ISafe(onBehalfOf).execTransactionFromModule(
             mContract,
@@ -239,7 +239,6 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
             abi.encodeCall(IComptroller.enterMarkets, (collateralContracts)),
             ISafe.Operation.Call
         );
-
         require(successEnterMarkets, "Enter markets transaction failed");
     }
 

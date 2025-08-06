@@ -98,7 +98,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(address(this));
             require(currentBalance > 0, "No collateral balance available");
             require(
-                currentBalance < (collateralAssets[i].amount * 101) / 100,
+                currentBalance * 100 < collateralAssets[i].amount * 101,
                 "Current balance is more than collateral amount + buffer"
             );
         

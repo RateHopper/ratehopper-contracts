@@ -203,8 +203,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
         
         (address vaultAddress, ) = abi.decode(extraData, (address, uint256));
-        IERC20(asset).transfer(onBehalfOf, amount);
-
+    
         bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
             asset,
             0,
@@ -212,6 +211,8 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
             ISafe.Operation.Call
         );
         require(successApprove, "Approval failed");
+
+        IERC20(asset).transfer(onBehalfOf, amount);
 
         (bool successSupply, bytes memory returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
             vaultAddress,

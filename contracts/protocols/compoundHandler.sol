@@ -90,7 +90,7 @@ contract CompoundHandler is BaseProtocolHandler, ReentrancyGuard {
             require(registry.isWhitelisted(collateralAssets[i].asset), "Collateral asset is not whitelisted");
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(address(this));
             require(
-                currentBalance < (collateralAssets[i].amount * 101) / 100,
+                currentBalance * 100 < collateralAssets[i].amount * 101,
                 "Current balance is more than collateral amount + buffer"
             );
             TransferHelper.safeApprove(collateralAssets[i].asset, address(cContract), currentBalance);
