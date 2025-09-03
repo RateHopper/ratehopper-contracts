@@ -18,6 +18,8 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
     IAaveProtocolDataProvider public immutable dataProvider;
     ProtocolRegistry public immutable registry;
     
+
+    
     constructor(address _AAVE_V3_POOL_ADDRESS, address _AAVE_V3_DATA_PROVIDER_ADDRESS, address _UNISWAP_V3_FACTORY_ADDRESS, address _REGISTRY_ADDRESS) 
         BaseProtocolHandler(_UNISWAP_V3_FACTORY_ADDRESS) 
     {
@@ -34,6 +36,8 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         (, , uint256 currentVariableDebt, , , , , , ) = dataProvider.getUserReserveData(asset, onBehalfOf);
         return currentVariableDebt;
     }
+
+
 
     function switchIn(
         address fromAsset,
@@ -121,6 +125,11 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
     }
 
     function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyUniswapV3Pool nonReentrant {
+        // Skip repayment if amount is 1 wei or less to prevent Aave v3 InvalidBurnAmount error
+        if (amount <= 1) {
+            return;
+        }
+        
         TransferHelper.safeApprove(asset, address(aaveV3Pool), amount);
         aaveV3Pool.repay(asset, amount, 2, onBehalfOf);
         TransferHelper.safeApprove(asset, address(aaveV3Pool), 0);

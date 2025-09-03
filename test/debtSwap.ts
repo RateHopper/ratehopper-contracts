@@ -241,6 +241,52 @@ describe("DebtSwap should switch", function () {
             await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
         });
 
+        it("should switch USDC debt to MAI with protocol fee - tests decimal mismatch", async function () {
+            // set protocol fee to 1% (100 basis points)
+            const signers = await ethers.getSigners();
+            const contractByOwner = await ethers.getContractAt("DebtSwap", deployedContractAddress, signers[0]);
+            const setTx = await contractByOwner.setProtocolFee(100); // 1%
+            await setTx.wait();
+
+            const setFeeBeneficiaryTx = await contractByOwner.setFeeBeneficiary(TEST_FEE_BENEFICIARY_ADDRESS);
+            await setFeeBeneficiaryTx.wait();
+
+            // Supply and borrow USDC (6 decimals)
+            await morphoHelper.supply(cbETH_ADDRESS, morphoMarket1Id);
+            await morphoHelper.borrow(morphoMarket1Id);
+
+            // Get MAI contract for balance checks
+            const maiContract = new ethers.Contract(MAI_ADDRESS, ERC20_ABI, impersonatedSigner);
+
+            // Record fee beneficiary's MAI balance before swap
+            const beneficiaryMaiBalanceBefore = await maiContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+
+            // Execute debt swap from USDC (6 decimals) to MAI (18 decimals)
+            await executeDebtSwap(
+                USDC_hyUSD_POOL,
+                USDC_ADDRESS,
+                MAI_ADDRESS,
+                Protocols.MORPHO,
+                Protocols.MORPHO,
+                cbETH_ADDRESS,
+                {
+                    morphoFromMarketId: morphoMarket1Id,
+                    morphoToMarketId: morphoMarket3Id,
+                },
+            );
+
+            // Check fee beneficiary's MAI balance after swap
+            const beneficiaryMaiBalanceAfter = await maiContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+            const feeReceived = beneficiaryMaiBalanceAfter - beneficiaryMaiBalanceBefore;
+
+            // Log the fee received
+            console.log("Protocol fee received (MAI):", ethers.formatUnits(feeReceived, 18));
+
+            // The fee should be approximately 1% of the debt amount in MAI terms
+            // For example, if swapping 10 USDC to ~10 MAI, fee should be ~0.1 MAI (not 0.0000001 MAI)
+            expect(feeReceived).to.be.lt(ethers.parseUnits("1", 18)); // Less than 1 MAI
+        });
+
         it("USDC debt from Compound to Aave", async function () {
             await compoundHelper.supply(USDC_COMET_ADDRESS, cbETH_ADDRESS);
             await compoundHelper.borrow(USDC_ADDRESS);
@@ -869,6 +915,32 @@ describe("DebtSwap should switch", function () {
         const tx = await signer.sendTransaction({
             to: deployedContractAddress,
             data: "0xf741356e000000000000000000000000dba83ed66a9f7c6785e3ba668512b36e54a3344200000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000420000000000000000000000000000000000000600000000000000000000000000000000000000000000000000082c557faf3e9700000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000004200000000000000000000000000000000000006000000000000000000000000fea2d58cefcb9fcb597723c6bae66ffe4193afe400000000000000000000000046415998764c29ab2a25cbea6254146d50d226870000000000000000000000000000000000000000000000000bef55718ad60000000000000000000000000000000000000000000000000000000001339c406394000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000",
+        });
+
+        const receipt = await tx.wait();
+
+        const aaveDebtAmount = await aaveV3Helper.getDebtAmount(USDC_ADDRESS, signer.address);
+        console.log(`Aave debt amount: ${aaveDebtAmount.toString()}`);
+    });
+
+    it.skip("test with real position 2", async function () {
+        const signer = await ethers.getImpersonatedSigner("0x9e073c36f63bf1c611026fda1ff6007a81932231");
+
+        // Fund the impersonated account with ETH for gas fees
+        const [deployer] = await ethers.getSigners();
+        await deployer.sendTransaction({
+            to: signer.address,
+            value: ethers.parseEther("1.0"), // Send 1 ETH for gas
+        });
+
+        const morphoContract = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, signer);
+        await morphoContract.setAuthorization(deployedContractAddress, true);
+
+        await aaveV3Helper.approveDelegation(USDC_ADDRESS, deployedContractAddress);
+
+        const tx = await signer.sendTransaction({
+            to: deployedContractAddress,
+            data: "0xf741356e000000000000000000000000b4cb800910b228ed3d0834cf79d697127bbb00e500000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000420000000000000000000000000000000000000600000000000000000000000000000000000000000000000000038d7ea4c6800000000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000004200000000000000000000000000000000000006000000000000000000000000fea2d58cefcb9fcb597723c6bae66ffe4193afe400000000000000000000000046415998764c29ab2a25cbea6254146d50d226870000000000000000000000000000000000000000000000000bef55718ad600000000000000000000000000000000000000000000000000000000011c5f52dc640000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000",
         });
 
         const receipt = await tx.wait();

@@ -83,6 +83,7 @@ export const mContractAddressMap = new Map<string, string>([
     [tBTC_ADDRESS, mtBTC],
     [LBTC_ADDRESS, mLBTC],
     [VIRTUAL_ADDRESS, mVIRTUAL],
+    [WETH_ADDRESS, mWETH],
 ]);
 
 /**

@@ -14,15 +14,19 @@ import {Structs} from "../dependencies/fluid/structs.sol";
 import "../protocols/BaseProtocolHandler.sol";
 import "../ProtocolRegistry.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "../interfaces/IWETH9.sol";
 
 contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
     using GPv2SafeERC20 for IERC20;
 
-    address public immutable FLUID_VAULT_RESOLVER;
+    address public immutable WETH_ADDRESS = 0x4200000000000000000000000000000000000006;
+
+    // The registry contract holds configuration data including the Fluid vault resolver address
+    // This design allows the resolver to be updated without redeploying handlers
+    // and works correctly with delegatecall since registry is immutable
     ProtocolRegistry public immutable registry;
 
-    constructor(address _fluidVaultResolver, address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY) {
-        FLUID_VAULT_RESOLVER = _fluidVaultResolver;
+    constructor(address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY) {
         registry = ProtocolRegistry(_REGISTRY_ADDRESS);
     }
 
@@ -33,7 +37,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
     ) public view returns (uint256) {
         (address vaultAddress, ) = abi.decode(fromExtraData, (address, uint256));
 
-        IFluidVaultResolver resolver = IFluidVaultResolver(FLUID_VAULT_RESOLVER);
+        IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
 
         (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
             .positionsByUser(onBehalfOf);
@@ -127,23 +131,51 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
                 "Current balance is more than collateral amount + buffer"
             );
 
-        IERC20(collateralAssets[0].asset).transfer(onBehalfOf, currentBalance);
+        bytes memory returnData;
+        // Check if collateral asset is WETH
+        if (collateralAssets[0].asset == WETH_ADDRESS) {
+            // Transfer WETH to onBehalfOf first
+            IERC20(collateralAssets[0].asset).transfer(onBehalfOf, currentBalance);
+            
+            // Unwrap WETH to ETH in the Safe
+            bool successUnwrap = ISafe(onBehalfOf).execTransactionFromModule(
+                collateralAssets[0].asset,
+                0,
+                abi.encodeCall(IWETH9.withdraw, (currentBalance)),
+                ISafe.Operation.Call
+            );
+            require(successUnwrap, "WETH unwrap failed");
+            
+            // For WETH, send ETH as msg.value
+            bool successSupply;
+            (successSupply, returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
+                vaultAddress,
+                currentBalance, // Send ETH as msg.value
+                abi.encodeCall(IFluidVault.operate, (nftId, int256(currentBalance), 0, onBehalfOf)),
+                ISafe.Operation.Call
+            );
+            require(successSupply, "Fluid supply failed");
+        } else {
+            // For other assets, use the standard approve and transfer flow
+            IERC20(collateralAssets[0].asset).transfer(onBehalfOf, currentBalance);
 
-        bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
-            collateralAssets[0].asset,
-            0,
-            abi.encodeCall(IERC20.approve, (address(vaultAddress), currentBalance)),
-            ISafe.Operation.Call
-        );
-        require(successApprove, "Approval failed");
+            bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
+                collateralAssets[0].asset,
+                0,
+                abi.encodeCall(IERC20.approve, (address(vaultAddress), currentBalance)),
+                ISafe.Operation.Call
+            );
+            require(successApprove, "Approval failed");
 
-        (bool successSupply, bytes memory returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
-            vaultAddress,
-            0,
-            abi.encodeCall(IFluidVault.operate, (nftId, int256(currentBalance), 0, onBehalfOf)),
-            ISafe.Operation.Call
-        );
-        require(successSupply, "Fluid supply failed");
+            bool successSupply;
+            (successSupply, returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
+                vaultAddress,
+                0,
+                abi.encodeCall(IFluidVault.operate, (nftId, int256(currentBalance), 0, onBehalfOf)),
+                ISafe.Operation.Call
+            );
+            require(successSupply, "Fluid supply failed");
+        }
 
         // If nftId is 0, extract new ID from return data, otherwise use the provided ID
         uint256 positionNftId;
@@ -169,6 +201,14 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
 
         IERC20(asset).transfer(onBehalfOf, amount);
 
+        int256 repayAmount = -int256(amount);
+
+        // To avoid FluidVaultError(ErrorTypes.Vault__InvalidOperateAmount) error, skip repayment if amount is very small
+        // https://github.com/Instadapp/fluid-contracts-public/blob/main/contracts/protocols/vault/vaultT1/coreModule/main.sol
+        if (repayAmount > -10000) {
+            return;
+        }
+
         bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
             asset,
             0,
@@ -177,7 +217,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         );
         require(successApprove, "Approval failed");
 
-        IFluidVaultResolver resolver = IFluidVaultResolver(FLUID_VAULT_RESOLVER);
+        IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
 
         // get nftId
         uint256 nftId = 0;
@@ -192,7 +232,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         bool successRepay = ISafe(onBehalfOf).execTransactionFromModule(
             vaultAddress,
             0,
-            abi.encodeCall(IFluidVault.operate, (nftId, 0, -int256(amount), onBehalfOf)),
+            abi.encodeCall(IFluidVault.operate, (nftId, 0, repayAmount, onBehalfOf)),
             ISafe.Operation.Call
         );
 
@@ -204,23 +244,48 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         
         (address vaultAddress, ) = abi.decode(extraData, (address, uint256));
     
-        bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
-            asset,
-            0,
-            abi.encodeCall(IERC20.approve, (address(vaultAddress), amount)),
-            ISafe.Operation.Call
-        );
-        require(successApprove, "Approval failed");
+        // Check if asset is WETH
+        if (asset == WETH_ADDRESS) {
+            // Transfer WETH to onBehalfOf first
+            IERC20(asset).transfer(onBehalfOf, amount);
+            
+            // Unwrap WETH to ETH in the Safe
+            bool successUnwrap = ISafe(onBehalfOf).execTransactionFromModule(
+                asset,
+                0,
+                abi.encodeCall(IWETH9.withdraw, (amount)),
+                ISafe.Operation.Call
+            );
+            require(successUnwrap, "WETH unwrap failed");
+            
+            // For WETH, send ETH as msg.value
+            (bool successSupply, bytes memory returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
+                vaultAddress,
+                amount, // Send ETH as msg.value
+                abi.encodeCall(IFluidVault.operate, (0, int256(amount), 0, onBehalfOf)),
+                ISafe.Operation.Call
+            );
+            require(successSupply, "Fluid supply failed");
+        } else {
+            // For other assets, use the standard approve and transfer flow
+            bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
+                asset,
+                0,
+                abi.encodeCall(IERC20.approve, (address(vaultAddress), amount)),
+                ISafe.Operation.Call
+            );
+            require(successApprove, "Approval failed");
 
-        IERC20(asset).transfer(onBehalfOf, amount);
+            IERC20(asset).transfer(onBehalfOf, amount);
 
-        (bool successSupply, bytes memory returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
-            vaultAddress,
-            0,
-            abi.encodeCall(IFluidVault.operate, (0, int256(amount), 0, onBehalfOf)),
-            ISafe.Operation.Call
-        );
-        require(successSupply, "Fluid supply failed");
+            (bool successSupply, bytes memory returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
+                vaultAddress,
+                0,
+                abi.encodeCall(IFluidVault.operate, (0, int256(amount), 0, onBehalfOf)),
+                ISafe.Operation.Call
+            );
+            require(successSupply, "Fluid supply failed");
+        }
     }
 
     function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyUniswapV3Pool nonReentrant {
@@ -228,7 +293,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         
         (address vaultAddress, ) = abi.decode(extraData, (address, uint256));
 
-        IFluidVaultResolver resolver = IFluidVaultResolver(FLUID_VAULT_RESOLVER);
+        IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
 
         // get nftId
         uint256 nftId = 0;

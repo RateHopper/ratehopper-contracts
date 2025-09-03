@@ -33,8 +33,10 @@ const config: HardhatUserConfig = {
         apiKey: process.env.EXPLORER_KEY,
     },
     mocha: {
-        timeout: 3000000,
-        parallel: false,
+        timeout: 300000, // 5 minutes for memory-intensive tests
+        parallel: false, // Disable parallel to reduce memory usage
+        bail: false, // Continue running tests even if one fails
+        slow: 30000, // Mark tests as slow if they take more than 30 seconds
     },
     gasReporter: {
         enabled: process.env.REPORT_GAS ? true : false,
@@ -45,6 +47,8 @@ const config: HardhatUserConfig = {
             chainId: 8453,
             timeout: 10_000_000,
             accounts: [process.env.PRIVATE_KEY!],
+            gasPrice: "auto",
+            gasMultiplier: 1.2,
         },
         baseSepolia: {
             url: "https://sepolia.base.org",
@@ -71,6 +75,7 @@ const config: HardhatUserConfig = {
             },
             forking: {
                 url: baseUrl,
+                blockNumber: 35043522,
             },
         },
     },

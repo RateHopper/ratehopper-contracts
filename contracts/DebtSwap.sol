@@ -156,7 +156,13 @@ contract DebtSwap is Ownable, ReentrancyGuard {
             flashloanFee = flashloanFeeOriginal;
         }
 
-        uint256 protocolFeeAmount = (decoded.amount * protocolFee) / 10000;
+        // Calculate protocol fee in toAsset decimals to ensure correct fee amount
+        uint256 protocolFeeAmount = _calculateProtocolFee(
+            decoded.fromAsset,
+            decoded.toAsset,
+            decoded.amount,
+            decimalDifference
+        );
 
         uint256 amountInMax = decoded.paraswapParams.srcAmount == 0 ? decoded.amount : decoded.paraswapParams.srcAmount;
         uint256 amountTotal = amountInMax + flashloanFee + protocolFeeAmount;
@@ -279,5 +285,33 @@ contract DebtSwap is Ownable, ReentrancyGuard {
         require(amount <= balance, "Insufficient balance");
         IERC20(token).safeTransfer(owner(), amount);
         emit EmergencyWithdrawn(token, amount, owner());
+    }
+
+    /**
+     * @dev Calculate protocol fee in toAsset decimals to ensure correct fee amount
+     * @param fromAsset The source asset address
+     * @param toAsset The destination asset address
+     * @param amount The amount to calculate fee for
+     * @param decimalDifference The decimal difference between fromAsset and toAsset (fromAssetDecimals - toAssetDecimals)
+     * @return protocolFeeAmount The calculated protocol fee amount in toAsset decimals
+     */
+    function _calculateProtocolFee(
+        address fromAsset,
+        address toAsset,
+        uint256 amount,
+        int8 decimalDifference
+    ) private view returns (uint256 protocolFeeAmount) {
+        if (fromAsset == toAsset) {
+            protocolFeeAmount = (amount * protocolFee) / 10000;
+        } else {
+            // Convert amount to toAsset decimals first
+            uint256 amountInToAssetDecimals = amount;
+            if (decimalDifference > 0) {
+                amountInToAssetDecimals = amount / (10 ** uint8(decimalDifference));
+            } else if (decimalDifference < 0) {
+                amountInToAssetDecimals = amount * (10 ** uint8(-decimalDifference));
+            }
+            protocolFeeAmount = (amountInToAssetDecimals * protocolFee) / 10000;
+        }
     }
 }

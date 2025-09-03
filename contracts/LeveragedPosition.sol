@@ -139,7 +139,12 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         // suppose either of fee0 or fee1 is 0
         uint totalFee = fee0 + fee1;
 
-        uint256 amountInMax = decoded.paraswapParams.srcAmount + 1;
+        // Calculate protocol fee based on borrowed amount
+        uint256 borrowAmount = decoded.paraswapParams.srcAmount + 1;
+        
+        uint256 protocolFeeAmount = (borrowAmount * protocolFee) / 10000;
+
+        uint256 amountInMax = borrowAmount + protocolFeeAmount;
 
         address handler = protocolHandlers[decoded.protocol];
         require(handler != address(0), "Invalid protocol handler");
@@ -178,16 +183,22 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         uint256 remainingCollateralBalance = IERC20(decoded.collateralAsset).balanceOf(address(this));
         collateralToken.safeTransfer(decoded.onBehalfOf, remainingCollateralBalance);
 
+        // send protocol fee if applicable
+        if (protocolFee > 0 && feeBeneficiary != address(0)) {
+            IERC20(decoded.debtAsset).safeTransfer(feeBeneficiary, protocolFeeAmount);
+        }
+
         // repay remaining debt amount
         uint256 remainingBalance = IERC20(decoded.debtAsset).balanceOf(address(this));
-        (bool successRepay, ) = handler.delegatecall(
-            abi.encodeCall(
-                IProtocolHandler.repay,
-                (decoded.debtAsset, remainingBalance, decoded.onBehalfOf, decoded.extraData)
-            )
-        );
-
-        require(successRepay, "Repay remaining amount failed");
+        if (remainingBalance > 0) {
+            (bool successRepay, ) = handler.delegatecall(
+                abi.encodeCall(
+                    IProtocolHandler.repay,
+                    (decoded.debtAsset, remainingBalance, decoded.onBehalfOf, decoded.extraData)
+                )
+            );
+            require(successRepay, "Repay remaining amount failed");
+        }
 
         emit LeveragedPositionCreated(
             decoded.onBehalfOf,
@@ -223,5 +234,4 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         IERC20(token).safeTransfer(owner(), amount);
         emit EmergencyWithdrawn(token, amount, owner());
     }
-
 }

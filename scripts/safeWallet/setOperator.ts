@@ -3,7 +3,7 @@ import { ethers } from "ethers";
 dotenv.config();
 
 async function main() {
-    const ourContractAddress = "0x492340D1797c509617Ee66Ae5FB90528492aB2D6";
+    const ourContractAddress = "0x3dB540120B824c0a0dfDb4CD7aDdcDa016ee63E6";
     const provider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
     const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
 

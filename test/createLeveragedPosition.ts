@@ -143,7 +143,10 @@ describe("Create leveraged position", function () {
         console.log("collateralAmount: ", ethers.formatUnits(collateralAmount, collateralDecimals));
 
         expect(debtAmount).to.be.gt(0);
-        expect(Number(collateralAmount)).to.be.equal(parsedTargetAmount);
+
+        // Allow for small rounding differences (up to 0.01% of target amount)
+        const tolerance = parsedTargetAmount / 10000n; // 0.01% tolerance
+        expect(collateralAmount).to.be.closeTo(parsedTargetAmount, tolerance);
 
         const collateralToken = new ethers.Contract(collateralAddress, ERC20_ABI, impersonatedSigner);
         const collateralRemainingBalance = await collateralToken.balanceOf(deployedContractAddress);
@@ -226,6 +229,44 @@ describe("Create leveraged position", function () {
             );
         });
 
+        it("with cbETH collateral and protocol fee", async function () {
+            // Set protocol fee
+            const signers = await ethers.getSigners();
+            const contractByOwner = await ethers.getContractAt(
+                "LeveragedPosition",
+                deployedContractAddress,
+                signers[0],
+            );
+            await contractByOwner.setProtocolFee(50); // 0.5%
+            await contractByOwner.setFeeBeneficiary(TEST_ADDRESS);
+
+            // Get USDC contract for balance checks
+            const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, impersonatedSigner);
+
+            // Record fee beneficiary's USDC balance before
+            const beneficiaryUsdcBalanceBefore = await usdcContract.balanceOf(TEST_ADDRESS);
+
+            await createLeveragedPosition(
+                cbETH_ETH_POOL,
+                Protocols.MORPHO,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                morphoMarket1Id,
+            );
+
+            // Check fee beneficiary's USDC balance after
+            const beneficiaryUsdcBalanceAfter = await usdcContract.balanceOf(TEST_ADDRESS);
+
+            const feeReceived = beneficiaryUsdcBalanceAfter - beneficiaryUsdcBalanceBefore;
+
+            console.log("Protocol fee received (USDC):", ethers.formatUnits(feeReceived, 6));
+
+            // The fee should be greater than 0
+            expect(feeReceived).to.be.gt(0);
+        });
+
         it("with cbBTC collateral", async function () {
             const targetAmount = cbBTCPrincipleAmount * 2;
             await createLeveragedPosition(
@@ -249,6 +290,47 @@ describe("Create leveraged position", function () {
                 2,
                 morphoMarket6Id,
             );
+        });
+
+        it("with USDC collateral and WETH debt with protocol fee - tests different decimals", async function () {
+            // Set protocol fee to 1%
+            const signers = await ethers.getSigners();
+            const contractByOwner = await ethers.getContractAt(
+                "LeveragedPosition",
+                deployedContractAddress,
+                signers[0],
+            );
+            await contractByOwner.setProtocolFee(100); // 1%
+            await contractByOwner.setFeeBeneficiary(TEST_ADDRESS);
+
+            // Get WETH contract for balance checks
+            const wethContract = new ethers.Contract(WETH_ADDRESS, ERC20_ABI, impersonatedSigner);
+
+            // Record fee beneficiary's WETH balance before
+            const beneficiaryWethBalanceBefore = await wethContract.balanceOf(TEST_ADDRESS);
+
+            // Create leveraged position with USDC collateral (6 decimals) and WETH debt (18 decimals)
+            await createLeveragedPosition(
+                USDC_hyUSD_POOL,
+                Protocols.MORPHO,
+                USDC_ADDRESS,
+                WETH_ADDRESS,
+                1,
+                2,
+                morphoMarket6Id,
+            );
+
+            // Check fee beneficiary's WETH balance after
+            const beneficiaryWethBalanceAfter = await wethContract.balanceOf(TEST_ADDRESS);
+            const feeReceived = beneficiaryWethBalanceAfter - beneficiaryWethBalanceBefore;
+
+            console.log("Protocol fee received (WETH):", ethers.formatUnits(feeReceived, 18));
+
+            // The fee should be properly calculated in WETH terms (18 decimals)
+            expect(feeReceived).to.be.gt(0);
+
+            // Verify fee is reasonable (not too small due to decimal mismatch)
+            expect(feeReceived).to.be.gt(ethers.parseUnits("0.000002", 18)); // At least 0.000002 WETH
         });
     });
 

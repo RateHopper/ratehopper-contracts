@@ -8,6 +8,7 @@ import {
     DAI_ADDRESS,
     DAI_USDC_POOL,
     DEFAULT_SUPPLY_AMOUNT,
+    ETH_USDbC_POOL,
     EURC_ADDRESS,
     Protocols,
     sUSDS_ADDRESS,
@@ -16,6 +17,7 @@ import {
     USDbC_ADDRESS,
     USDC_ADDRESS,
     USDC_hyUSD_POOL,
+    WETH_ADDRESS,
     wstETH_ADDRESS,
 } from "./constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
@@ -26,10 +28,9 @@ import { MaxUint256 } from "ethers";
 import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 import { fundETH, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
 import {
-    FLUID_cbBTC_sUSDS_VAULT,
-    FLUID_cbBTC_USDC_VAULT,
     FLUID_cbETH_EURC_VAULT,
     FLUID_cbETH_USDC_VAULT,
+    FLUID_WETH_USDC_VAULT,
     FLUID_wstETH_sUSDS_VAULT,
     FLUID_wstETH_USDC_VAULT,
     FluidHelper,
@@ -41,6 +42,7 @@ import aaveDebtTokenJson from "../externalAbi/aaveV3/aaveDebtToken.json";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect } from "chai";
 import { deploySafeContractFixture } from "./deployUtils";
+import { WETH9 } from "@uniswap/sdk-core";
 
 export const eip1193Provider: Eip1193Provider = {
     request: async (args: RequestArguments) => {
@@ -98,12 +100,16 @@ describe("Safe wallet should debtSwap", function () {
         await tx.wait();
     }
 
-    async function supplyAndBorrow(protocol: Protocols, debtTokenAddress = USDC_ADDRESS) {
-        await sendCollateralToSafe();
+    async function supplyAndBorrow(
+        protocol: Protocols,
+        debtTokenAddress = USDC_ADDRESS,
+        collateralTokenAddress = cbETH_ADDRESS,
+    ) {
+        await sendCollateralToSafe(collateralTokenAddress);
         const Helper = protocolHelperMap.get(protocol)!;
         const helper = new Helper(signer);
 
-        const protocolCallData = await helper.getSupplyAndBorrowTxdata(debtTokenAddress);
+        const protocolCallData = await helper.getSupplyAndBorrowTxdata(debtTokenAddress, collateralTokenAddress);
 
         const tokenContract = new ethers.Contract(debtTokenAddress, ERC20_ABI, signer);
 
@@ -310,6 +316,38 @@ describe("Safe wallet should debtSwap", function () {
         await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.FLUID);
     });
 
+    it.skip("from Moonwell to Fluid with WETH collateral", async function () {
+        await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS, WETH_ADDRESS);
+
+        await executeDebtSwap(
+            USDC_hyUSD_POOL,
+            USDC_ADDRESS,
+            USDC_ADDRESS,
+            Protocols.MOONWELL,
+            Protocols.FLUID,
+            WETH_ADDRESS,
+            {
+                tofluidVaultAddress: FLUID_WETH_USDC_VAULT,
+            },
+        );
+    });
+
+    it("from Aave to Fluid with WETH collateral", async function () {
+        await supplyAndBorrow(Protocols.AAVE_V3, USDC_ADDRESS, WETH_ADDRESS);
+
+        await executeDebtSwap(
+            USDC_hyUSD_POOL,
+            USDC_ADDRESS,
+            USDC_ADDRESS,
+            Protocols.AAVE_V3,
+            Protocols.FLUID,
+            WETH_ADDRESS,
+            {
+                tofluidVaultAddress: FLUID_WETH_USDC_VAULT,
+            },
+        );
+    });
+
     it.skip("from Moonwell DAI to Fluid USDC", async function () {
         await supplyAndBorrow(Protocols.MOONWELL, DAI_ADDRESS);
         await executeDebtSwap(DAI_USDC_POOL, DAI_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.FLUID);
@@ -339,6 +377,42 @@ describe("Safe wallet should debtSwap", function () {
         await supplyAndBorrow(Protocols.AAVE_V3);
 
         await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.MOONWELL);
+    });
+
+    // TODO: Fix this test
+    it.skip("from Moonwell USDC to DAI with protocol fee - tests decimal mismatch", async function () {
+        // set protocol fee to 1% (100 basis points)
+        const signers = await ethers.getSigners();
+        const contractByOwner = await ethers.getContractAt("SafeModuleDebtSwap", safeModuleAddress, signers[0]);
+        const setTx = await contractByOwner.setProtocolFee(100); // 1%
+        await setTx.wait();
+
+        const setFeeBeneficiaryTx = await contractByOwner.setFeeBeneficiary(TEST_FEE_BENEFICIARY_ADDRESS);
+        await setFeeBeneficiaryTx.wait();
+
+        // Supply and borrow USDC (6 decimals)
+        await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS);
+
+        // Get DAI contract for balance checks
+        const daiContract = new ethers.Contract(DAI_ADDRESS, ERC20_ABI, signer);
+
+        // Record fee beneficiary's DAI balance before swap
+        const beneficiaryDaiBalanceBefore = await daiContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+
+        // Execute debt swap from USDC (6 decimals) to DAI (18 decimals)
+        await executeDebtSwap(DAI_USDC_POOL, USDC_ADDRESS, DAI_ADDRESS, Protocols.MOONWELL, Protocols.AAVE_V3);
+
+        // Check fee beneficiary's DAI balance after swap
+        const beneficiaryDaiBalanceAfter = await daiContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+        const feeReceived = beneficiaryDaiBalanceAfter - beneficiaryDaiBalanceBefore;
+
+        // Log the fee received
+        console.log("Protocol fee received (DAI):", ethers.formatUnits(feeReceived, 18));
+
+        // The fee should be approximately 1% of the debt amount in DAI terms
+        // For example, if swapping 100 USDC to ~100 DAI, fee should be ~1 DAI (not 0.000001 DAI)
+        expect(feeReceived).to.be.gt(ethers.parseUnits("0.5", 18)); // At least 0.5 DAI
+        expect(feeReceived).to.be.lt(ethers.parseUnits("5", 18)); // Less than 5 DAI
     });
 
     it("Set operator address and Call executeDebtSwap by operator", async function () {
@@ -470,7 +544,7 @@ describe("Safe wallet should debtSwap", function () {
             case Protocols.AAVE_V3:
                 // if switch to another protocol, must give approval for aToken
                 if (toProtocol != Protocols.AAVE_V3) {
-                    const aTokenAddress = await fromHelper.getATokenAddress(cbETH_ADDRESS);
+                    const aTokenAddress = await fromHelper.getATokenAddress(collateralTokenAddress || cbETH_ADDRESS);
 
                     const token = new ethers.Contract(aTokenAddress, ERC20_ABI, signer);
 

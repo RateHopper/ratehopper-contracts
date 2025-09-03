@@ -78,7 +78,7 @@ export async function deployHandlers() {
     console.log("MoonwellHandler deployed to:", await moonwellHandler.getAddress());
 
     const FluidHandler = await hre.ethers.getContractFactory("FluidSafeHandler");
-    const fluidHandler = await FluidHandler.deploy(FLUID_VAULT_RESOLVER, UNISWAP_V3_FACTORY_ADRESS, registryAddress);
+    const fluidHandler = await FluidHandler.deploy(UNISWAP_V3_FACTORY_ADRESS, registryAddress);
     await fluidHandler.waitForDeployment();
     console.log("FluidHandler deployed to:", await fluidHandler.getAddress());
 

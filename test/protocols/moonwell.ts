@@ -17,6 +17,7 @@ import {
     VIRTUAL_ADDRESS,
     weETH_ADDRESS,
     WELL_ADDRESS,
+    WETH_ADDRESS,
     wrsETH_ADDRESS,
     wstETH_ADDRESS,
 } from "../constants";
@@ -66,6 +67,7 @@ export const mContractAddressMap = new Map<string, string>([
     [tBTC_ADDRESS, mtBTC],
     [LBTC_ADDRESS, mLBTC],
     [VIRTUAL_ADDRESS, mVIRTUAL],
+    [WETH_ADDRESS, mWETH],
 ]);
 
 export class MoonwellHelper {
@@ -74,6 +76,7 @@ export class MoonwellHelper {
     async getCollateralAmount(tokenAddress: string, userAddress?: string): Promise<bigint> {
         const mContractAddress = mContractAddressMap.get(tokenAddress)!;
         const viewContract = new ethers.Contract(view_address, ViewAbi, this.signer);
+        // TODO: something is wrong when collateral is WETH, can't fetch collateral amount correctly
         const collaterals = await viewContract.getUserBalances(userAddress || TEST_ADDRESS);
         console.log("mContractAddress:", mContractAddress);
 
@@ -140,21 +143,28 @@ export class MoonwellHelper {
         console.log("withdrawn collateral from moonwell:", withdrawAmount);
     }
 
-    async getSupplyAndBorrowTxdata(debtTokenAddress): Promise<MetaTransactionData[]> {
-        const cbETHmToken = new ethers.Contract(mcbETH, MErc20DelegatorAbi, defaultProvider);
+    async getSupplyAndBorrowTxdata(
+        debtTokenAddress = USDC_ADDRESS,
+        collateralTokenAddress = cbETH_ADDRESS,
+    ): Promise<MetaTransactionData[]> {
+        const mContractAddress = mContractAddressMap.get(collateralTokenAddress)!;
+        const mToken = new ethers.Contract(mContractAddress, MErc20DelegatorAbi, defaultProvider);
 
-        const cbETHContract = new ethers.Contract(cbETH_ADDRESS, ERC20_ABI, defaultProvider);
+        const collateralContract = new ethers.Contract(collateralTokenAddress, ERC20_ABI, defaultProvider);
         const approveTransactionData: MetaTransactionData = {
-            to: cbETH_ADDRESS,
+            to: collateralTokenAddress,
             value: "0",
-            data: cbETHContract.interface.encodeFunctionData("approve", [mcbETH, ethers.parseEther("1")]),
+            data: collateralContract.interface.encodeFunctionData("approve", [
+                mContractAddress,
+                ethers.parseEther("1"),
+            ]),
             operation: OperationType.Call,
         };
 
         const supplyTransactionData: MetaTransactionData = {
-            to: mcbETH,
+            to: mContractAddress,
             value: "0",
-            data: cbETHmToken.interface.encodeFunctionData("mint", [ethers.parseEther(DEFAULT_SUPPLY_AMOUNT)]),
+            data: mToken.interface.encodeFunctionData("mint", [ethers.parseEther(DEFAULT_SUPPLY_AMOUNT)]),
             operation: OperationType.Call,
         };
 
@@ -163,18 +173,15 @@ export class MoonwellHelper {
         const enableTransactionData: MetaTransactionData = {
             to: COMPTROLLER_ADDRESS,
             value: "0",
-            data: comptroller.interface.encodeFunctionData("enterMarkets", [[mcbETH]]),
+            data: comptroller.interface.encodeFunctionData("enterMarkets", [[mContractAddress]]),
             operation: OperationType.Call,
         };
 
-        const mContractAddress = mContractAddressMap.get(debtTokenAddress)!;
-
-        const mToken = new ethers.Contract(mContractAddress, MErc20DelegatorAbi, defaultProvider);
-
         const decimals = await getDecimals(debtTokenAddress);
+        const debtMContractAddress = mContractAddressMap.get(debtTokenAddress)!;
 
         const borrowTransactionData: MetaTransactionData = {
-            to: mContractAddress,
+            to: debtMContractAddress,
             value: "0",
             data: mToken.interface.encodeFunctionData("borrow", [ethers.parseUnits("1", decimals)]),
             operation: OperationType.Call,

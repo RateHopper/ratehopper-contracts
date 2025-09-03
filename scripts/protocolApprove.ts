@@ -25,8 +25,8 @@ async function compound() {
     const USDC_COMET_ADDRESS = "0xb125E6687d4313864e53df431d5425969c15Eb2F";
     const USDbC_COMET_ADDRESS = "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf";
     const comet = new ethers.Contract(USDC_COMET_ADDRESS, cometAbi, signer);
-    const tx = await comet.allow(debtSwapContractAddress, true);
-    // const tx = await comet.allow(debtSwapContractAddress, false);
+    // const tx = await comet.allow(debtSwapContractAddress, true);
+    const tx = await comet.allow(debtSwapContractAddress, false);
     await tx.wait();
     console.log("Successfully approved DebtSwap contract for Compound");
 }

@@ -1,19 +1,15 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 import hre from "hardhat";
 import { ethers } from "hardhat";
-import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADRESS } from "./constants";
-
-const PROTOCOLS = [0, 1, 2, 3, 4];
-const HANDLERS = [
-    "0x7f1be446C938c9046206eCbf803405A0B7741D3f", // AaveV3Handler
-    "0x62AC021A02A631824B5665C6A8657B9c6e0587e6", // CompoundHandler
-    "0xb03B40507829d4Ec4b5681d566eA64CE0264Bf48", // MorphoHandler
-    "0x4DAF0278E9c8933685d10d159b80F13a841C8a50", // FluidHandler
-    "0xaF141AB1eD50144Ff527cF0Ee5595e7D27dAb935", // MoonwellHandler
-];
+import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADRESS, Protocol } from "./constants";
+import { deploySharedInfrastructure } from "./deploySharedInfrastructure";
 
 const LeveragedPositionModule = buildModule("LeveragedPosition", (m) => {
-    const leveragedPosition = m.contract("LeveragedPosition", [UNISWAP_V3_FACTORY_ADRESS, PROTOCOLS, HANDLERS]);
+    const uniswapV3Factory = m.getParameter("uniswapV3Factory");
+    const protocols = m.getParameter("protocols");
+    const handlers = m.getParameter("handlers");
+
+    const leveragedPosition = m.contract("LeveragedPosition", [uniswapV3Factory, protocols, handlers]);
     return { leveragedPosition };
 });
 
@@ -21,12 +17,44 @@ export default LeveragedPositionModule;
 
 async function main() {
     try {
-        console.log("Deploying LeveragedPosition contract using Ignition...");
-        const { leveragedPosition } = await hre.ignition.deploy(LeveragedPositionModule);
-        const address = await leveragedPosition.getAddress();
-        console.log(`LeveragedPosition deployed to: ${address}`);
+        // Deploy shared infrastructure (registry + handlers)
+        console.log("Deploying shared infrastructure...");
+        const { registryAddress, handlers, gasOptions } = await deploySharedInfrastructure();
+
+        const PROTOCOLS = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
+        
+        // Collect handler addresses in the correct order
+        const handlerAddresses = [
+            handlers.aaveV3,
+            handlers.compound,
+            handlers.morpho,
+            handlers.fluidSafe,
+            handlers.moonwell,
+        ];
+
+        // Deploy LeveragedPosition contract directly using ethers
+        console.log("Deploying LeveragedPosition contract...");
+        const LeveragedPositionFactory = await ethers.getContractFactory("LeveragedPosition");
+        const leveragedPosition = await LeveragedPositionFactory.deploy(
+            UNISWAP_V3_FACTORY_ADRESS,
+            PROTOCOLS,
+            handlerAddresses,
+            { ...gasOptions, gasLimit: 5000000 }
+        );
+        await leveragedPosition.waitForDeployment();
+        const leveragedPositionAddress = await leveragedPosition.getAddress();
+        console.log(`LeveragedPosition deployed to: ${leveragedPositionAddress}`);
+
+        // Set Paraswap addresses
         await leveragedPosition.setParaswapAddresses(PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS);
-        console.log("Paraswap addresses set");
+        console.log("Paraswap addresses set successfully");
+
+        console.log("\n=== LeveragedPosition Deployment Summary ===");
+        console.log(`Registry (shared): ${registryAddress}`);
+        console.log(`Handlers (shared):`, handlers);
+        console.log(`LeveragedPosition: ${leveragedPositionAddress}`);
+        console.log("LeveragedPosition deployment completed successfully!");
+
     } catch (error) {
         console.error("Deployment error:", error);
         process.exit(1);

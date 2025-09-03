@@ -192,7 +192,20 @@ contract SafeModuleDebtSwap is Ownable, ReentrancyGuard, Pausable {
             flashloanFee = flashloanFeeOriginal;
         }
 
-        uint256 protocolFeeAmount = (decoded.amount * protocolFee) / 10000;
+        // Calculate protocol fee in toAsset decimals to ensure correct fee amount
+        uint256 protocolFeeAmount;
+        if (decoded.fromAsset == decoded.toAsset) {
+            protocolFeeAmount = (decoded.amount * protocolFee) / 10000;
+        } else {
+            // Convert amount to toAsset decimals first
+            uint256 amountInToAssetDecimals = decoded.amount;
+            if (decimalDifference > 0) {
+                amountInToAssetDecimals = decoded.amount / (10 ** uint8(decimalDifference));
+            } else if (decimalDifference < 0) {
+                amountInToAssetDecimals = decoded.amount * (10 ** uint8(-decimalDifference));
+            }
+            protocolFeeAmount = (amountInToAssetDecimals * protocolFee) / 10000;
+        }
 
         uint256 amountInMax = decoded.paraswapParams.srcAmount == 0 ? decoded.amount : decoded.paraswapParams.srcAmount;
         uint256 amountTotal = amountInMax + flashloanFee + protocolFeeAmount;

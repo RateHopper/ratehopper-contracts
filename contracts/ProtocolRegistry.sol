@@ -20,6 +20,9 @@ contract ProtocolRegistry is Ownable {
     // Mapping to track whitelisted tokens
     mapping(address => bool) public whitelistedTokens;
 
+    // Fluid vault resolver address
+    address public fluidVaultResolver;
+
     error ZeroAddress();
     error ArrayLengthMismatch();
     
@@ -28,6 +31,9 @@ contract ProtocolRegistry is Ownable {
     
     /// @notice Event emitted when a token is removed from the whitelist
     event TokenRemovedFromWhitelist(address indexed token, address indexed owner);
+    
+    /// @notice Event emitted when the Fluid vault resolver is updated
+    event FluidVaultResolverUpdated(address indexed oldResolver, address indexed newResolver);
 
     function setTokenMContract(address token, address mContract) external onlyOwner {
         if (token == address(0)) revert ZeroAddress();
@@ -117,5 +123,16 @@ contract ProtocolRegistry is Ownable {
      */
     function isWhitelisted(address token) external view returns (bool) {
         return whitelistedTokens[token];
+    }
+
+    /**
+     * @dev Set the Fluid vault resolver address
+     * @param _fluidVaultResolver The new Fluid vault resolver address
+     */
+    function setFluidVaultResolver(address _fluidVaultResolver) external onlyOwner {
+        if (_fluidVaultResolver == address(0)) revert ZeroAddress();
+        address oldResolver = fluidVaultResolver;
+        fluidVaultResolver = _fluidVaultResolver;
+        emit FluidVaultResolverUpdated(oldResolver, _fluidVaultResolver);
     }
 }

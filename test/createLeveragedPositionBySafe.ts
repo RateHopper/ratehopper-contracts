@@ -19,6 +19,8 @@ import {
     cbBTC_ADDRESS,
     cbBTC_USDC_POOL,
     USDC_hyUSD_POOL,
+    ETH_USDC_POOL,
+    ETH_USDbC_POOL,
 } from "./constants";
 import { MaxUint256 } from "ethers";
 import { deployLeveragedPositionContractFixture } from "./deployUtils";
@@ -33,6 +35,8 @@ import {
 } from "./protocols/fluid";
 
 describe("Create leveraged position by Safe", function () {
+    this.timeout(3000000); // 50 minutes
+
     let myContract: LeveragedPosition;
     let impersonatedSigner: HardhatEthersSigner;
 
@@ -88,16 +92,7 @@ describe("Create leveraged position by Safe", function () {
 
         let extraData = "0x";
 
-        const collateralMContract = mContractAddressMap.get(collateralAddress)!;
-
         switch (protocol) {
-            case Protocols.MOONWELL:
-                const debtMContract = mContractAddressMap.get(debtAddress)!;
-                extraData = ethers.AbiCoder.defaultAbiCoder().encode(
-                    ["address", "address[]"],
-                    [debtMContract, [collateralMContract]],
-                );
-                break;
             case Protocols.FLUID:
                 const vaultAddress = fluidVaultMap.get(collateralAddress)!;
                 extraData = ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [vaultAddress, 0]);
@@ -122,7 +117,7 @@ describe("Create leveraged position by Safe", function () {
             value: "0",
             data: collateralContract.interface.encodeFunctionData("approve", [
                 deployedContractAddress,
-                ethers.parseEther("1"),
+                MaxUint256, // Use maximum approval to avoid repeated approvals
             ]),
             operation: OperationType.Call,
         };
@@ -143,14 +138,24 @@ describe("Create leveraged position by Safe", function () {
             operation: OperationType.Call,
         };
 
-        const safeTransaction = await safeWallet.createTransaction({
-            transactions: [approveTransactionData, createTransactionData],
-        });
+        let safeTransaction;
+        try {
+            safeTransaction = await safeWallet.createTransaction({
+                transactions: [approveTransactionData, createTransactionData],
+            });
+        } catch (error) {
+            console.error("Error creating transaction:", error);
+            throw error;
+        }
 
-        const safeTxHash = await safeWallet.executeTransaction(safeTransaction);
+        const safeTxHash = await safeWallet.executeTransaction(safeTransaction, {
+            gasLimit: "10000000", // Total gas limit for the execution transaction
+        });
         console.log(safeTxHash);
 
-        const debtAmount = await protocolHelper.getDebtAmount(debtAddress, safeAddress);
+        const addressForDebtAmount = protocol === Protocols.FLUID ? fluidVaultMap.get(collateralAddress)! : debtAddress;
+
+        const debtAmount = await protocolHelper.getDebtAmount(addressForDebtAmount, safeAddress);
 
         const collateralAmount = await protocolHelper.getCollateralAmount(collateralAddress, safeAddress);
 
@@ -201,6 +206,23 @@ describe("Create leveraged position by Safe", function () {
     describe("on Fluid", function () {
         it("with cbETH collateral", async function () {
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.FLUID);
+        });
+
+        it("with cbBTC collateral", async function () {
+            const cbBTCPrincipleAmount = 0.00006;
+            const targetAmount = cbBTCPrincipleAmount * 2;
+            await createLeveragedPosition(
+                cbBTC_USDC_POOL,
+                Protocols.FLUID,
+                cbBTC_ADDRESS,
+                USDC_ADDRESS,
+                cbBTCPrincipleAmount,
+                targetAmount,
+            );
+        });
+
+        it("with WETH collateral", async function () {
+            await createLeveragedPosition(ETH_USDbC_POOL, Protocols.FLUID, WETH_ADDRESS, USDC_ADDRESS);
         });
     });
 });

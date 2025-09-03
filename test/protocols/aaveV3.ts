@@ -77,14 +77,20 @@ export class AaveV3Helper {
         console.log(`borrowed ${amount}, ${tokenAddress} Wallet Balance:`, formatAmount(walletBalance));
     }
 
-    async getSupplyAndBorrowTxdata(debtTokenAddress): Promise<MetaTransactionData[]> {
+    async getSupplyAndBorrowTxdata(
+        debtTokenAddress,
+        collateralTokenAddress = cbETH_ADDRESS,
+    ): Promise<MetaTransactionData[]> {
         const aavePool = new ethers.Contract(AAVE_V3_POOL_ADDRESS, aaveV3PoolJson, defaultProvider);
 
-        const cbETHContract = new ethers.Contract(cbETH_ADDRESS, ERC20_ABI, defaultProvider);
+        const collateralContract = new ethers.Contract(collateralTokenAddress, ERC20_ABI, defaultProvider);
         const approveTransactionData: MetaTransactionData = {
-            to: cbETH_ADDRESS,
+            to: collateralTokenAddress,
             value: "0",
-            data: cbETHContract.interface.encodeFunctionData("approve", [AAVE_V3_POOL_ADDRESS, ethers.parseEther("1")]),
+            data: collateralContract.interface.encodeFunctionData("approve", [
+                AAVE_V3_POOL_ADDRESS,
+                ethers.parseEther("1"),
+            ]),
             operation: OperationType.Call,
         };
 
@@ -92,7 +98,7 @@ export class AaveV3Helper {
             to: AAVE_V3_POOL_ADDRESS,
             value: "0",
             data: aavePool.interface.encodeFunctionData("supply", [
-                cbETH_ADDRESS,
+                collateralTokenAddress,
                 ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
                 safeAddress,
                 0,

@@ -14,15 +14,18 @@ import {
     TEST_ADDRESS,
     USDbC_ADDRESS,
     USDC_ADDRESS,
+    WETH_ADDRESS,
 } from "../constants";
 
-export const FLUID_VAULT_RESOLVER = "0x79B3102173EB84E6BCa182C7440AfCa5A41aBcF8";
+export const FLUID_VAULT_RESOLVER = "0x1500d70d8551b828f8fb56fa739c977d113444df";
+// export const FLUID_VAULT_RESOLVER = "0x79B3102173EB84E6BCa182C7440AfCa5A41aBcF8";
 export const FLUID_cbETH_USDC_VAULT = "0x40d9b8417e6e1dcd358f04e3328bced061018a82";
 export const FLUID_cbBTC_sUSDS_VAULT = "0xf2c8f54447cbd591c396b0dd7ac15faf552d0fa4";
 export const FLUID_cbBTC_USDC_VAULT = "0x4045720a33193b4fe66c94dfbc8d37b0b4d9b469";
 export const FLUID_cbETH_EURC_VAULT = "0xf55b8e9f0c51ace009f4b41d03321675d4c643b3";
 export const FLUID_wstETH_USDC_VAULT = "0xbec491fef7b4f666b270f9d5e5c3f443cbf20991";
 export const FLUID_wstETH_sUSDS_VAULT = "0xbc345229c1b52e4c30530c614bb487323ba38da5";
+export const FLUID_WETH_USDC_VAULT = "0xeabbfca72f8a8bf14c4ac59e69ecb2eb69f0811c";
 
 export const fluidVaultMap = new Map<string, string>([
     // https://fluid.instadapp.io/vaults/8453/6
@@ -34,6 +37,7 @@ export const fluidVaultMap = new Map<string, string>([
     // https://fluid.instadapp.io/vaults/8453/7
     [cbBTC_ADDRESS, FLUID_cbBTC_USDC_VAULT],
     [EURC_ADDRESS, FLUID_cbETH_EURC_VAULT],
+    [WETH_ADDRESS, FLUID_WETH_USDC_VAULT],
 ]);
 
 async function approve(tokenAddress: string, spenderAddress: string, signer: any) {
