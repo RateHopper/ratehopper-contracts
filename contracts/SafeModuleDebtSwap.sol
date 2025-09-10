@@ -47,7 +47,8 @@ contract SafeModuleDebtSwap is Ownable, ReentrancyGuard, Pausable {
         Protocol toProtocol,
         address fromAsset,
         address toAsset,
-        uint256 amount
+        uint256 amount,
+        CollateralAsset[] collateralAssets
     );
 
     event FeeBeneficiarySet(address indexed oldBeneficiary, address indexed newBeneficiary);
@@ -294,7 +295,8 @@ contract SafeModuleDebtSwap is Ownable, ReentrancyGuard, Pausable {
             decoded.toProtocol,
             decoded.fromAsset,
             decoded.toAsset,
-            decoded.amount
+            decoded.amount,
+            decoded.collateralAssets
         );
     }
 

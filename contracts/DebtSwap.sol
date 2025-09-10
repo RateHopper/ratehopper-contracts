@@ -40,7 +40,8 @@ contract DebtSwap is Ownable, ReentrancyGuard {
         Protocol toProtocol,
         address fromAsset,
         address toAsset,
-        uint256 amount
+        uint256 amount,
+        CollateralAsset[] collateralAssets
     );
 
     event FeeBeneficiarySet(address indexed oldBeneficiary, address indexed newBeneficiary);
@@ -258,7 +259,8 @@ contract DebtSwap is Ownable, ReentrancyGuard {
             decoded.toProtocol,
             decoded.fromAsset,
             decoded.toAsset,
-            decoded.amount
+            decoded.amount,
+            decoded.collateralAssets
         );
     }
 
