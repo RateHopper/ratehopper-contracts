@@ -83,7 +83,7 @@ const market7Params = {
     collateralToken: WETH_ADDRESS,
     loanToken: USDC_ADDRESS,
     irm: "0x46415998764C29aB2a25CbeA6254146D50D22687",
-    oracle: "",
+    oracle: "0xFEa2D58cEfCb9fcb597723c6bAE66fFE4193aFE4",
     lltv: 860000000000000000n,
 };
 
@@ -94,6 +94,7 @@ export const marketParamsMap = new Map<string, any>([
     [morphoMarket4Id, market4Params],
     [morphoMarket5Id, market5Params],
     [morphoMarket6Id, market6Params],
+    [morphoMarket7Id, market7Params],
 ]);
 
 export class MorphoHelper {
@@ -211,16 +212,16 @@ export class MorphoHelper {
         }
     }
 
-    async getSupplyAndBorrowTxdata(debtTokenAddress): Promise<MetaTransactionData[]> {
+    async getSupplyAndBorrowTxdata(debtTokenAddress, collateralAddress = cbETH_ADDRESS): Promise<MetaTransactionData[]> {
         const morphoContract = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, defaultProvider);
         const marketParams = marketParamsMap.get(morphoMarket1Id)!;
 
-        const cbETHContract = new ethers.Contract(cbETH_ADDRESS, ERC20_ABI, defaultProvider);
+        const collateralContract = new ethers.Contract(collateralAddress, ERC20_ABI, defaultProvider);
 
         const approveTransactionData: MetaTransactionData = {
-            to: cbETH_ADDRESS,
+            to: collateralAddress,
             value: "0",
-            data: cbETHContract.interface.encodeFunctionData("approve", [MORPHO_ADDRESS, ethers.parseEther("1")]),
+            data: collateralContract.interface.encodeFunctionData("approve", [MORPHO_ADDRESS, ethers.parseEther("1")]),
             operation: OperationType.Call,
         };
 

@@ -4,6 +4,7 @@ import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADRESS, Protocol } fro
 import { FluidSafeModule, MoonwellModule } from "./deployHandlers";
 
 const PAUSER_ADDRESS = "0x9E073c36F63BF1c611026fdA1fF6007A81932231";
+const OPERATOR_ADDRESS = "0xE549DE35b4D370B76c0A777653aD85Aef6eb8Fa4";
 
 async function main() {
     try {
@@ -56,11 +57,13 @@ async function main() {
         console.log(`SafeModuleDebtSwap deployed to: ${await safeModuleDebtSwap.getAddress()}`);
 
         // Set Paraswap addresses
-        await safeModuleDebtSwap.setParaswapAddresses(PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS);
+        const setParaswapTx = await safeModuleDebtSwap.setParaswapAddresses(PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS);
+        await setParaswapTx.wait();
         console.log("Paraswap addresses set successfully");
 
         // Set operator
-        await safeModuleDebtSwap.setoperator("0xE549DE35b4D370B76c0A777653aD85Aef6eb8Fa4");
+        const setOperatorTx = await safeModuleDebtSwap.setoperator(OPERATOR_ADDRESS);
+        await setOperatorTx.wait();
         console.log("Operator set successfully");
     } catch (error) {
         console.error("Deployment error:", error);

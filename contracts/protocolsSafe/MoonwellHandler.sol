@@ -113,6 +113,18 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
 
             require(successWithdraw, "Redeem transaction failed");
 
+             // Moonwell sends ETH instead of WETH when withdrawing, so wrap it for compatibility with other protocols.
+             if (collateralAssets[i].asset == registry.WETH_ADDRESS()) {
+                bool successWrap = ISafe(onBehalfOf).execTransactionFromModule(
+                    registry.WETH_ADDRESS(),
+                    collateralAssets[i].amount,
+                    abi.encodeCall(IWETH9.deposit, ()),
+                    ISafe.Operation.Call
+                );
+                require(successWrap, "WETH wrap failed");
+            }
+
+
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(onBehalfOf);
             require(
                 currentBalance * 100 < collateralAssets[i].amount * 101,

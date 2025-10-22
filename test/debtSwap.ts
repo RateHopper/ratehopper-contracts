@@ -39,6 +39,7 @@ import { MORPHO_ADDRESS, MorphoHelper, morphoMarket1Id, morphoMarket2Id, morphoM
 import { MaxUint256 } from "ethers";
 import { zeroAddress } from "viem";
 import { deployDebtSwapContractFixture, getGasOptions } from "./deployUtils";
+import { morphoMarket7Id } from "./protocols/morpho";
 
 describe("DebtSwap should switch", function () {
     let myContract: DebtSwap;
@@ -362,6 +363,24 @@ describe("DebtSwap should switch", function () {
                 cbETH_ADDRESS,
                 {
                     morphoFromMarketId: morphoMarket1Id,
+                },
+            );
+        });
+
+        it("should switch USDC debt on Compound to USDC on Morpho with WETH collateral", async function () {
+            await wrapETH(DEFAULT_SUPPLY_AMOUNT, impersonatedSigner);
+            await compoundHelper.supply(USDC_COMET_ADDRESS, WETH_ADDRESS);
+            await compoundHelper.borrow(USDC_ADDRESS);
+
+            await executeDebtSwap(
+                USDC_hyUSD_POOL,
+                USDC_ADDRESS,
+                USDC_ADDRESS,
+                Protocols.COMPOUND,
+                Protocols.MORPHO,
+                WETH_ADDRESS,
+                {
+                    morphoToMarketId: morphoMarket7Id,
                 },
             );
         });
