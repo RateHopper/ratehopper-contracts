@@ -1,6 +1,6 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 import { ethers } from "hardhat";
-import { FLUID_VAULT_RESOLVER } from "./constants";
+import { FLUID_VAULT_RESOLVER, WETH_ADDRESS } from "./constants";
 import { getCTokenMappingArrays, getMTokenMappingArrays } from "../contractAddresses";
 
 // Gas options utility function
@@ -41,7 +41,8 @@ export async function getGasOptions() {
 
 // ProtocolRegistry module
 export const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
-    const registry = m.contract("ProtocolRegistry", []);
+    const wethAddress = m.getParameter("wethAddress", WETH_ADDRESS);
+    const registry = m.contract("ProtocolRegistry", [wethAddress]);
     return { registry };
 });
 

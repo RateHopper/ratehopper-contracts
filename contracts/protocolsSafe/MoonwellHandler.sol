@@ -15,8 +15,6 @@ import "../interfaces/IWETH9.sol";
 contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
     using GPv2SafeERC20 for IERC20;
 
-    address public immutable WETH_ADDRESS = 0x4200000000000000000000000000000000000006;
-
     address public immutable COMPTROLLER;
     ProtocolRegistry public immutable registry;
 
@@ -115,10 +113,10 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
 
             require(successWithdraw, "Redeem transaction failed");
 
-            // Moonwell sends ETH instead of WETH when withdrawing, so wrap it for compatibility with other protocols. 
-             if (collateralAssets[i].asset == WETH_ADDRESS) {
+             // Moonwell sends ETH instead of WETH when withdrawing, so wrap it for compatibility with other protocols.
+             if (collateralAssets[i].asset == registry.WETH_ADDRESS()) {
                 bool successWrap = ISafe(onBehalfOf).execTransactionFromModule(
-                    WETH_ADDRESS,
+                    registry.WETH_ADDRESS(),
                     collateralAssets[i].amount,
                     abi.encodeCall(IWETH9.deposit, ()),
                     ISafe.Operation.Call

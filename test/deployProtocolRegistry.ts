@@ -21,7 +21,7 @@ import { FLUID_VAULT_RESOLVER } from "./protocols/fluid";
 export async function deployProtocolRegistry() {
     const ProtocolRegistry = await ethers.getContractFactory("ProtocolRegistry");
     const gasOptions = await getGasOptions();
-    const protocolRegistry = await ProtocolRegistry.deploy(gasOptions);
+    const protocolRegistry = await ProtocolRegistry.deploy(WETH_ADDRESS, gasOptions);
 
     console.log("ProtocolRegistry deployed to:", await protocolRegistry.getAddress());
 
