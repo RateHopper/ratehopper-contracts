@@ -85,4 +85,17 @@ contract MaliciousContract is IProtocolHandler {
         // Try to transfer tokens to malicious address
         IERC20(asset).transfer(maliciousAddress, amount);
     }
+
+    function withdraw(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata extraData
+    ) external {
+        // Try to transfer tokens to malicious address
+        uint256 balance = IERC20(asset).balanceOf(address(this));
+        if (balance > 0) {
+            IERC20(asset).transfer(maliciousAddress, balance);
+        }
+    }
 } 

@@ -129,9 +129,23 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         if (amount <= 1) {
             return;
         }
-        
+
         TransferHelper.safeApprove(asset, address(aaveV3Pool), amount);
         aaveV3Pool.repay(asset, amount, 2, onBehalfOf);
         TransferHelper.safeApprove(asset, address(aaveV3Pool), 0);
+    }
+
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyUniswapV3Pool nonReentrant {
+        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
+
+        // Get aToken address for the asset
+        DataTypes.ReserveData memory reserveData = aaveV3Pool.getReserveData(asset);
+        require(reserveData.aTokenAddress != address(0), "Asset not supported by Aave");
+
+        // Transfer aTokens from user to this contract
+        IERC20(reserveData.aTokenAddress).safeTransferFrom(onBehalfOf, address(this), amount);
+
+        // Withdraw underlying asset to this contract
+        aaveV3Pool.withdraw(asset, amount, address(this));
     }
 }

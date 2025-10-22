@@ -10,6 +10,7 @@ import {IERC20} from "../dependencies/IERC20.sol";
 import {ProtocolRegistry} from "../ProtocolRegistry.sol";
 import "../protocols/BaseProtocolHandler.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "../interfaces/IWETH9.sol";
 
 contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
     using GPv2SafeERC20 for IERC20;
@@ -269,11 +270,49 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
 
     function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) public override onlyUniswapV3Pool nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-        
+
         address mContract = getMContract(asset);
         if (mContract == address(0)) revert TokenNotRegistered();
 
         IERC20(asset).approve(address(mContract), amount);
         IMToken(mContract).repayBorrowBehalf(onBehalfOf, amount);
+    }
+
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyUniswapV3Pool nonReentrant {
+        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
+
+        address mTokenAddress = getMContract(asset);
+        if (mTokenAddress == address(0)) revert TokenNotRegistered();
+
+        // Redeem underlying asset from Moonwell
+        bool successWithdraw = ISafe(onBehalfOf).execTransactionFromModule(
+            mTokenAddress,
+            0,
+            abi.encodeCall(IMToken.redeemUnderlying, (amount)),
+            ISafe.Operation.Call
+        );
+        require(successWithdraw, "Redeem transaction failed");
+
+        // Moonwell sends ETH instead of WETH when withdrawing, so wrap it for compatibility with other protocols.
+        if (asset == registry.WETH_ADDRESS()) {
+            uint256 ethBalanceInSafe = address(onBehalfOf).balance;
+            bool successWrap = ISafe(onBehalfOf).execTransactionFromModule(
+                registry.WETH_ADDRESS(),
+                ethBalanceInSafe,
+                abi.encodeCall(IWETH9.deposit, ()),
+                ISafe.Operation.Call
+            );
+            require(successWrap, "WETH wrap failed");
+        }
+
+        // Transfer withdrawn asset from Safe to handler contract
+        uint256 currentBalance = IERC20(asset).balanceOf(onBehalfOf);
+        bool successTransfer = ISafe(onBehalfOf).execTransactionFromModule(
+            asset,
+            0,
+            abi.encodeCall(IERC20.transfer, (address(this), currentBalance)),
+            ISafe.Operation.Call
+        );
+        require(successTransfer, "Transfer transaction failed");
     }
 }

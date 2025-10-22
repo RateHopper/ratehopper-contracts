@@ -143,7 +143,7 @@ contract CompoundHandler is BaseProtocolHandler, ReentrancyGuard {
         bytes calldata /* extraData */
     ) external override onlyUniswapV3Pool nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-        
+
         address cContract = getCContract(asset);
         require(cContract != address(0), "Token not registered");
 
@@ -151,5 +151,22 @@ contract CompoundHandler is BaseProtocolHandler, ReentrancyGuard {
         IComet toComet = IComet(cContract);
         toComet.supplyTo(onBehalfOf, asset, amount);
         TransferHelper.safeApprove(asset, address(cContract), 0);
+    }
+
+    function withdraw(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata extraData
+    ) external override onlyUniswapV3Pool nonReentrant {
+        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
+
+        // Decode the comet address from extraData
+        address cContract = abi.decode(extraData, (address));
+        require(cContract != address(0), "Invalid comet address");
+
+        // Withdraw collateral from user's position to this contract
+        IComet comet = IComet(cContract);
+        comet.withdrawFrom(onBehalfOf, address(this), asset, amount);
     }
 }

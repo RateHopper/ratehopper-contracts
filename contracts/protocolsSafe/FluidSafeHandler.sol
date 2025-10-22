@@ -313,4 +313,28 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         );
         require(successBorrow, "Fluid borrow failed");
     }
+
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyUniswapV3Pool nonReentrant {
+        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
+
+        (address vaultAddress, uint256 nftId) = abi.decode(extraData, (address, uint256));
+
+        // Withdraw all collateral from the position
+        bool successWithdraw = ISafe(onBehalfOf).execTransactionFromModule(
+            vaultAddress,
+            0,
+            // Support only full withdraw on Fluid to avoid error
+            abi.encodeCall(IFluidVault.operate, (nftId, type(int).min, 0, address(this))),
+            ISafe.Operation.Call
+        );
+        require(successWithdraw, "Fluid withdraw failed");
+
+        // Handle WETH wrapping if needed - Fluid may send ETH for WETH positions
+        if (asset == WETH_ADDRESS) {
+            uint256 ethBalance = address(this).balance;
+            if (ethBalance > 0) {
+                IWETH9(WETH_ADDRESS).deposit{value: ethBalance}();
+            }
+        }
+    }
 }

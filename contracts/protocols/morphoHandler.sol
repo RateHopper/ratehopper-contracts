@@ -124,11 +124,21 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
 
     function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyUniswapV3Pool nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-        
+
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
 
         TransferHelper.safeApprove(asset, address(morpho), amount);
         morpho.repay(marketParams, amount, 0, onBehalfOf, "");
         TransferHelper.safeApprove(asset, address(morpho), 0);
+    }
+
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyUniswapV3Pool nonReentrant {
+        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
+
+        // Decode market parameters from extraData
+        (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
+
+        // Withdraw collateral from user's position to this contract
+        morpho.withdrawCollateral(marketParams, amount, onBehalfOf, address(this));
     }
 }
