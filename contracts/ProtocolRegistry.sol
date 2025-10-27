@@ -9,7 +9,10 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
  * This registry allows protocol handlers to access mappings even when called via delegatecall
  */
 contract ProtocolRegistry is Ownable {
-    constructor() Ownable(msg.sender) {}
+    constructor(address _wethAddress) Ownable(msg.sender) {
+        if (_wethAddress == address(0)) revert ZeroAddress();
+        WETH_ADDRESS = _wethAddress;
+    }
 
     // Mapping from underlying token address to corresponding Moonwell mToken contract address
     mapping(address => address) public tokenToMContract;
@@ -22,6 +25,9 @@ contract ProtocolRegistry is Ownable {
 
     // Fluid vault resolver address
     address public fluidVaultResolver;
+
+    // WETH address on Base network
+    address public immutable WETH_ADDRESS;
 
     error ZeroAddress();
     error ArrayLengthMismatch();

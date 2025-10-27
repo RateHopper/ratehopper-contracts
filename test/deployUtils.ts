@@ -128,7 +128,7 @@ export async function deployDebtSwapContractWithMaliciousHandlerFixture() {
     const debtSwapMalicious = await DebtSwap.deploy(
         UNISWAP_V3_FACTORY_ADRESS,
         [Protocols.AAVE_V3],
-        [maliciousContract.getAddress()],
+        [await maliciousContract.getAddress()],
         await getGasOptions(),
     );
     console.log("DebtSwapMalicious deployed to:", await debtSwapMalicious.getAddress());
@@ -147,7 +147,7 @@ export async function deployDebtSwapContractFixture() {
     const debtSwap = await DebtSwap.deploy(
         UNISWAP_V3_FACTORY_ADRESS,
         [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO],
-        [aaveV3Handler.getAddress(), compoundHandler.getAddress(), morphoHandler.getAddress()],
+        [await aaveV3Handler.getAddress(), await compoundHandler.getAddress(), await morphoHandler.getAddress()],
         await getGasOptions(),
     );
     await debtSwap.waitForDeployment();
@@ -169,11 +169,11 @@ export async function deployLeveragedPositionContractFixture() {
         UNISWAP_V3_FACTORY_ADRESS,
         [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO, Protocols.MOONWELL, Protocols.FLUID],
         [
-            aaveV3Handler.getAddress(),
-            compoundHandler.getAddress(),
-            morphoHandler.getAddress(),
-            moonwellHandler.getAddress(),
-            fluidHandler.getAddress(),
+            await aaveV3Handler.getAddress(),
+            await compoundHandler.getAddress(),
+            await morphoHandler.getAddress(),
+            await moonwellHandler.getAddress(),
+            await fluidHandler.getAddress(),
         ],
         await getGasOptions(),
     );
@@ -194,11 +194,11 @@ export async function deploySafeContractFixture() {
         UNISWAP_V3_FACTORY_ADRESS,
         [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO, Protocols.MOONWELL, Protocols.FLUID],
         [
-            aaveV3Handler.getAddress(),
-            compoundHandler.getAddress(),
-            morphoHandler.getAddress(),
-            moonwellHandler.getAddress(),
-            fluidHandler.getAddress(),
+            await aaveV3Handler.getAddress(),
+            await compoundHandler.getAddress(),
+            await morphoHandler.getAddress(),
+            await moonwellHandler.getAddress(),
+            await fluidHandler.getAddress(),
         ],
         pauser.address,
         await getGasOptions(),

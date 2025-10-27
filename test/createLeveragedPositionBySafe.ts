@@ -202,6 +202,11 @@ describe("Create leveraged position by Safe", function () {
                 targetAmount,
             );
         });
+
+        it("with WETH collateral", async function () {
+            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.MOONWELL, WETH_ADDRESS, USDC_ADDRESS);
+        });
+
     });
     describe("on Fluid", function () {
         it("with cbETH collateral", async function () {

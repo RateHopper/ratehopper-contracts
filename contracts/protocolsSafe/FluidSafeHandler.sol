@@ -19,9 +19,7 @@ import "../interfaces/IWETH9.sol";
 contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
     using GPv2SafeERC20 for IERC20;
 
-    address public immutable WETH_ADDRESS = 0x4200000000000000000000000000000000000006;
-
-    // The registry contract holds configuration data including the Fluid vault resolver address
+    // The registry contract holds configuration data including the Fluid vault resolver address and WETH address
     // This design allows the resolver to be updated without redeploying handlers
     // and works correctly with delegatecall since registry is immutable
     ProtocolRegistry public immutable registry;
@@ -133,7 +131,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
 
         bytes memory returnData;
         // Check if collateral asset is WETH
-        if (collateralAssets[0].asset == WETH_ADDRESS) {
+        if (collateralAssets[0].asset == registry.WETH_ADDRESS()) {
             // Transfer WETH to onBehalfOf first
             IERC20(collateralAssets[0].asset).transfer(onBehalfOf, currentBalance);
             
@@ -245,7 +243,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         (address vaultAddress, ) = abi.decode(extraData, (address, uint256));
     
         // Check if asset is WETH
-        if (asset == WETH_ADDRESS) {
+        if (asset == registry.WETH_ADDRESS()) {
             // Transfer WETH to onBehalfOf first
             IERC20(asset).transfer(onBehalfOf, amount);
             
