@@ -33,10 +33,19 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         bytes calldata fromExtraData
     ) public view returns (uint256) {
-        (address vaultAddress, ) = abi.decode(fromExtraData, (address, uint256));
+        (address vaultAddress, uint256 nftId) = abi.decode(fromExtraData, (address, uint256));
 
         IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
 
+        // If nftId is provided, use positionByNftId for more efficient lookup
+        if (nftId > 0) {
+            (Structs.UserPosition memory userPosition, ) = resolver.positionByNftId(nftId);
+            uint256 debtAmount = userPosition.borrow;
+            // add tiny amount buffer to avoid repay amount is slightly increased and revert
+            return (debtAmount * 100001) / 100000;
+        }
+
+        // Fallback to positionsByUser if nftId is not provided
         (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
             .positionsByUser(onBehalfOf);
         for (uint256 i = 0; i < vaultsData_.length; i++) {
@@ -80,10 +89,12 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
 
         IERC20(fromAsset).transfer(onBehalfOf, amount);
 
+        // Approve 101% of amount to handle rounding errors
+        uint256 approvalAmount = (amount * 101) / 100;
         bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
             fromAsset,
             0,
-            abi.encodeCall(IERC20.approve, (address(vaultAddress), amount)),
+            abi.encodeCall(IERC20.approve, (address(vaultAddress), approvalAmount)),
             ISafe.Operation.Call
         );
         require(successApprove, "Fluid approve failed");
@@ -179,15 +190,21 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         );
         require(successApprove, "Approval failed");
 
-        IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+        // Extract nftId from extraData - if not provided (0), we'll fetch it
+        (, uint256 nftIdFromExtra, ) = abi.decode(extraData, (address, uint256, bool));
 
-        // get nftId
-        uint256 nftId = 0;
-        (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
-            .positionsByUser(onBehalfOf);
-        for (uint256 i = 0; i < vaultsData_.length; i++) {
-            if (vaultsData_[i].vault == vaultAddress) {
-                nftId = userPositions_[i].nftId;
+        uint256 nftId = nftIdFromExtra;
+
+        // If nftId not provided in extraData, fetch it using positionsByUser
+        if (nftId == 0) {
+            IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+            (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
+                .positionsByUser(onBehalfOf);
+            for (uint256 i = 0; i < vaultsData_.length; i++) {
+                if (vaultsData_[i].vault == vaultAddress) {
+                    nftId = userPositions_[i].nftId;
+                    break;
+                }
             }
         }
 
@@ -262,17 +279,20 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
     function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyUniswapV3Pool nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
-        (address vaultAddress, , ) = abi.decode(extraData, (address, uint256, bool));
+        (address vaultAddress, uint256 nftIdFromExtra, ) = abi.decode(extraData, (address, uint256, bool));
 
-        IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+        uint256 nftId = nftIdFromExtra;
 
-        // get nftId
-        uint256 nftId = 0;
-        (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
-            .positionsByUser(onBehalfOf);
-        for (uint256 i = 0; i < vaultsData_.length; i++) {
-            if (vaultsData_[i].vault == vaultAddress) {
-                nftId = userPositions_[i].nftId;
+        // If nftId not provided in extraData, fetch it using positionsByUser
+        if (nftId == 0) {
+            IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+            (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
+                .positionsByUser(onBehalfOf);
+            for (uint256 i = 0; i < vaultsData_.length; i++) {
+                if (vaultsData_[i].vault == vaultAddress) {
+                    nftId = userPositions_[i].nftId;
+                    break;
+                }
             }
         }
 

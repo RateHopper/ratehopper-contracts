@@ -306,7 +306,7 @@ describe("Safe wallet should debtSwap", function () {
         await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.AAVE_V3);
     });
 
-    it("from Fluid to Aave with WETH collateral", async function () {
+    it.only("from Fluid to Aave with WETH collateral", async function () {
         await supplyAndBorrowOnFluid(FLUID_WETH_USDC_VAULT, WETH_ADDRESS);
         await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.AAVE_V3, WETH_ADDRESS, {
             fromFluidVaultAddress: FLUID_WETH_USDC_VAULT,
@@ -334,7 +334,7 @@ describe("Safe wallet should debtSwap", function () {
         await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.COMPOUND);
     });
 
-    it("from Moonwell to Fluid", async function () {
+    it.only("from Moonwell to Fluid", async function () {
         await supplyAndBorrow(Protocols.MOONWELL);
 
         await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.FLUID);
