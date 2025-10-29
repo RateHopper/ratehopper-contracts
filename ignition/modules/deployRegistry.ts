@@ -1,8 +1,8 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 import { ethers } from "hardhat";
 import { FLUID_VAULT_RESOLVER } from "./constants";
-import { getCTokenMappingArrays, getMTokenMappingArrays } from "../contractAddresses";
-import { WETH_ADDRESS } from "../test/constants";
+import { getCTokenMappingArrays, getMTokenMappingArrays } from "../../contractAddresses";
+import { WETH_ADDRESS } from "../../test/constants";
 
 // Gas options utility function
 export async function getGasOptions() {

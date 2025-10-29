@@ -1,7 +1,7 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 import hre from "hardhat";
 import { ethers } from "hardhat";
-import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADRESS, Protocol } from "./constants";
+import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADRESS, Protocol } from "./modules/constants";
 import { deploySharedInfrastructure } from "./deploySharedInfrastructure";
 
 const LeveragedPositionModule = buildModule("LeveragedPosition", (m) => {

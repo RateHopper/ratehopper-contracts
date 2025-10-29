@@ -1,16 +1,12 @@
 import hre from "hardhat";
-import { ethers } from "hardhat";
-import { UNISWAP_V3_FACTORY_ADRESS } from "./constants";
-import { ProtocolRegistryModule, setupRegistry, getGasOptions } from "./deployRegistry";
+import { ProtocolRegistryModule, setupRegistry } from "./modules/deployRegistry";
+import { AllHandlersModule } from "./modules/deployHandlers";
 
 /**
  * Deploys the shared infrastructure (registry + handlers) that can be used by multiple contracts
  * Returns the deployed addresses for reuse
  */
 export async function deploySharedInfrastructure() {
-    const gasOptions = await getGasOptions();
-    console.log("Gas options:", gasOptions);
-
     // Deploy the registry
     console.log("Deploying ProtocolRegistry...");
     const { registry } = await hre.ignition.deploy(ProtocolRegistryModule);
@@ -21,69 +17,26 @@ export async function deploySharedInfrastructure() {
     console.log("Setting up registry configuration...");
     await setupRegistry(registry);
 
-    // Deploy all handlers directly using ethers
-    const AAVE_V3_POOL_ADDRESS = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5";
-    const AAVE_V3_DATA_PROVIDER_ADDRESS = "0xd82a47fdebB5bf5329b09441C3DaB4b5df2153Ad";
-    const MORPHO_ADDRESS = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
-    const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
+    // Deploy all handlers using Ignition
+    console.log("Deploying all handlers...");
+    const handlers = await hre.ignition.deploy(AllHandlersModule, {
+        parameters: {
+            AllHandlers: {
+                registryAddress: registryAddress,
+            },
+        },
+    });
 
-    console.log("Deploying AaveV3Handler...");
-    const AaveV3HandlerFactory = await ethers.getContractFactory("AaveV3Handler");
-    const aaveV3Handler = await AaveV3HandlerFactory.deploy(
-        AAVE_V3_POOL_ADDRESS,
-        AAVE_V3_DATA_PROVIDER_ADDRESS,
-        UNISWAP_V3_FACTORY_ADRESS,
-        registryAddress,
-        { ...gasOptions, gasLimit: 5000000 }
-    );
-    await aaveV3Handler.waitForDeployment();
-    const aaveV3HandlerAddress = await aaveV3Handler.getAddress();
+    const aaveV3HandlerAddress = await handlers.aaveV3Handler.getAddress();
+    const compoundHandlerAddress = await handlers.compoundHandler.getAddress();
+    const morphoHandlerAddress = await handlers.morphoHandler.getAddress();
+    const fluidSafeHandlerAddress = await handlers.fluidSafeHandler.getAddress();
+    const moonwellHandlerAddress = await handlers.moonwellHandler.getAddress();
+
     console.log(`AaveV3Handler deployed to: ${aaveV3HandlerAddress}`);
-
-    console.log("Deploying CompoundHandler...");
-    const CompoundHandlerFactory = await ethers.getContractFactory("CompoundHandler");
-    const compoundHandler = await CompoundHandlerFactory.deploy(
-        registryAddress,
-        UNISWAP_V3_FACTORY_ADRESS,
-        { ...gasOptions, gasLimit: 5000000 }
-    );
-    await compoundHandler.waitForDeployment();
-    const compoundHandlerAddress = await compoundHandler.getAddress();
     console.log(`CompoundHandler deployed to: ${compoundHandlerAddress}`);
-
-    console.log("Deploying MorphoHandler...");
-    const MorphoHandlerFactory = await ethers.getContractFactory("MorphoHandler");
-    const morphoHandler = await MorphoHandlerFactory.deploy(
-        MORPHO_ADDRESS,
-        UNISWAP_V3_FACTORY_ADRESS,
-        registryAddress,
-        { ...gasOptions, gasLimit: 5000000 }
-    );
-    await morphoHandler.waitForDeployment();
-    const morphoHandlerAddress = await morphoHandler.getAddress();
     console.log(`MorphoHandler deployed to: ${morphoHandlerAddress}`);
-
-    console.log("Deploying FluidSafeHandler...");
-    const FluidSafeHandlerFactory = await ethers.getContractFactory("FluidSafeHandler");
-    const fluidSafeHandler = await FluidSafeHandlerFactory.deploy(
-        UNISWAP_V3_FACTORY_ADRESS,
-        registryAddress,
-        { ...gasOptions, gasLimit: 5000000 }
-    );
-    await fluidSafeHandler.waitForDeployment();
-    const fluidSafeHandlerAddress = await fluidSafeHandler.getAddress();
     console.log(`FluidSafeHandler deployed to: ${fluidSafeHandlerAddress}`);
-
-    console.log("Deploying MoonwellHandler...");
-    const MoonwellHandlerFactory = await ethers.getContractFactory("MoonwellHandler");
-    const moonwellHandler = await MoonwellHandlerFactory.deploy(
-        COMPTROLLER_ADDRESS,
-        UNISWAP_V3_FACTORY_ADRESS,
-        registryAddress,
-        { ...gasOptions, gasLimit: 5000000 }
-    );
-    await moonwellHandler.waitForDeployment();
-    const moonwellHandlerAddress = await moonwellHandler.getAddress();
     console.log(`MoonwellHandler deployed to: ${moonwellHandlerAddress}`);
 
     return {
@@ -95,7 +48,6 @@ export async function deploySharedInfrastructure() {
             fluidSafe: fluidSafeHandlerAddress,
             moonwell: moonwellHandlerAddress,
         },
-        gasOptions,
     };
 }
 

@@ -57,7 +57,7 @@ export const FluidSafeModule = buildModule("FluidSafeHandler", (m) => {
 
 export const MoonwellModule = buildModule("MoonwellHandler", (m) => {
     const registryAddress = m.getParameter("registryAddress");
-    
+
     const moonwellHandler = m.contract("MoonwellHandler", [
         COMPTROLLER_ADDRESS,
         UNISWAP_V3_FACTORY_ADRESS,
@@ -65,4 +65,69 @@ export const MoonwellModule = buildModule("MoonwellHandler", (m) => {
     ]);
 
     return { moonwellHandler };
+});
+
+// Comprehensive module to deploy all handlers
+export const AllHandlersModule = buildModule("AllHandlers", (m) => {
+    const registryAddress = m.getParameter("registryAddress");
+
+    const aaveV3Handler = m.contract("AaveV3Handler", [
+        AAVE_V3_POOL_ADDRESS,
+        AAVE_V3_DATA_PROVIDER_ADDRESS,
+        UNISWAP_V3_FACTORY_ADRESS,
+        registryAddress,
+    ]);
+
+    const compoundHandler = m.contract("CompoundHandler", [
+        registryAddress,
+        UNISWAP_V3_FACTORY_ADRESS
+    ]);
+
+    const morphoHandler = m.contract("MorphoHandler", [
+        MORPHO_ADDRESS,
+        UNISWAP_V3_FACTORY_ADRESS,
+        registryAddress
+    ]);
+
+    const fluidSafeHandler = m.contract("FluidSafeHandler", [
+        UNISWAP_V3_FACTORY_ADRESS,
+        registryAddress
+    ]);
+
+    const moonwellHandler = m.contract("MoonwellHandler", [
+        COMPTROLLER_ADDRESS,
+        UNISWAP_V3_FACTORY_ADRESS,
+        registryAddress
+    ]);
+
+    return {
+        aaveV3Handler,
+        compoundHandler,
+        morphoHandler,
+        fluidSafeHandler,
+        moonwellHandler
+    };
+});
+
+export const SafeModuleDebtSwapModule = buildModule("SafeModuleDebtSwap", (m) => {
+    const protocols = m.getParameter("protocols");
+    const handlers = m.getParameter("handlers");
+    const pauserAddress = m.getParameter("pauserAddress");
+    const paraswapAddress = m.getParameter("paraswapAddress");
+    const operatorAddress = m.getParameter("operatorAddress");
+
+    const safeModuleDebtSwap = m.contract("SafeModuleDebtSwap", [
+        UNISWAP_V3_FACTORY_ADRESS,
+        protocols,
+        handlers,
+        pauserAddress,
+    ]);
+
+    // Set Paraswap addresses
+    m.call(safeModuleDebtSwap, "setParaswapAddresses", [paraswapAddress, paraswapAddress]);
+
+    // Set operator
+    m.call(safeModuleDebtSwap, "setoperator", [operatorAddress]);
+
+    return { safeModuleDebtSwap };
 });

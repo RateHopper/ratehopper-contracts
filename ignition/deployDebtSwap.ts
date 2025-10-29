@@ -1,8 +1,8 @@
 import hre from "hardhat";
 import { ethers } from "hardhat";
-import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADRESS } from "./constants";
-import { ProtocolRegistryModule, setupRegistry, getGasOptions } from "./deployRegistry";
-import { AaveV3Module, CompoundModule, MorphoModule } from "./deployHandlers";
+import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADRESS } from "./modules/constants";
+import { ProtocolRegistryModule, setupRegistry, getGasOptions } from "./modules/deployRegistry";
+import { AaveV3Module, CompoundModule, MorphoModule } from "./modules/deployHandlers";
 
 // Define Protocol enum directly
 enum Protocol {
