@@ -2,7 +2,6 @@ import hre from "hardhat";
 import { ethers } from "hardhat";
 import { UNISWAP_V3_FACTORY_ADRESS } from "./constants";
 import { ProtocolRegistryModule, setupRegistry, getGasOptions } from "./deployRegistry";
-import { AaveV3Module, CompoundModule, MorphoModule, FluidSafeModule, MoonwellModule } from "./deployHandlers";
 
 /**
  * Deploys the shared infrastructure (registry + handlers) that can be used by multiple contracts

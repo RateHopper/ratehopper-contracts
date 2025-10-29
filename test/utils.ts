@@ -72,7 +72,8 @@ export async function getParaswapData(
     const amountPlusFee = amount + (amount * flashloanFee + 9999n) / 10000n;
 
     // deal with debt amount is slightly increased after getting quote from Dex aggregator
-    const amountPlusBuffer = (BigInt(amountPlusFee) * 100001n) / 100000n;
+    const amountPlusBuffer = (BigInt(amountPlusFee) * 101n) / 100n;
+    console.log("amountPlusBuffer:", amountPlusBuffer);
 
     const srcDecimals = await getDecimals(srcToken);
     const destDecimals = await getDecimals(destToken);
@@ -91,7 +92,7 @@ export async function getParaswapData(
         slippage: "200",
         userAddress: contractAddress,
         // exclude Uniswap V3 to avoid conflict with flashloan pool. More sophisticated mechanism should be implemented
-        excludeDEXS: "UniswapV3",
+        excludeDEXS: "UniswapV3,BalancerV3",
         version: 6.2,
     };
 
@@ -105,6 +106,8 @@ export async function getParaswapData(
 
         // add 2% slippage(must be set by user)
         const amountPlusSlippage = (BigInt(response.data.priceRoute.srcAmount) * 1020n) / 1000n;
+
+        console.log("amountPlusSlippage:", amountPlusSlippage);
 
         return {
             srcAmount: amountPlusSlippage,

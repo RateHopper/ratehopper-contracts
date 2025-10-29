@@ -8,31 +8,31 @@ const OPERATOR_ADDRESS = "0xE549DE35b4D370B76c0A777653aD85Aef6eb8Fa4";
 
 async function main() {
     try {
-        const registryAddress = "0xc2b45C4FCaEAE99e609Dd2aAB1684ffBbb95fDEa";
+        // const registryAddress = "0xc2b45C4FCaEAE99e609Dd2aAB1684ffBbb95fDEa";
 
-        // Deploy FluidSafeHandler using Ignition
-        console.log("Deploying FluidSafeHandler...");
-        const { fluidSafeHandler } = await hre.ignition.deploy(FluidSafeModule, {
-            parameters: {
-                FluidSafeHandler: {
-                    registryAddress: registryAddress,
-                },
-            },
-        });
-        const fluidSafeHandlerAddress = await fluidSafeHandler.getAddress();
-        console.log(`FluidSafeHandler deployed to: ${fluidSafeHandlerAddress}`);
+        // // Deploy FluidSafeHandler using Ignition
+        // console.log("Deploying FluidSafeHandler...");
+        // const { fluidSafeHandler } = await hre.ignition.deploy(FluidSafeModule, {
+        //     parameters: {
+        //         FluidSafeHandler: {
+        //             registryAddress: registryAddress,
+        //         },
+        //     },
+        // });
+        // const fluidSafeHandlerAddress = await fluidSafeHandler.getAddress();
+        // console.log(`FluidSafeHandler deployed to: ${fluidSafeHandlerAddress}`);
 
-        // Deploy MoonwellHandler using Ignition
-        console.log("Deploying MoonwellHandler...");
-        const { moonwellHandler } = await hre.ignition.deploy(MoonwellModule, {
-            parameters: {
-                MoonwellHandler: {
-                    registryAddress: registryAddress,
-                },
-            },
-        });
-        const moonwellHandlerAddress = await moonwellHandler.getAddress();
-        console.log(`MoonwellHandler deployed to: ${moonwellHandlerAddress}`);
+        // // Deploy MoonwellHandler using Ignition
+        // console.log("Deploying MoonwellHandler...");
+        // const { moonwellHandler } = await hre.ignition.deploy(MoonwellModule, {
+        //     parameters: {
+        //         MoonwellHandler: {
+        //             registryAddress: registryAddress,
+        //         },
+        //     },
+        // });
+        // const moonwellHandlerAddress = await moonwellHandler.getAddress();
+        // console.log(`MoonwellHandler deployed to: ${moonwellHandlerAddress}`);
 
         // Deploy SafeModuleDebtSwap
         console.log("Deploying SafeModuleDebtSwap...");
@@ -40,11 +40,11 @@ async function main() {
 
         const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
         const handlers = [
-            "0x7f1be446C938c9046206eCbf803405A0B7741D3f", // AaveV3Handler
-            "0x2397AE142c2BFd7C3dEc242CE98f87Da172983a7", // CompoundHandler
-            "0xb03B40507829d4Ec4b5681d566eA64CE0264Bf48", // MorphoHandler
-            fluidSafeHandlerAddress,
-            moonwellHandlerAddress,
+            "0x4c66eB971B93A24CA1FF73476d4195d03AbD0C96", // AaveV3Handler
+            "0xE7a7951a64ee3DE7F1b30Ed86fC4b23F36d43938", // CompoundHandler
+            "0xb40c31CfE9ae176266F99DA9C52Eb1254eE1dB47", // MorphoHandler
+            "0xFCCfc6D05130e4485837989Ac216Bc38B675B10F", // FluidSafeHandler
+            "0x9019DEe61cAB6fcAB3A5EAa7D9FF98964a17dc95", // MoonwellHandler
         ];
 
         const safeModuleDebtSwap = await SafeModuleDebtSwapFactory.deploy(

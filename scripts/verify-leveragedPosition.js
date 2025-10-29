@@ -1,7 +1,7 @@
 const hre = require("hardhat");
 
 async function main() {
-    const contractAddress = "0xcDEAEf6A3373d7f844874e42A409133BaFB60649";
+    const contractAddress = "0xba25a6bf94ceb977ca1b4823158369463e514802";
     const UNISWAP_V3_FACTORY_ADRESS = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD";
 
     // Define the constructor arguments

@@ -21,6 +21,7 @@ import {
     cbBTC_ADDRESS,
     cbBTC_USDC_POOL,
     USDC_hyUSD_POOL,
+    ETH_USDC_POOL,
 } from "./constants";
 
 import { AaveV3Helper } from "./protocols/aaveV3";
@@ -32,6 +33,7 @@ import {
     morphoMarket4Id,
     morphoMarket5Id,
     morphoMarket6Id,
+    morphoMarket7Id,
 } from "./protocols/morpho";
 import { deployLeveragedPositionContractFixture } from "./deployUtils";
 
@@ -77,6 +79,11 @@ describe("Create leveraged position", function () {
 
         const collateralDecimals = await getDecimals(collateralAddress);
         const debtDecimals = await getDecimals(debtAsset);
+
+        // Check debt token balance in contract before creating position
+        const debtToken = new ethers.Contract(debtAsset, ERC20_ABI, impersonatedSigner);
+        const debtBalanceBefore = await debtToken.balanceOf(deployedContractAddress);
+        console.log("Debt token balance in contract before creating position: ", ethers.formatUnits(debtBalanceBefore, debtDecimals));
 
         switch (protocol) {
             case Protocols.AAVE_V3:
@@ -152,14 +159,201 @@ describe("Create leveraged position", function () {
         const collateralRemainingBalance = await collateralToken.balanceOf(deployedContractAddress);
         expect(Number(collateralRemainingBalance)).to.be.equal(0);
 
-        const debtToken = new ethers.Contract(debtAsset, ERC20_ABI, impersonatedSigner);
         const debtRemainingBalance = await debtToken.balanceOf(deployedContractAddress);
         expect(Number(debtRemainingBalance)).to.be.equal(0);
     }
 
+    async function closeLeveragedPosition(
+        flashloanPool: string,
+        protocol: Protocols,
+        collateralAddress = cbETH_ADDRESS,
+        debtTokenAddress = USDC_ADDRESS,
+        morphoMarketId?: string,
+        partialClosePercentage: number = 100, // 100 = full close, 50 = half close, etc.
+    ) {
+        const Helper = protocolHelperMap.get(protocol)!;
+        const protocolHelper = new Helper(impersonatedSigner);
+
+        const debtAsset = debtTokenAddress || USDC_ADDRESS;
+
+        const collateralDecimals = await getDecimals(collateralAddress);
+        const debtDecimals = await getDecimals(debtAsset);
+
+        // Get current debt amount before closing
+        const debtAmountParameter = protocol === Protocols.MORPHO ? morphoMarketId! : debtAsset;
+        const debtAmountFull = await protocolHelper.getDebtAmount(debtAmountParameter);
+        console.log("Debt amount before closing: ", ethers.formatUnits(debtAmountFull, debtDecimals));
+
+        // Get current collateral amount before closing
+        let collateralAmountFull: bigint;
+        switch (protocol) {
+            case Protocols.AAVE_V3:
+                collateralAmountFull = await aaveV3Helper.getCollateralAmount(collateralAddress);
+
+                // Approve aToken to the contract for withdrawal
+                const aTokenAddress = await aaveV3Helper.getATokenAddress(collateralAddress);
+                await approve(aTokenAddress, deployedContractAddress, impersonatedSigner);
+                break;
+            case Protocols.COMPOUND:
+                collateralAmountFull = await compoundHelper.getCollateralAmount(
+                    cometAddressMap.get(debtAsset)!,
+                    collateralAddress,
+                );
+                break;
+            case Protocols.MORPHO:
+                collateralAmountFull = await morphoHelper.getCollateralAmount(morphoMarketId!);
+                break;
+            default:
+                throw new Error("Unsupported protocol");
+        }
+        console.log("Collateral amount before closing: ", ethers.formatUnits(collateralAmountFull, collateralDecimals));
+
+        // Calculate amounts based on partial close percentage
+        const debtAmountBefore = (debtAmountFull * BigInt(partialClosePercentage)) / 100n;
+        const collateralAmountBefore = (collateralAmountFull * BigInt(partialClosePercentage)) / 100n;
+
+        if (partialClosePercentage < 100) {
+            console.log(`Partial close (${partialClosePercentage}%):`);
+            console.log("  Debt to repay:", ethers.formatUnits(debtAmountBefore, debtDecimals));
+            console.log("  Collateral to withdraw:", ethers.formatUnits(collateralAmountBefore, collateralDecimals));
+        }
+
+        let extraData = "0x";
+        switch (protocol) {
+            case Protocols.COMPOUND:
+                extraData = compoundHelper.encodeExtraData(cometAddressMap.get(debtAsset)!);
+                break;
+            case Protocols.MORPHO:
+                // Fetch borrowShares for full repayment
+                const borrowShares = await morphoHelper.getBorrowShares(morphoMarketId!);
+                console.log("Morpho borrowShares for repayment:", borrowShares.toString());
+                extraData = morphoHelper.encodeExtraData(morphoMarketId!, borrowShares);
+                break;
+        }
+
+        // Get paraswap data to swap collateral to debt asset
+        const paraswapData = await getParaswapData(debtAsset, collateralAddress, deployedContractAddress, debtAmountBefore);
+
+        // Get user's collateral token balance before closing
+        const collateralToken = new ethers.Contract(collateralAddress, ERC20_ABI, impersonatedSigner);
+        const userCollateralBalanceBefore = await collateralToken.balanceOf(impersonatedSigner.address);
+
+        // Log all parameters before calling closeLeveragedPosition
+        console.log("=== closeLeveragedPosition Parameters ===");
+        console.log("flashloanPool:", flashloanPool);
+        console.log("protocol:", protocol);
+        console.log("collateralAddress:", collateralAddress);
+        console.log("collateralAmountBefore:", ethers.formatUnits(collateralAmountBefore, collateralDecimals));
+        console.log("debtAsset:", debtAsset);
+        console.log("extraData:", extraData);
+        console.log("paraswapData.srcAmount:", paraswapData.srcAmount.toString());
+        console.log("paraswapData.swapData length:", paraswapData.swapData.length);
+        console.log("=========================================");
+
+        // Add 1% buffer to debt amount to account for interest accrual
+        const debtAmountToPass = (debtAmountBefore * 101n) / 100n;
+
+        console.log("Original debt amount:", ethers.formatUnits(debtAmountBefore, debtDecimals));
+        console.log("Debt amount with 1% buffer:", ethers.formatUnits(debtAmountToPass, debtDecimals));
+
+        await myContract.closeLeveragedPosition(
+            flashloanPool,
+            protocol,
+            collateralAddress,
+            collateralAmountBefore,
+            debtAsset,
+            debtAmountToPass,
+            extraData,
+            paraswapData,
+        );
+
+        // Verify debt and collateral amounts after closing
+        const debtAmountAfter = await protocolHelper.getDebtAmount(debtAmountParameter);
+        console.log("Debt amount after closing: ", ethers.formatUnits(debtAmountAfter, debtDecimals));
+
+        let collateralAmountAfter: bigint;
+        switch (protocol) {
+            case Protocols.AAVE_V3:
+                collateralAmountAfter = await aaveV3Helper.getCollateralAmount(collateralAddress);
+                break;
+            case Protocols.COMPOUND:
+                collateralAmountAfter = await compoundHelper.getCollateralAmount(
+                    cometAddressMap.get(debtAsset)!,
+                    collateralAddress,
+                );
+                break;
+            case Protocols.MORPHO:
+                collateralAmountAfter = await morphoHelper.getCollateralAmount(morphoMarketId!);
+                break;
+            default:
+                throw new Error("Unsupported protocol");
+        }
+        console.log("Collateral amount after closing: ", ethers.formatUnits(collateralAmountAfter, collateralDecimals));
+
+        if (partialClosePercentage === 100) {
+            // For full close, expect debt to be 0
+            expect(debtAmountAfter).to.equal(0);
+
+            // For full close, allow for dust amount in collateral
+            const dustTolerance = ethers.parseUnits("0.00001", collateralDecimals);
+            expect(collateralAmountAfter).to.be.lte(dustTolerance);
+        } else {
+            // For partial close, verify remaining amounts
+            const remainingPercentage = 100 - partialClosePercentage;
+            const expectedRemainingDebt = (debtAmountFull * BigInt(remainingPercentage)) / 100n;
+            const expectedRemainingCollateral = (collateralAmountFull * BigInt(remainingPercentage)) / 100n;
+
+            // Allow 5% tolerance for interest accrual and swap slippage
+            const debtTolerance = expectedRemainingDebt / 20n; // 5%
+            const collateralTolerance = expectedRemainingCollateral / 20n; // 5%
+
+            console.log("Expected remaining debt:", ethers.formatUnits(expectedRemainingDebt, debtDecimals));
+            console.log("Expected remaining collateral:", ethers.formatUnits(expectedRemainingCollateral, collateralDecimals));
+
+            expect(debtAmountAfter).to.be.closeTo(expectedRemainingDebt, debtTolerance);
+            expect(collateralAmountAfter).to.be.closeTo(expectedRemainingCollateral, collateralTolerance);
+        }
+
+        // Verify user received collateral back
+        const userCollateralBalanceAfter = await collateralToken.balanceOf(impersonatedSigner.address);
+        const collateralReturned = userCollateralBalanceAfter - userCollateralBalanceBefore;
+        console.log("Collateral returned to user: ", ethers.formatUnits(collateralReturned, collateralDecimals));
+        expect(collateralReturned).to.be.gt(0);
+
+        // Verify no tokens left in contract
+        const collateralRemainingBalance = await collateralToken.balanceOf(deployedContractAddress);
+        expect(Number(collateralRemainingBalance)).to.be.equal(0);
+
+        const debtToken = new ethers.Contract(debtAsset, ERC20_ABI, impersonatedSigner);
+        const debtRemainingBalance = await debtToken.balanceOf(deployedContractAddress);
+        console.log("Debt remaining balance in contract: ", ethers.formatUnits(debtRemainingBalance, debtDecimals));
+        expect(Number(debtRemainingBalance)).to.be.equal(0);
+    }
+
     describe("on Aave", function () {
-        it("with cbETH collateral", async function () {
+        it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.AAVE_V3);
+        });
+
+        it("create and close position with WETH collateral", async function () {
+            await createLeveragedPosition(ETH_USDC_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
+        });
+
+        it("partial close position with cbETH collateral", async function () {
+            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            // Partially close 50% of the position
+            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.AAVE_V3, cbETH_ADDRESS, USDC_ADDRESS, undefined, 50);
         });
 
         it("with cbETH collateral and USDbC debt", async function () {
@@ -194,8 +388,12 @@ describe("Create leveraged position", function () {
     });
 
     describe("on Compoud", function () {
-        it("with cbETH collateral", async function () {
+        it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.COMPOUND);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.COMPOUND);
         });
 
         // USDbC is no longer available in Compound
@@ -214,10 +412,18 @@ describe("Create leveraged position", function () {
                 targetAmount,
             );
         });
+        
+        it("close position with WETH collateral", async function () {
+            await createLeveragedPosition(ETH_USDC_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
+        });
     });
 
     describe("on Morpho", function () {
-        it("with cbETH collateral", async function () {
+        it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(
                 cbETH_ETH_POOL,
                 Protocols.MORPHO,
@@ -227,7 +433,18 @@ describe("Create leveraged position", function () {
                 undefined,
                 morphoMarket1Id,
             );
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await closeLeveragedPosition(
+                USDC_hyUSD_POOL,
+                Protocols.MORPHO,
+                cbETH_ADDRESS,
+                USDC_ADDRESS,
+                morphoMarket1Id,
+            );
         });
+
 
         it("with cbETH collateral and protocol fee", async function () {
             // Set protocol fee
@@ -331,6 +548,29 @@ describe("Create leveraged position", function () {
 
             // Verify fee is reasonable (not too small due to decimal mismatch)
             expect(feeReceived).to.be.gt(ethers.parseUnits("0.000002", 18)); // At least 0.000002 WETH
+        });
+
+
+        it("close position with WETH collateral", async function () {
+            await createLeveragedPosition(
+                ETH_USDC_POOL,
+                Protocols.MORPHO,
+                WETH_ADDRESS,
+                USDC_ADDRESS,
+                undefined,
+                undefined,
+                morphoMarket7Id,
+            );
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await closeLeveragedPosition(
+                USDC_hyUSD_POOL,
+                Protocols.MORPHO,
+                WETH_ADDRESS,
+                USDC_ADDRESS,
+                morphoMarket7Id,
+            );
         });
     });
 
@@ -446,5 +686,39 @@ describe("Create leveraged position", function () {
         await expect(
             createLeveragedPosition(USDC_ADDRESS, Protocols.MORPHO, USDC_ADDRESS, WETH_ADDRESS, 1, 2, morphoMarket6Id),
         ).to.be.revertedWith("Invalid flashloan pool address");
+    });
+
+    it.skip("trace failed transaction 0x94adbbc69208165e95a5a997bb7661196df597d68b9a5e72f84fa23fc9ea093b", async function () {
+        // This test traces the exact failed transaction from basescan
+        const txSender = "0x482F5a12cBa3b277eB9FFdBA774aFd250a7FCC4f";
+        const safeWalletAddress = "0xE9AE8836C9f6F419dcb86E00A0453A074FaBfFa2";
+        const contractAddress = "0xba25a6bf94ceb977ca1b4823158369463e514802";
+
+        // Fund the sender with ETH for gas (only works on forked network)
+        await ethers.provider.send("hardhat_setBalance", [
+            txSender,
+            "0x56BC75E2D63100000", // 100 ETH in hex
+        ]);
+
+        // Impersonate the transaction sender
+        const sender = await ethers.getImpersonatedSigner(txSender);
+
+        console.log("Testing failed transaction...");
+        console.log("Sender:", txSender);
+        console.log("Safe Wallet:", safeWalletAddress);
+        console.log("LeveragedPosition Contract:", contractAddress);
+
+        // Raw transaction data from basescan
+        const data = "0x6a761202000000000000000000000000a1dabef33b3b82c7814b6d82a79e50f4ac44102b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000002dc6c000000000000000000000000000000000000000000000000000000000000186a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008c000000000000000000000000000000000000000000000000000000000000007448d80ff0a000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000006e400420000000000000000000000000000000000000600000000000000000000000000000000000000000000000000038d7ea4c680000000000000000000000000000000000000000000000000000000000000000004d0e30db000420000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000044095ea7b3000000000000000000000000ba25a6bf94ceb977ca1b4823158369463e51480200000000000000000000000000000000000000000000000000038d7ea4c680000059dca05b6c26dbd64b5381374aaac5cd05644c2800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000044c04a8a10000000000000000000000000ba25a6bf94ceb977ca1b4823158369463e514802ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00ba25a6bf94ceb977ca1b4823158369463e51480200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000504da0329f4000000000000000000000000b4cb800910b228ed3d0834cf79d697127bbb00e50000000000000000000000000000000000000000000000000000000000000000000000000000000000000000420000000000000000000000000000000000000600000000000000000000000000000000000000000000000000038d7ea4c6800000000000000000000000000000000000000000000000000000082bd67afbc000000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000483322000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000003647f4576750000000000000000000000000e5891850bb3f03090f03010000806f080040100000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000004200000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000048332300000000000000000000000000000000000000000000000000044383819d77800000000000000000000000000000000000000000000000000000000000477c224bf0cddb8a7e4eed814ff69bc61d75590000000000000000000000000236d7c90000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001e00000016000000000000000000000008c000000000000006c000000000000271076578ecf9a141296ec657847fb45b0585bcda3a601400064012500440000000b0000000000000000000000000000000000000000000000000000000094e86ef800000000000000000000000054a8423c1b1bdae9a1accf7d8cf0c7e7106e31c3000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000420000000000000000000000000000000000000600000000000000000000000000000000000000000000000000044383819d7780ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041000000000000000000000000482f5a12cba3b277eb9ffdba774afd250a7fcc4f00000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000";
+
+        // Send the exact transaction to the Safe wallet
+        await expect(
+            sender.sendTransaction({
+                to: safeWalletAddress,
+                data: data,
+            })
+        ).to.be.reverted;
+
+        console.log("Transaction reverted as expected");
     });
 });

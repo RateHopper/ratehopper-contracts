@@ -286,8 +286,12 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         address mContract = getMContract(asset);
         if (mContract == address(0)) revert TokenNotRegistered();
 
-        IERC20(asset).approve(address(mContract), amount);
-        IMToken(mContract).repayBorrowBehalf(onBehalfOf, amount);
+        // Get actual debt to avoid repaying more than owed (which causes underflow)
+        uint256 actualDebt = IMToken(mContract).borrowBalanceCurrent(onBehalfOf);
+        uint256 repayAmount = amount > actualDebt ? actualDebt : amount;
+
+        IERC20(asset).approve(address(mContract), repayAmount);
+        IMToken(mContract).repayBorrowBehalf(onBehalfOf, repayAmount);
     }
 
     function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyUniswapV3Pool nonReentrant {

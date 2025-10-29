@@ -32,6 +32,7 @@ import {
     FLUID_cbBTC_USDC_VAULT,
     FLUID_cbETH_USDC_VAULT,
     fluidVaultMap,
+    FluidHelper,
 } from "./protocols/fluid";
 
 describe("Create leveraged position by Safe", function () {
@@ -95,7 +96,11 @@ describe("Create leveraged position by Safe", function () {
         switch (protocol) {
             case Protocols.FLUID:
                 const vaultAddress = fluidVaultMap.get(collateralAddress)!;
-                extraData = ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [vaultAddress, 0]);
+                // Encode with isFullRepay = false for Fluid create operation
+                extraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                    ["address", "uint256", "bool"],
+                    [vaultAddress, 0, false]
+                );
                 break;
         }
 
@@ -159,6 +164,15 @@ describe("Create leveraged position by Safe", function () {
 
         const collateralAmount = await protocolHelper.getCollateralAmount(collateralAddress, safeAddress);
 
+        // For Fluid protocol, get and log the nftId
+        if (protocol === Protocols.FLUID) {
+            const fluidHelper = new FluidHelper(impersonatedSigner);
+            const vaultAddress = fluidVaultMap.get(collateralAddress)!;
+            const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
+            console.log("Fluid Position NFT ID:", nftId.toString());
+            expect(nftId).to.be.gt(0);
+        }
+
         expect(debtAmount).to.be.gt(0);
         expect(Number(collateralAmount)).to.be.gt(0);
 
@@ -171,9 +185,156 @@ describe("Create leveraged position by Safe", function () {
         expect(Number(debtRemainingBalance)).to.be.equal(0);
     }
 
+    async function closeLeveragedPosition(
+        flashloanPool: string,
+        protocol: Protocols,
+        collateralAddress = cbETH_ADDRESS,
+        debtAddress = USDC_ADDRESS,
+    ) {
+        const Helper = protocolHelperMap.get(protocol)!;
+        const protocolHelper = new Helper(impersonatedSigner);
+
+        const collateralDecimals = await getDecimals(collateralAddress);
+        const debtDecimals = await getDecimals(debtAddress);
+
+        // Get current debt and collateral amounts before closing
+        const addressForDebtAmount = protocol === Protocols.FLUID ? fluidVaultMap.get(collateralAddress)! : debtAddress;
+        const debtAmountBefore = await protocolHelper.getDebtAmount(addressForDebtAmount, safeAddress);
+        console.log("Debt amount before closing: ", ethers.formatUnits(debtAmountBefore, debtDecimals));
+
+        const collateralAmountBefore = await protocolHelper.getCollateralAmount(collateralAddress, safeAddress);
+        console.log("Collateral amount before closing: ", ethers.formatUnits(collateralAmountBefore, collateralDecimals));
+
+        let extraData = "0x";
+        switch (protocol) {
+            case Protocols.FLUID:
+                const fluidHelper = new FluidHelper(impersonatedSigner);
+                const vaultAddress = fluidVaultMap.get(collateralAddress)!;
+                const nftIdBefore = await fluidHelper.getNftId(vaultAddress, safeAddress);
+                console.log("Fluid Position NFT ID before closing:", nftIdBefore.toString());
+
+                // Encode with isFullRepay = true for Fluid close operation
+                extraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                    ["address", "uint256", "bool"],
+                    [vaultAddress, nftIdBefore, true]
+                );
+                break;
+        }
+
+        // Get paraswap data to swap collateral to debt asset
+        const paraswapData = await getParaswapData(debtAddress, collateralAddress, deployedContractAddress, debtAmountBefore);
+
+        // Get user's collateral token balance before closing
+        const collateralToken = new ethers.Contract(collateralAddress, ERC20_ABI, impersonatedSigner);
+        const userCollateralBalanceBefore = await collateralToken.balanceOf(safeAddress);
+
+        console.log("=== closeLeveragedPosition Parameters ===");
+        console.log("flashloanPool:", flashloanPool);
+        console.log("protocol:", protocol);
+        console.log("collateralAddress:", collateralAddress);
+        console.log("collateralAmountBefore:", ethers.formatUnits(collateralAmountBefore, collateralDecimals));
+        console.log("debtAsset:", debtAddress);
+        console.log("extraData:", extraData);
+        console.log("paraswapData.srcAmount:", paraswapData.srcAmount.toString());
+        console.log("paraswapData.swapData length:", paraswapData.swapData.length);
+        console.log("=========================================");
+
+        // Add 1% buffer to debt amount to account for interest accrual
+        const debtAmountToPass = (debtAmountBefore * 101n) / 100n;
+
+        console.log("Original debt amount:", ethers.formatUnits(debtAmountBefore, debtDecimals));
+        console.log("Debt amount with 1% buffer:", ethers.formatUnits(debtAmountToPass, debtDecimals));
+
+        // For Moonwell, we need to approve the mToken
+        const transactions: MetaTransactionData[] = [];
+
+        if (protocol === Protocols.MOONWELL) {
+            const mTokenAddress = mContractAddressMap.get(collateralAddress)!;
+            transactions.push({
+                to: mTokenAddress,
+                value: "0",
+                data: collateralToken.interface.encodeFunctionData("approve", [
+                    deployedContractAddress,
+                    MaxUint256,
+                ]),
+                operation: OperationType.Call,
+            });
+        }
+
+        // Create close position transaction
+        transactions.push({
+            to: deployedContractAddress,
+            value: "0",
+            data: myContract.interface.encodeFunctionData("closeLeveragedPosition", [
+                flashloanPool,
+                protocol,
+                collateralAddress,
+                collateralAmountBefore,
+                debtAddress,
+                debtAmountToPass,
+                extraData,
+                paraswapData,
+            ]),
+            operation: OperationType.Call,
+        });
+
+        let safeTransaction;
+        try {
+            safeTransaction = await safeWallet.createTransaction({
+                transactions: transactions,
+            });
+        } catch (error) {
+            console.error("Error creating transaction:", error);
+            throw error;
+        }
+
+        const safeTxHash = await safeWallet.executeTransaction(safeTransaction, {
+            gasLimit: "10000000",
+        });
+        console.log(safeTxHash);
+
+        // Verify debt is now 0
+        const debtAmountAfter = await protocolHelper.getDebtAmount(addressForDebtAmount, safeAddress);
+        console.log("Debt amount after closing: ", ethers.formatUnits(debtAmountAfter, debtDecimals));
+        expect(debtAmountAfter).to.equal(0);
+
+        // Verify collateral in protocol is now 0 or dust
+        const collateralAmountAfter = await protocolHelper.getCollateralAmount(collateralAddress, safeAddress);
+        console.log("Collateral amount after closing: ", ethers.formatUnits(collateralAmountAfter, collateralDecimals));
+        const dustTolerance = ethers.parseUnits("0.00001", collateralDecimals);
+        expect(collateralAmountAfter).to.be.lte(dustTolerance);
+
+
+        // Verify user received collateral back
+        const userCollateralBalanceAfter = await collateralToken.balanceOf(safeAddress);
+        const collateralReturned = userCollateralBalanceAfter - userCollateralBalanceBefore;
+        console.log("Collateral returned to user: ", ethers.formatUnits(collateralReturned, collateralDecimals));
+        expect(collateralReturned).to.be.gt(0);
+
+        // Verify no tokens left in contract
+        const collateralRemainingBalance = await collateralToken.balanceOf(deployedContractAddress);
+        expect(Number(collateralRemainingBalance)).to.be.equal(0);
+
+        const debtToken = new ethers.Contract(debtAddress, ERC20_ABI, impersonatedSigner);
+        const debtRemainingBalance = await debtToken.balanceOf(deployedContractAddress);
+        console.log("Debt remaining balance in contract: ", ethers.formatUnits(debtRemainingBalance, debtDecimals));
+    }
+
     describe("on Moonwell", function () {
-        it("with cbETH collateral", async function () {
+        it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.MOONWELL);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.MOONWELL);
+        });
+
+        it("create and close position with WETH collateral", async function () {
+            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.MOONWELL, WETH_ADDRESS, USDC_ADDRESS);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.MOONWELL, WETH_ADDRESS, USDC_ADDRESS);
         });
 
         it("with cbBTC collateral", async function () {
@@ -203,14 +364,23 @@ describe("Create leveraged position by Safe", function () {
             );
         });
 
-        it("with WETH collateral", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.MOONWELL, WETH_ADDRESS, USDC_ADDRESS);
+    });
+
+    describe("on Fluid", function () {
+        it("create and close position with WETH collateral", async function () {
+            await createLeveragedPosition(ETH_USDbC_POOL, Protocols.FLUID, WETH_ADDRESS, USDC_ADDRESS);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.FLUID, WETH_ADDRESS, USDC_ADDRESS);
         });
 
-    });
-    describe("on Fluid", function () {
-        it("with cbETH collateral", async function () {
+        it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.FLUID);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.FLUID);
         });
 
         it("with cbBTC collateral", async function () {
@@ -224,10 +394,6 @@ describe("Create leveraged position by Safe", function () {
                 cbBTCPrincipleAmount,
                 targetAmount,
             );
-        });
-
-        it("with WETH collateral", async function () {
-            await createLeveragedPosition(ETH_USDbC_POOL, Protocols.FLUID, WETH_ADDRESS, USDC_ADDRESS);
         });
     });
 });

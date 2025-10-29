@@ -341,4 +341,7 @@ contract SafeModuleDebtSwap is Ownable, ReentrancyGuard, Pausable {
     function unpause() external onlyPauser {
         _unpause();
     }
+
+    // // Allow contract to receive ETH (e.g., from protocols like Moonwell or Fluid)
+    receive() external payable {}
 }

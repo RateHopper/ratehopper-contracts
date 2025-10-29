@@ -21,13 +21,29 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
     address public paraswapRouter;
     mapping(Protocol => address) public protocolHandlers;
 
-    struct FlashCallbackData {
+    error InsufficientTokenBalanceAfterSwap(uint256 expected, uint256 actual);
+
+    enum OperationType { Create, Close }
+
+    struct CreateCallbackData {
         address flashloanPool;
         Protocol protocol;
         address collateralAsset;
         address debtAsset;
         uint256 principleCollateralAmount;
         uint256 targetCollateralAmount;
+        address onBehalfOf;
+        bytes extraData;
+        ParaswapParams paraswapParams;
+    }
+
+    struct CloseCallbackData {
+        address flashloanPool;
+        Protocol protocol;
+        address collateralAsset;
+        address debtAsset;
+        uint256 debtAmount;
+        uint256 collateralAmount;
         address onBehalfOf;
         bytes extraData;
         ParaswapParams paraswapParams;
@@ -40,6 +56,16 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         uint256 principleCollateralAmount,
         uint256 targetCollateralAmount,
         address debtAsset
+    );
+
+    event LeveragedPositionClosed(
+        address indexed onBehalfOf,
+        Protocol protocol,
+        address collateralAsset,
+        uint256 collateralAmount,
+        address debtAsset,
+        uint256 debtAmount,
+        uint256 collateralReturned
     );
 
     event FeeBeneficiarySet(address indexed oldBeneficiary, address indexed newBeneficiary);
@@ -110,7 +136,8 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         uint256 amount1 = _collateralAsset == token0 ? 0 : flashloanBorrowAmount;
 
         bytes memory data = abi.encode(
-            FlashCallbackData({
+            OperationType.Create,
+            CreateCallbackData({
                 flashloanPool: _flashloanPool,
                 protocol: _protocol,
                 collateralAsset: _collateralAsset,
@@ -126,18 +153,78 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         pool.flash(address(this), amount0, amount1, data);
     }
 
-    function uniswapV3FlashCallback(uint256 fee0, uint256 fee1, bytes calldata data) external {
-        FlashCallbackData memory decoded = abi.decode(data, (FlashCallbackData));
+    function closeLeveragedPosition(
+        address _flashloanPool,
+        Protocol _protocol,
+        address _collateralAsset,
+        uint256 _collateralAmount,
+        address _debtAsset,
+        uint256 _debtAmount,
+        bytes calldata _extraData,
+        ParaswapParams calldata _paraswapParams
+    ) public nonReentrant {
+        require(_collateralAsset != address(0), "Invalid collateral asset address");
+        require(_debtAsset != address(0), "Invalid debt asset address");
+        require(_collateralAmount > 0, "Invalid collateral amount");
+        require(_debtAmount > 0, "Invalid debt amount");
 
-        // verify callback
+        address handler = protocolHandlers[_protocol];
+        require(handler != address(0), "Invalid protocol handler");
+
+        IUniswapV3Pool pool = IUniswapV3Pool(_flashloanPool);
+
+        address token0;
+        try pool.token0() returns (address result) {
+            token0 = result;
+        } catch {
+            revert("Invalid flashloan pool address");
+        }
+
+        // Flash loan the debt amount to repay the debt
+        uint256 amount0 = _debtAsset == token0 ? _debtAmount : 0;
+        uint256 amount1 = _debtAsset == token0 ? 0 : _debtAmount;
+
+        bytes memory data = abi.encode(
+            OperationType.Close,
+            CloseCallbackData({
+                flashloanPool: _flashloanPool,
+                protocol: _protocol,
+                collateralAsset: _collateralAsset,
+                debtAsset: _debtAsset,
+                debtAmount: _debtAmount,
+                collateralAmount: _collateralAmount,
+                onBehalfOf: msg.sender,
+                extraData: _extraData,
+                paraswapParams: _paraswapParams
+            })
+        );
+
+        pool.flash(address(this), amount0, amount1, data);
+    }
+
+    function uniswapV3FlashCallback(uint256 fee0, uint256 fee1, bytes calldata data) external {
+        // Decode operation type first
+        (OperationType operationType) = abi.decode(data, (OperationType));
+
+        // Verify callback
         IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
         PoolAddress.PoolKey memory poolKey = PoolAddress.getPoolKey(pool.token0(), pool.token1(), pool.fee());
         CallbackValidation.verifyCallback(uniswapV3Factory, poolKey);
 
-        uint256 flashloanBorrowAmount = decoded.targetCollateralAmount - decoded.principleCollateralAmount;
-
-        // suppose either of fee0 or fee1 is 0
+        // Suppose either of fee0 or fee1 is 0
         uint totalFee = fee0 + fee1;
+
+        if (operationType == OperationType.Create) {
+            (, CreateCallbackData memory decoded) = abi.decode(data, (OperationType, CreateCallbackData));
+            _handleCreateCallback(decoded, totalFee);
+        } else if (operationType == OperationType.Close) {
+            (, CloseCallbackData memory decoded) = abi.decode(data, (OperationType, CloseCallbackData));
+            _handleCloseCallback(decoded, totalFee);
+        }
+    }
+
+    function _handleCreateCallback(CreateCallbackData memory decoded, uint256 totalFee) internal {
+        uint256 flashloanBorrowAmount = decoded.targetCollateralAmount - decoded.principleCollateralAmount;
 
         // Calculate protocol fee based on borrowed amount
         uint256 borrowAmount = decoded.paraswapParams.srcAmount + 1;
@@ -210,6 +297,65 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         );
     }
 
+    function _handleCloseCallback(CloseCallbackData memory decoded, uint256 totalFee) internal {
+        address handler = protocolHandlers[decoded.protocol];
+        require(handler != address(0), "Invalid protocol handler");
+
+        // Flash loan borrowed the full debt amount - repay the debt
+        (bool successRepay, ) = handler.delegatecall(
+            abi.encodeCall(
+                IProtocolHandler.repay,
+                (decoded.debtAsset, decoded.debtAmount, decoded.onBehalfOf, decoded.extraData)
+            )
+        );
+        require(successRepay, "Repay failed");
+
+        (bool successWithdraw, ) = handler.delegatecall(
+            abi.encodeCall(
+                IProtocolHandler.withdraw,
+                (decoded.collateralAsset, decoded.collateralAmount, decoded.onBehalfOf, decoded.extraData)
+            )
+        );
+        require(successWithdraw, "Withdraw failed");
+        
+        uint256 flashloanRepayAmount = decoded.debtAmount + totalFee;
+
+        // Swap collateral to debt asset to repay flash loan
+        swapByParaswap(
+            decoded.collateralAsset,
+            decoded.debtAsset,
+            decoded.paraswapParams.srcAmount, // Amount of collateral to swap
+            flashloanRepayAmount,
+            decoded.paraswapParams.swapData
+        );
+
+        // Repay flash loan
+        IERC20 debtToken = IERC20(decoded.debtAsset);
+        debtToken.safeTransfer(msg.sender, flashloanRepayAmount);
+
+        // Transfer remaining collateral back to user
+        uint256 remainingCollateral = IERC20(decoded.collateralAsset).balanceOf(address(this));
+        if (remainingCollateral > 0) {
+            IERC20(decoded.collateralAsset).safeTransfer(decoded.onBehalfOf, remainingCollateral);
+        }
+
+        // Transfer remaining debt asset back to user
+        uint256 remainingDebtAsset = IERC20(decoded.debtAsset).balanceOf(address(this));
+        if (remainingDebtAsset > 0) {
+            IERC20(decoded.debtAsset).safeTransfer(decoded.onBehalfOf, remainingDebtAsset);
+        }
+
+        emit LeveragedPositionClosed(
+            decoded.onBehalfOf,
+            decoded.protocol,
+            decoded.collateralAsset,
+            decoded.collateralAmount,
+            decoded.debtAsset,
+            decoded.debtAmount,
+            remainingCollateral
+        );
+    }
+
     function swapByParaswap(
         address srcAsset,
         address dstAsset,
@@ -217,11 +363,14 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         uint256 minAmountOut,
         bytes memory _txParams
     ) internal {
-        TransferHelper.safeApprove(srcAsset, paraswapTokenTransferProxy, amount);
+        TransferHelper.safeApprove(srcAsset, paraswapTokenTransferProxy, (type(uint256).max));
         (bool success, ) = paraswapRouter.call(_txParams);
         require(success, "Token swap by paraSwap failed");
 
-        require(IERC20(dstAsset).balanceOf(address(this)) >= minAmountOut, "Insufficient token balance after swap");
+        uint256 actualBalance = IERC20(dstAsset).balanceOf(address(this));
+        if (actualBalance < minAmountOut) {
+            revert InsufficientTokenBalanceAfterSwap(minAmountOut, actualBalance);
+        }
 
         //remove approval
         TransferHelper.safeApprove(srcAsset, paraswapTokenTransferProxy, 0);
@@ -234,4 +383,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         IERC20(token).safeTransfer(owner(), amount);
         emit EmergencyWithdrawn(token, amount, owner());
     }
+
+    // Allow contract to receive ETH (e.g., from protocols like Moonwell or Fluid)
+    receive() external payable {}
 }

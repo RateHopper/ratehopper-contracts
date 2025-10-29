@@ -125,10 +125,19 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
     function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyUniswapV3Pool nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
-        (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
+        (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(extraData, (MarketParams, uint256));
 
-        TransferHelper.safeApprove(asset, address(morpho), amount);
-        morpho.repay(marketParams, amount, 0, onBehalfOf, "");
+        // Approve max if repaying by shares, otherwise approve the specific amount
+        uint256 approvalAmount = borrowShares > 0 ? type(uint256).max : amount;
+        TransferHelper.safeApprove(asset, address(morpho), approvalAmount);
+
+        // If borrowShares > 0, repay by shares (full repayment), otherwise repay by amount
+        if (borrowShares > 0) {
+            morpho.repay(marketParams, 0, borrowShares, onBehalfOf, "");
+        } else {
+            morpho.repay(marketParams, amount, 0, onBehalfOf, "");
+        }
+
         TransferHelper.safeApprove(asset, address(morpho), 0);
     }
 
