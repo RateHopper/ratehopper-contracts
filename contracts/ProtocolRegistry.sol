@@ -29,7 +29,7 @@ contract ProtocolRegistry is Ownable {
     // WETH address on Base network
     address public immutable WETH_ADDRESS;
 
-    /// @notice The operator address (SafeModuleDebtSwap) that can call functions via delegatecall
+    /// @notice The operator address (SafeDebtManager) that can call functions via delegatecall
     address public operator;
 
     error ZeroAddress();
@@ -149,7 +149,7 @@ contract ProtocolRegistry is Ownable {
     }
 
     /**
-     * @dev Set the operator address (SafeModuleDebtSwap)
+     * @dev Set the operator address (SafeDebtManager)
      * @param _operator The new operator address
      */
     function setOperator(address _operator) external onlyOwner {

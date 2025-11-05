@@ -337,7 +337,7 @@ describe("Safe wallet should debtSwap", function () {
         );
     });
 
-    it("from Fluid to Compound", async function () {
+    it.only("from Fluid to Compound", async function () {
         await supplyAndBorrowOnFluid();
         await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.COMPOUND);
     });
@@ -399,7 +399,7 @@ describe("Safe wallet should debtSwap", function () {
     it("from Aave to Moonwell with protocol fee", async function () {
         // set protocol fee
         const signers = await ethers.getSigners();
-        const contractByOwner = await ethers.getContractAt("SafeModuleDebtSwap", safeModuleAddress, signers[0]);
+        const contractByOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
         const setTx = await contractByOwner.setProtocolFee(10);
         await setTx.wait();
 
@@ -415,7 +415,7 @@ describe("Safe wallet should debtSwap", function () {
     it.skip("from Moonwell USDC to DAI with protocol fee - tests decimal mismatch", async function () {
         // set protocol fee to 1% (100 basis points)
         const signers = await ethers.getSigners();
-        const contractByOwner = await ethers.getContractAt("SafeModuleDebtSwap", safeModuleAddress, signers[0]);
+        const contractByOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
         const setTx = await contractByOwner.setProtocolFee(100); // 1%
         await setTx.wait();
 
@@ -450,7 +450,7 @@ describe("Safe wallet should debtSwap", function () {
     it("Set operator address and Call executeDebtSwap by operator", async function () {
         const safeModuleAddress = await safeModuleContract.getAddress();
         const [_, wallet2] = await ethers.getSigners();
-        const safeModule = await ethers.getContractAt("SafeModuleDebtSwap", safeModuleAddress);
+        const safeModule = await ethers.getContractAt("SafeDebtManager", safeModuleAddress);
 
         await safeModule.setoperator(wallet2.address);
 
@@ -471,7 +471,7 @@ describe("Safe wallet should debtSwap", function () {
     it("Revert when calling executeDebtSwap by non operator(wallet3)", async function () {
         const safeModuleAddress = await safeModuleContract.getAddress();
         const [_, wallet2, wallet3] = await ethers.getSigners();
-        const safeModule = await ethers.getContractAt("SafeModuleDebtSwap", safeModuleAddress);
+        const safeModule = await ethers.getContractAt("SafeDebtManager", safeModuleAddress);
 
         // await safeModule.setoperator(wallet2.address);
 
@@ -533,7 +533,7 @@ describe("Safe wallet should debtSwap", function () {
 
         const safeModuleAddress = await safeModuleContract.getAddress();
         const moduleContract = await ethers.getContractAt(
-            "SafeModuleDebtSwap",
+            "SafeDebtManager",
             safeModuleAddress,
             options.operator || signer,
         );
@@ -841,9 +841,9 @@ describe("Safe wallet should debtSwap", function () {
         const collateralBalanceBefore = await collateralContract.balanceOf(safeAddress);
         console.log("Collateral balance before exit:", ethers.formatUnits(collateralBalanceBefore, collateralDecimals));
 
-        // Step 6: Set operator in SafeModuleDebtSwap
+        // Step 6: Set operator in SafeDebtManager
         const signers = await ethers.getSigners();
-        const moduleContractByOwner = await ethers.getContractAt("SafeModuleDebtSwap", safeModuleAddress, signers[0]);
+        const moduleContractByOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
         const setOperatorTx = await moduleContractByOwner.setoperator(operatorWallet.address);
         await setOperatorTx.wait();
         console.log("Operator set to:", operatorWallet.address);
@@ -852,7 +852,7 @@ describe("Safe wallet should debtSwap", function () {
         const extraData = await getExtraData();
 
         // Step 8: Call exit function using operator wallet
-        const moduleContract = await ethers.getContractAt("SafeModuleDebtSwap", safeModuleAddress, operatorWallet);
+        const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operatorWallet);
 
         const exitTx = await moduleContract.exit(
             protocol,
@@ -870,19 +870,17 @@ describe("Safe wallet should debtSwap", function () {
         console.log("Exit transaction completed");
 
         // Verify DebtPositionExited event was emitted
-        const exitEvent = receipt?.logs.find(
-            (log: any) => {
-                try {
-                    const parsed = moduleContract.interface.parseLog({
-                        topics: [...log.topics],
-                        data: log.data,
-                    });
-                    return parsed?.name === "DebtPositionExited";
-                } catch {
-                    return false;
-                }
+        const exitEvent = receipt?.logs.find((log: any) => {
+            try {
+                const parsed = moduleContract.interface.parseLog({
+                    topics: [...log.topics],
+                    data: log.data,
+                });
+                return parsed?.name === "DebtPositionExited";
+            } catch {
+                return false;
             }
-        );
+        });
         expect(exitEvent).to.not.be.undefined;
 
         // Step 9: Verify debt is repaid

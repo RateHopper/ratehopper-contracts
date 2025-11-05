@@ -6,15 +6,15 @@ const PAUSER_ADDRESS = "0x9E073c36F63BF1c611026fdA1fF6007A81932231";
 const OPERATOR_ADDRESS = "0xE549DE35b4D370B76c0A777653aD85Aef6eb8Fa4";
 
 /**
- * Module to deploy SafeModuleDebtSwap with all handlers
+ * Module to deploy SafeDebtManager with all handlers
  *
  * This module uses the SharedInfrastructure module to get the deployed handler addresses,
  * ensuring consistency and avoiding hardcoded addresses.
  *
  * Usage:
- * npx hardhat ignition deploy ignition/modules/SafeModuleDebtSwap.ts --network base --verify
+ * npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base --verify
  */
-export default buildModule("SafeModuleDebtSwapDeploy", (m) => {
+export default buildModule("SafeDebtManagerDeploy", (m) => {
     // Use the SharedInfrastructure module to get deployed handlers
     const { aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler } = m.useModule(SharedInfrastructureModule);
 
@@ -27,7 +27,7 @@ export default buildModule("SafeModuleDebtSwapDeploy", (m) => {
         moonwellHandler,
     ];
 
-    const safeModuleDebtSwap = m.contract("SafeModuleDebtSwap", [
+    const safeDebtManager = m.contract("SafeDebtManager", [
         UNISWAP_V3_FACTORY_ADRESS,
         protocols,
         handlers,
@@ -35,12 +35,12 @@ export default buildModule("SafeModuleDebtSwapDeploy", (m) => {
     ]);
 
     // Set Paraswap addresses (first call)
-    const setParaswap = m.call(safeModuleDebtSwap, "setParaswapAddresses", [PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS]);
+    const setParaswap = m.call(safeDebtManager, "setParaswapAddresses", [PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS]);
 
     // Set operator (after Paraswap)
-    m.call(safeModuleDebtSwap, "setoperator", [OPERATOR_ADDRESS], {
+    m.call(safeDebtManager, "setoperator", [OPERATOR_ADDRESS], {
         after: [setParaswap]
     });
 
-    return { safeModuleDebtSwap };
+    return { safeDebtManager };
 });

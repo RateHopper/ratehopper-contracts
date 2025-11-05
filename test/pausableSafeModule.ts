@@ -3,9 +3,9 @@ import { expect } from "chai";
 import { deploySafeContractFixture } from "./deployUtils";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { Protocols, USDC_ADDRESS, DAI_ADDRESS, USDC_hyUSD_POOL } from "./constants";
-import { SafeModuleDebtSwap } from "../typechain-types";
+import { SafeDebtManager } from "../typechain-types";
 
-describe("SafeModuleDebtSwap Pausable", function () {
+describe("SafeDebtManager Pausable", function () {
     let safeModuleContract: any;
     let owner: any;
     let user: any;

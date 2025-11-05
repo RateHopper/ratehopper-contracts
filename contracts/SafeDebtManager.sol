@@ -17,7 +17,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 
 import "./dependencies/TransferHelper.sol";
 
-contract SafeModuleDebtSwap is Ownable, ReentrancyGuard, Pausable {
+contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     using GPv2SafeERC20 for IERC20;
     uint8 public protocolFee;
     address public feeBeneficiary;

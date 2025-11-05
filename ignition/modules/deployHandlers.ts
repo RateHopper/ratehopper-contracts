@@ -109,14 +109,14 @@ export const AllHandlersModule = buildModule("AllHandlers", (m) => {
     };
 });
 
-export const SafeModuleDebtSwapModule = buildModule("SafeModuleDebtSwap", (m) => {
+export const SafeDebtManagerModule = buildModule("SafeDebtManager", (m) => {
     const protocols = m.getParameter("protocols");
     const handlers = m.getParameter("handlers");
     const pauserAddress = m.getParameter("pauserAddress");
     const paraswapAddress = m.getParameter("paraswapAddress");
     const operatorAddress = m.getParameter("operatorAddress");
 
-    const safeModuleDebtSwap = m.contract("SafeModuleDebtSwap", [
+    const safeDebtManager = m.contract("SafeDebtManager", [
         UNISWAP_V3_FACTORY_ADRESS,
         protocols,
         handlers,
@@ -124,10 +124,10 @@ export const SafeModuleDebtSwapModule = buildModule("SafeModuleDebtSwap", (m) =>
     ]);
 
     // Set Paraswap addresses
-    m.call(safeModuleDebtSwap, "setParaswapAddresses", [paraswapAddress, paraswapAddress]);
+    m.call(safeDebtManager, "setParaswapAddresses", [paraswapAddress, paraswapAddress]);
 
     // Set operator
-    m.call(safeModuleDebtSwap, "setoperator", [operatorAddress]);
+    m.call(safeDebtManager, "setoperator", [operatorAddress]);
 
-    return { safeModuleDebtSwap };
+    return { safeDebtManager };
 });

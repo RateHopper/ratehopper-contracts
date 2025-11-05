@@ -37,6 +37,7 @@ The system consists of several key components:
 2. **Protocol Handlers**: Individual handlers for each supported lending protocol:
 
     - In `contracts/protocols/` directory:
+
         - `AaveV3Handler.sol`: Handles interactions with Aave V3 protocol
         - `CompoundHandler.sol`: Handles interactions with Compound protocol
         - `MorphoHandler.sol`: Handles interactions with Morpho protocol
@@ -47,7 +48,7 @@ The system consists of several key components:
 
 3. **Safe Modules**: Modules for Gnosis Safe integration:
 
-    - `SafeModuleDebtSwap.sol`: Enables debt swaps through Gnosis Safe
+    - `SafeDebtManager.sol`: Enables debt swaps through Gnosis Safe
 
 4. **LeveragedPosition.sol**: Facilitates creation of leveraged positions across protocols.
 
@@ -87,7 +88,7 @@ await debtSwapContract.executeDebtSwap(
     collateralAssets, // Array of collateral assets
     fromExtraData, // Protocol-specific data for source
     toExtraData, // Protocol-specific data for destination
-    paraswapParams // Parameters for token swaps if needed
+    paraswapParams, // Parameters for token swaps if needed
 );
 ```
 
@@ -207,7 +208,7 @@ await debtSwapContract.executeDebtSwap(
     [{ asset: collateralTokenAddress, amount: collateralAmount }],
     fromExtraData,
     toExtraData,
-    paraswapParams
+    paraswapParams,
 );
 ```
 
@@ -269,13 +270,13 @@ const [srcAmount, paraswapData] = await getParaswapData(
     toTokenAddress,
     debtSwapContractAddress,
     debtAmount,
-    slippageAdjustedAmount
+    slippageAdjustedAmount,
 );
 
 // Create the paraswap parameters object
 const paraswapParams = {
     srcAmount: srcAmount,
-    swapData: paraswapData
+    swapData: paraswapData,
 };
 ```
 
@@ -288,7 +289,7 @@ const [srcAmount, paraswapData] = await getParaswapData(
     toTokenAddress,
     debtSwapContractAddress,
     debtAmount,
-    slippageAdjustedAmount
+    slippageAdjustedAmount,
 );
 
 // Execute the debt swap with slippage protection
@@ -304,8 +305,8 @@ await debtSwapContract.executeDebtSwap(
     toExtraData,
     {
         srcAmount,
-        swapData
-    }
+        swapData,
+    },
 );
 ```
 
@@ -386,7 +387,7 @@ Create a `.env` file in the project root with the following variables:
 PRIVATE_KEY=your_private_key_here
 
 # Private key for the operator address
-# The operator can call exit() and other SafeModuleDebtSwap functions
+# The operator can call exit() and other SafeDebtManager functions
 OPERATOR_PRIVATE_KEY=your_operator_private_key_here
 ```
 

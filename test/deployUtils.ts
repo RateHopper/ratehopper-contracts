@@ -199,7 +199,7 @@ export async function deploySafeContractFixture() {
     const [owner, _, __, pauser] = await ethers.getSigners();
 
     // Pre-calculate SafeModule address to use as operator in registry
-    const SafeModule = await hre.ethers.getContractFactory("SafeModuleDebtSwap");
+    const SafeModule = await hre.ethers.getContractFactory("SafeDebtManager");
     const nonce = await ethers.provider.getTransactionCount(owner.address);
     // Account for all the transactions that will happen before SafeModule deployment:
     // Registry + setOperator + Moonwell mappings + Compound mappings + Fluid resolver + 5 Handlers + whitelist = 11 transactions

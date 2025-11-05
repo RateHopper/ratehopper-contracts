@@ -1,14 +1,14 @@
 import hre from "hardhat";
 import { PARASWAP_V6_CONTRACT_ADDRESS, Protocol } from "./modules/constants";
-import { SafeModuleDebtSwapModule } from "./modules/deployHandlers";
+import { SafeDebtManagerModule } from "./modules/deployHandlers";
 
 const PAUSER_ADDRESS = "0x9E073c36F63BF1c611026fdA1fF6007A81932231";
 const OPERATOR_ADDRESS = "0xE549DE35b4D370B76c0A777653aD85Aef6eb8Fa4";
 
 async function main() {
     try {
-        // Deploy SafeModuleDebtSwap using Ignition
-        console.log("Deploying SafeModuleDebtSwap...");
+        // Deploy SafeDebtManager using Ignition
+        console.log("Deploying SafeDebtManager...");
 
         const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
         const handlers = [
@@ -19,9 +19,9 @@ async function main() {
             "0x9019DEe61cAB6fcAB3A5EAa7D9FF98964a17dc95", // MoonwellHandler
         ];
 
-        const { safeModuleDebtSwap } = await hre.ignition.deploy(SafeModuleDebtSwapModule, {
+        const { safeDebtManager } = await hre.ignition.deploy(SafeDebtManagerModule, {
             parameters: {
-                SafeModuleDebtSwap: {
+                SafeDebtManager: {
                     protocols: protocols,
                     handlers: handlers,
                     pauserAddress: PAUSER_ADDRESS,
@@ -31,8 +31,8 @@ async function main() {
             },
         });
 
-        const safeModuleDebtSwapAddress = await safeModuleDebtSwap.getAddress();
-        console.log(`SafeModuleDebtSwap deployed to: ${safeModuleDebtSwapAddress}`);
+        const safeDebtManagerAddress = await safeDebtManager.getAddress();
+        console.log(`SafeDebtManager deployed to: ${safeDebtManagerAddress}`);
         console.log("Paraswap addresses set successfully");
         console.log("Operator set successfully");
     } catch (error) {
