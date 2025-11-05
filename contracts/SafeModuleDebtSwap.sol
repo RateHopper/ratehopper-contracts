@@ -51,6 +51,14 @@ contract SafeModuleDebtSwap is Ownable, ReentrancyGuard, Pausable {
         CollateralAsset[] collateralAssets
     );
 
+    event DebtPositionExited(
+        address indexed onBehalfOf,
+        Protocol protocol,
+        address debtAsset,
+        uint256 debtAmount,
+        CollateralAsset[] collateralAssets
+    );
+
     event FeeBeneficiarySet(address indexed oldBeneficiary, address indexed newBeneficiary);
 
     event ProtocolFeeSet(uint8 oldFee, uint8 newFee);
@@ -373,6 +381,8 @@ contract SafeModuleDebtSwap is Ownable, ReentrancyGuard, Pausable {
                 IERC20(_collateralAssets[i].asset).safeTransfer(_onBehalfOf, collateralBalance);
             }
         }
+
+        emit DebtPositionExited(_onBehalfOf, _protocol, _debtAsset, _debtAmount, _collateralAssets);
     }
 
     function emergencyWithdraw(address token, uint256 amount) external onlyOwner {

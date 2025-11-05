@@ -866,8 +866,24 @@ describe("Safe wallet should debtSwap", function () {
             },
         );
 
-        await exitTx.wait();
+        const receipt = await exitTx.wait();
         console.log("Exit transaction completed");
+
+        // Verify DebtPositionExited event was emitted
+        const exitEvent = receipt?.logs.find(
+            (log: any) => {
+                try {
+                    const parsed = moduleContract.interface.parseLog({
+                        topics: [...log.topics],
+                        data: log.data,
+                    });
+                    return parsed?.name === "DebtPositionExited";
+                } catch {
+                    return false;
+                }
+            }
+        );
+        expect(exitEvent).to.not.be.undefined;
 
         // Step 9: Verify debt is repaid
         await validateDebtRepaid();
