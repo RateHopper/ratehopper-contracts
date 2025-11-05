@@ -318,6 +318,63 @@ contract SafeModuleDebtSwap is Ownable, ReentrancyGuard, Pausable {
     }
 
 
+    /**
+     * @notice Exits a position by repaying debt and withdrawing collateral
+     * @dev Repays the debt first, then withdraws the collateral assets
+     * @param _protocol The protocol to exit from
+     * @param _debtAsset The address of the debt asset to repay
+     * @param _debtAmount The amount of debt to repay (can be type(uint256).max for full repayment)
+     * @param _collateralAssets Array of collateral assets and amounts to withdraw
+     * @param _onBehalfOf The address of the Safe wallet
+     * @param _extraData Additional data required by the protocol handler
+     */
+    function exit(
+        Protocol _protocol,
+        address _debtAsset,
+        uint256 _debtAmount,
+        CollateralAsset[] calldata _collateralAssets,
+        address _onBehalfOf,
+        bytes calldata _extraData
+    ) external onlyOwnerOroperator(_onBehalfOf) whenNotPaused {
+        require(_debtAsset != address(0), "Invalid debt asset address");
+        require(_debtAmount > 0, "Debt amount cannot be zero");
+        require(_collateralAssets.length > 0, "Must withdraw at least one collateral asset");
+
+        address handler = protocolHandlers[_protocol];
+        require(handler != address(0), "Invalid protocol handler");
+
+        // Repay debt
+        (bool repaySuccess, ) = handler.delegatecall(
+            abi.encodeCall(
+                IProtocolHandler.repay,
+                (_debtAsset, _debtAmount, _onBehalfOf, _extraData)
+            )
+        );
+        require(repaySuccess, "Repay failed");
+
+        // Withdraw collateral assets
+        for (uint256 i = 0; i < _collateralAssets.length; i++) {
+            require(_collateralAssets[i].asset != address(0), "Invalid collateral asset address");
+            require(_collateralAssets[i].amount > 0, "Collateral amount cannot be zero");
+
+            (bool withdrawSuccess, ) = handler.delegatecall(
+                abi.encodeCall(
+                    IProtocolHandler.withdraw,
+                    (_collateralAssets[i].asset, _collateralAssets[i].amount, _onBehalfOf, _extraData)
+                )
+            );
+            require(withdrawSuccess, "Withdraw failed");
+        }
+
+        // Transfer withdrawn collateral tokens to onBehalfOf address
+        for (uint256 i = 0; i < _collateralAssets.length; i++) {
+            uint256 collateralBalance = IERC20(_collateralAssets[i].asset).balanceOf(address(this));
+            if (collateralBalance > 0) {
+                IERC20(_collateralAssets[i].asset).safeTransfer(_onBehalfOf, collateralBalance);
+            }
+        }
+    }
+
     function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
         require(token != address(0), "Invalid token address");
         uint256 balance = IERC20(token).balanceOf(address(this));

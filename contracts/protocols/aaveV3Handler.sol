@@ -16,16 +16,15 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
 
     IPoolV3 public immutable aaveV3Pool;
     IAaveProtocolDataProvider public immutable dataProvider;
-    ProtocolRegistry public immutable registry;
-    
 
-    
-    constructor(address _AAVE_V3_POOL_ADDRESS, address _AAVE_V3_DATA_PROVIDER_ADDRESS, address _UNISWAP_V3_FACTORY_ADDRESS, address _REGISTRY_ADDRESS) 
-        BaseProtocolHandler(_UNISWAP_V3_FACTORY_ADDRESS) 
-    {
+    constructor(
+        address _AAVE_V3_POOL_ADDRESS,
+        address _AAVE_V3_DATA_PROVIDER_ADDRESS,
+        address _UNISWAP_V3_FACTORY_ADDRESS,
+        address _REGISTRY_ADDRESS
+    ) BaseProtocolHandler(_UNISWAP_V3_FACTORY_ADDRESS, _REGISTRY_ADDRESS) {
         aaveV3Pool = IPoolV3(_AAVE_V3_POOL_ADDRESS);
         dataProvider = IAaveProtocolDataProvider(_AAVE_V3_DATA_PROVIDER_ADDRESS);
-        registry = ProtocolRegistry(_REGISTRY_ADDRESS);
     }
 
     function getDebtAmount(
@@ -48,7 +47,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         CollateralAsset[] memory collateralAssets,
         bytes calldata fromExtraData,
         bytes calldata toExtraData
-    ) external override onlyUniswapV3Pool nonReentrant {
+    ) external override onlyAuthorizedCaller nonReentrant {
         TransferHelper.safeApprove(fromAsset, address(aaveV3Pool), amount);
         aaveV3Pool.repay(fromAsset, amount, 2, onBehalfOf);
 
@@ -62,7 +61,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
-    ) external override onlyUniswapV3Pool nonReentrant {
+    ) external override onlyAuthorizedCaller nonReentrant {
         _validateCollateralAssets(collateralAssets);
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
 
@@ -87,7 +86,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
-    ) external override onlyUniswapV3Pool nonReentrant {
+    ) external override onlyAuthorizedCaller nonReentrant {
         _validateCollateralAssets(collateralAssets);
         
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
@@ -115,16 +114,16 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         aaveV3Pool.borrow(toAsset, amount, 2, 0, onBehalfOf);
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyUniswapV3Pool nonReentrant {
+    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller nonReentrant {
         TransferHelper.safeApprove(asset, address(aaveV3Pool), amount);
         aaveV3Pool.supply(asset, amount, onBehalfOf, 0);
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyUniswapV3Pool nonReentrant {
+    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller nonReentrant {
         aaveV3Pool.borrow(asset, amount, 2, 0, onBehalfOf);
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyUniswapV3Pool nonReentrant {
+    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyAuthorizedCaller nonReentrant {
         // Skip repayment if amount is 1 wei or less to prevent Aave v3 InvalidBurnAmount error
         if (amount <= 1) {
             return;
@@ -135,7 +134,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         TransferHelper.safeApprove(asset, address(aaveV3Pool), 0);
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyUniswapV3Pool nonReentrant {
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         // Get aToken address for the asset

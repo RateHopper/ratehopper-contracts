@@ -377,13 +377,28 @@ struct ParaswapParams {
 npm install
 ```
 
-2. Compile contracts:
+2. Set up environment variables:
+
+Create a `.env` file in the project root with the following variables:
+
+```bash
+# Private key for the main signer/deployer (Safe owner)
+PRIVATE_KEY=your_private_key_here
+
+# Private key for the operator address
+# The operator can call exit() and other SafeModuleDebtSwap functions
+OPERATOR_PRIVATE_KEY=your_operator_private_key_here
+```
+
+You can use `.env.example` as a template.
+
+3. Compile contracts:
 
 ```bash
 npm run compile
 ```
 
-3. Run tests:
+4. Run tests:
 
 ```bash
 npm run test

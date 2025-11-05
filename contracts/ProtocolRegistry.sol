@@ -29,17 +29,23 @@ contract ProtocolRegistry is Ownable {
     // WETH address on Base network
     address public immutable WETH_ADDRESS;
 
+    /// @notice The operator address (SafeModuleDebtSwap) that can call functions via delegatecall
+    address public operator;
+
     error ZeroAddress();
     error ArrayLengthMismatch();
-    
+
     /// @notice Event emitted when a token is added to the whitelist
     event TokenWhitelisted(address indexed token, address indexed owner);
-    
+
     /// @notice Event emitted when a token is removed from the whitelist
     event TokenRemovedFromWhitelist(address indexed token, address indexed owner);
-    
+
     /// @notice Event emitted when the Fluid vault resolver is updated
     event FluidVaultResolverUpdated(address indexed oldResolver, address indexed newResolver);
+
+    /// @notice Event emitted when the operator is updated
+    event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
     function setTokenMContract(address token, address mContract) external onlyOwner {
         if (token == address(0)) revert ZeroAddress();
@@ -140,5 +146,16 @@ contract ProtocolRegistry is Ownable {
         address oldResolver = fluidVaultResolver;
         fluidVaultResolver = _fluidVaultResolver;
         emit FluidVaultResolverUpdated(oldResolver, _fluidVaultResolver);
+    }
+
+    /**
+     * @dev Set the operator address (SafeModuleDebtSwap)
+     * @param _operator The new operator address
+     */
+    function setOperator(address _operator) external onlyOwner {
+        if (_operator == address(0)) revert ZeroAddress();
+        address oldOperator = operator;
+        operator = _operator;
+        emit OperatorUpdated(oldOperator, _operator);
     }
 }

@@ -19,13 +19,11 @@ import "../interfaces/IWETH9.sol";
 contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
     using GPv2SafeERC20 for IERC20;
 
-    // The registry contract holds configuration data including the Fluid vault resolver address and WETH address
+    // Note: The registry contract holds configuration data including the Fluid vault resolver address and WETH address
     // This design allows the resolver to be updated without redeploying handlers
     // and works correctly with delegatecall since registry is immutable
-    ProtocolRegistry public immutable registry;
 
-    constructor(address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY) {
-        registry = ProtocolRegistry(_REGISTRY_ADDRESS);
+    constructor(address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
     }
 
     function getDebtAmount(
@@ -67,7 +65,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         CollateralAsset[] memory collateralAssets,
         bytes calldata fromExtraData,
         bytes calldata toExtraData
-    ) external override onlyUniswapV3Pool nonReentrant {
+    ) external override onlyAuthorizedCaller nonReentrant {
         switchFrom(fromAsset, amount, onBehalfOf, collateralAssets, fromExtraData);
         switchTo(toAsset, amountTotal, onBehalfOf, collateralAssets, toExtraData);
     }
@@ -78,7 +76,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
-    ) public override onlyUniswapV3Pool {
+    ) public override onlyAuthorizedCaller {
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
         _validateCollateralAssets(collateralAssets);
         for (uint256 i = 0; i < collateralAssets.length; i++) {
@@ -117,7 +115,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
-    ) public override onlyUniswapV3Pool {
+    ) public override onlyAuthorizedCaller {
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
         _validateCollateralAssets(collateralAssets);
         for (uint256 i = 0; i < collateralAssets.length; i++) {
@@ -152,7 +150,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         require(successBorrow, "Fluid borrow failed");
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public override onlyUniswapV3Pool nonReentrant {
+    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public override onlyAuthorizedCaller nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (address vaultAddress, , bool isFullRepay) = abi.decode(extraData, (address, uint256, bool));
@@ -268,7 +266,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         return returnData;
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyUniswapV3Pool nonReentrant {
+    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyAuthorizedCaller nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (address vaultAddress, , ) = abi.decode(extraData, (address, uint256, bool));
@@ -276,7 +274,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         _supplyCollateral(vaultAddress, 0, asset, amount, onBehalfOf);
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyUniswapV3Pool nonReentrant {
+    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyAuthorizedCaller nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (address vaultAddress, uint256 nftIdFromExtra, ) = abi.decode(extraData, (address, uint256, bool));
@@ -305,7 +303,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         require(successBorrow, "Fluid borrow failed");
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public override onlyUniswapV3Pool nonReentrant {
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public override onlyAuthorizedCaller nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (address vaultAddress, uint256 nftId, ) = abi.decode(extraData, (address, uint256, bool));

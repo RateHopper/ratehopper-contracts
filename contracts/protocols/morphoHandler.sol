@@ -16,13 +16,11 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
     using MarketParamsLib for MarketParams;
     using GPv2SafeERC20 for IERC20;
     using SharesMathLib for uint256;
-    
-    IMorpho public immutable morpho;
-    ProtocolRegistry public immutable registry;
 
-    constructor(address _MORPHO_ADDRESS, address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY) {
+    IMorpho public immutable morpho;
+
+    constructor(address _MORPHO_ADDRESS, address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
         morpho = IMorpho(_MORPHO_ADDRESS);
-        registry = ProtocolRegistry(_REGISTRY_ADDRESS);
     }
 
     function getDebtAmount(
@@ -45,7 +43,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         CollateralAsset[] memory collateralAssets,
         bytes calldata fromExtraData,
         bytes calldata toExtraData
-    ) external override onlyUniswapV3Pool nonReentrant {
+    ) external override onlyAuthorizedCaller nonReentrant {
         switchFrom(fromAsset, amount, onBehalfOf, collateralAssets, fromExtraData);
         switchTo(toAsset, amountTotal, onBehalfOf, collateralAssets, toExtraData);
     }
@@ -56,7 +54,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
-    ) public override onlyUniswapV3Pool {
+    ) public override onlyAuthorizedCaller {
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
         require(registry.isWhitelisted(collateralAssets[0].asset), "Collateral asset is not whitelisted");
         
@@ -79,7 +77,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
-    ) public override onlyUniswapV3Pool {
+    ) public override onlyAuthorizedCaller {
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
         require(registry.isWhitelisted(collateralAssets[0].asset), "Collateral asset is not whitelisted");
         
@@ -104,7 +102,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         TransferHelper.safeApprove(marketParams.collateralToken, address(morpho), 0);
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyUniswapV3Pool nonReentrant {
+    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
         
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
@@ -114,7 +112,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         TransferHelper.safeApprove(asset, address(morpho), 0);
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyUniswapV3Pool nonReentrant {
+    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
         
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
@@ -122,7 +120,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         morpho.borrow(marketParams, amount, 0, onBehalfOf, address(this));
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyUniswapV3Pool nonReentrant {
+    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyAuthorizedCaller nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(extraData, (MarketParams, uint256));
@@ -141,7 +139,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         TransferHelper.safeApprove(asset, address(morpho), 0);
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyUniswapV3Pool nonReentrant {
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         // Decode market parameters from extraData

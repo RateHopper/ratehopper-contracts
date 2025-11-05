@@ -10,7 +10,7 @@ const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
 // Handler modules that accept registry address as parameter
 export const AaveV3Module = buildModule("AaveV3Handler", (m) => {
     const registryAddress = m.getParameter("registryAddress");
-    
+
     const aaveV3Handler = m.contract("AaveV3Handler", [
         AAVE_V3_POOL_ADDRESS,
         AAVE_V3_DATA_PROVIDER_ADDRESS,
@@ -23,7 +23,7 @@ export const AaveV3Module = buildModule("AaveV3Handler", (m) => {
 
 export const CompoundModule = buildModule("CompoundHandler", (m) => {
     const registryAddress = m.getParameter("registryAddress");
-    
+
     const compoundHandler = m.contract("CompoundHandler", [
         registryAddress,
         UNISWAP_V3_FACTORY_ADRESS
@@ -34,7 +34,7 @@ export const CompoundModule = buildModule("CompoundHandler", (m) => {
 
 export const MorphoModule = buildModule("MorphoHandler", (m) => {
     const registryAddress = m.getParameter("registryAddress");
-    
+
     const morphoHandler = m.contract("MorphoHandler", [
         MORPHO_ADDRESS,
         UNISWAP_V3_FACTORY_ADRESS,
@@ -46,7 +46,7 @@ export const MorphoModule = buildModule("MorphoHandler", (m) => {
 
 export const FluidSafeModule = buildModule("FluidSafeHandler", (m) => {
     const registryAddress = m.getParameter("registryAddress");
-    
+
     const fluidSafeHandler = m.contract("FluidSafeHandler", [
         UNISWAP_V3_FACTORY_ADRESS,
         registryAddress

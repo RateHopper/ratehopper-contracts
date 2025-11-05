@@ -16,7 +16,7 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
         const [owner, nonOwner, mockMContract, mockCContract] = await ethers.getSigners();
 
         const ProtocolRegistry = await ethers.getContractFactory("ProtocolRegistry");
-        const protocolRegistry = await ProtocolRegistry.deploy();
+        const protocolRegistry = await ProtocolRegistry.deploy(WETH_ADDRESS);
         await protocolRegistry.waitForDeployment();
 
         return {

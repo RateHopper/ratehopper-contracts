@@ -48,9 +48,24 @@ export const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
 });
 
 // Setup function for registry configuration
-export async function setupRegistry(registry: any) {
+export async function setupRegistry(registry: any, operatorAddress?: string) {
     const gasOptions = await getGasOptions();
-    
+
+    // Set operator if provided
+    if (operatorAddress) {
+        try {
+            console.log("Setting operator address...");
+            const operatorTx = await registry.setOperator(operatorAddress, {
+                ...gasOptions,
+                gasLimit: 200000,
+            });
+            await operatorTx.wait();
+            console.log("Operator address set in ProtocolRegistry");
+        } catch (error) {
+            console.log("Operator may already be set, continuing...");
+        }
+    }
+
     try {
         // Set up Moonwell token mappings
         console.log("Setting up Moonwell token mappings...");

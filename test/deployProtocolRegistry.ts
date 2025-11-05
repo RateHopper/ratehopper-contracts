@@ -18,7 +18,7 @@ import { mAERO, mcbBTC, mEURC, mWeETH, mWETH, mwstETH, USDS_COMET_ADDRESS } from
 import { getGasOptions } from "./deployUtils";
 import { FLUID_VAULT_RESOLVER } from "./protocols/fluid";
 
-export async function deployProtocolRegistry() {
+export async function deployProtocolRegistry(operatorAddress?: string) {
     const ProtocolRegistry = await ethers.getContractFactory("ProtocolRegistry");
     const gasOptions = await getGasOptions();
     const protocolRegistry = await ProtocolRegistry.deploy(WETH_ADDRESS, gasOptions);
@@ -26,6 +26,12 @@ export async function deployProtocolRegistry() {
     console.log("ProtocolRegistry deployed to:", await protocolRegistry.getAddress());
 
     const registry = await ethers.getContractAt("ProtocolRegistry", await protocolRegistry.getAddress());
+
+    // Set operator if provided
+    if (operatorAddress) {
+        await registry.setOperator(operatorAddress);
+        console.log("Operator set to:", operatorAddress);
+    }
 
     // Set Moonwell token mappings using batch function
     await registry.batchSetTokenMContracts(
