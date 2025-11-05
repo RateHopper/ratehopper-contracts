@@ -20,10 +20,19 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
     address public paraswapTokenTransferProxy;
     address public paraswapRouter;
     mapping(Protocol => address) public protocolHandlers;
+    address public operator;
 
     error InsufficientTokenBalanceAfterSwap(uint256 expected, uint256 actual);
 
     enum OperationType { Create, Close }
+
+    modifier onlyOwnerOrOperator(address onBehalfOf) {
+        require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
+
+        // Check if caller is operator or the onBehalfOf address itself
+        require(msg.sender == operator || onBehalfOf == msg.sender, "Caller is not authorized");
+        _;
+    }
 
     struct CreateCallbackData {
         address flashloanPool;
@@ -82,6 +91,8 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
             require(handlers[i] != address(0), "Invalid handler address");
             protocolHandlers[protocols[i]] = handlers[i];
         }
+
+        operator = msg.sender;
     }
 
     function setProtocolFee(uint8 _fee) public onlyOwner {
@@ -105,6 +116,10 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         paraswapRouter = _paraswapRouter;
     }
 
+    function setOperator(address _operator) public onlyOwner {
+        require(_operator != address(0), "_operator cannot be zero address");
+        operator = _operator;
+    }
 
     function createLeveragedPosition(
         address _flashloanPool,
@@ -160,9 +175,10 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         uint256 _collateralAmount,
         address _debtAsset,
         uint256 _debtAmount,
+        address _onBehalfOf,
         bytes calldata _extraData,
         ParaswapParams calldata _paraswapParams
-    ) public nonReentrant {
+    ) public nonReentrant onlyOwnerOrOperator(_onBehalfOf) {
         require(_collateralAsset != address(0), "Invalid collateral asset address");
         require(_debtAsset != address(0), "Invalid debt asset address");
         require(_collateralAmount > 0, "Invalid collateral amount");
@@ -193,7 +209,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
                 debtAsset: _debtAsset,
                 debtAmount: _debtAmount,
                 collateralAmount: _collateralAmount,
-                onBehalfOf: msg.sender,
+                onBehalfOf: _onBehalfOf,
                 extraData: _extraData,
                 paraswapParams: _paraswapParams
             })

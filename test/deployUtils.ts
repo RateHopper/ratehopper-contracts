@@ -170,8 +170,6 @@ export async function deployDebtSwapContractFixture() {
 
 export async function deployLeveragedPositionContractFixture() {
     // Contracts are deployed using the first signer/account by default
-    // const [owner, otherAccount] = await hre.ethers.getSigners();
-
     const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler } = await deployHandlers();
 
     const LeveragedPosition = await hre.ethers.getContractFactory("LeveragedPosition");
@@ -191,6 +189,11 @@ export async function deployLeveragedPositionContractFixture() {
     console.log("LeveragedPosition deployed to:", await leveragedPosition.getAddress());
 
     await leveragedPosition.setParaswapAddresses(PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS);
+
+    // Set operator from OPERATOR_PRIVATE_KEY environment variable
+    const operatorWallet = new ethers.Wallet(process.env.OPERATOR_PRIVATE_KEY!, ethers.provider);
+    await leveragedPosition.setOperator(operatorWallet.address);
+    console.log("Operator set to:", operatorWallet.address);
 
     return leveragedPosition;
 }

@@ -337,7 +337,7 @@ describe("Safe wallet should debtSwap", function () {
         );
     });
 
-    it.only("from Fluid to Compound", async function () {
+    it("from Fluid to Compound", async function () {
         await supplyAndBorrowOnFluid();
         await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.COMPOUND);
     });
@@ -900,7 +900,7 @@ describe("Safe wallet should debtSwap", function () {
     }
 
     describe("exit function", function () {
-        it("Should exit a Fluid position successfully", async function () {
+        it("Should exit a Fluid position successfully with cbETH", async function () {
             const vaultAddress = FLUID_cbETH_USDC_VAULT;
             const fluidHelper = new FluidHelper(signer);
 
@@ -912,6 +912,40 @@ describe("Safe wallet should debtSwap", function () {
                 collateralDecimals: 18,
                 setupPosition: async () => {
                     await supplyAndBorrowOnFluid();
+                },
+                getDebtAmount: async () => {
+                    return await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
+                },
+                getCollateralAmount: async () => {
+                    return ethers.parseEther(DEFAULT_SUPPLY_AMOUNT);
+                },
+                getExtraData: async () => {
+                    const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
+                    return ethers.AbiCoder.defaultAbiCoder().encode(
+                        ["address", "uint256", "bool"],
+                        [vaultAddress, nftId, true], // isFullRepay = true
+                    );
+                },
+                validateDebtRepaid: async () => {
+                    const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
+                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    expect(debtAfter).to.equal(0);
+                },
+            });
+        });
+
+        it("Should exit a Fluid position successfully with WETH", async function () {
+            const vaultAddress = FLUID_WETH_USDC_VAULT;
+            const fluidHelper = new FluidHelper(signer);
+
+            await testExitPosition({
+                protocol: Protocols.FLUID,
+                debtAsset: USDC_ADDRESS,
+                debtDecimals: 6,
+                collateralAsset: WETH_ADDRESS,
+                collateralDecimals: 18,
+                setupPosition: async () => {
+                    await supplyAndBorrowOnFluid(FLUID_WETH_USDC_VAULT, WETH_ADDRESS);
                 },
                 getDebtAmount: async () => {
                     return await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
