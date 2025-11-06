@@ -30,7 +30,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
 
         // Check if caller is operator or the onBehalfOf address itself
-        require(msg.sender == operator || onBehalfOf == msg.sender, "Caller is not authorized");
+        require(msg.sender == operator || msg.sender == onBehalfOf, "Caller is not authorized");
         _;
     }
 

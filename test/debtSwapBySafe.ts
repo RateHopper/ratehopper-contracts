@@ -968,6 +968,85 @@ describe("Safe wallet should debtSwap", function () {
             });
         });
 
+        it("Should exit a Fluid position successfully - Safe owner call via Safe transaction", async function () {
+            const vaultAddress = FLUID_cbETH_USDC_VAULT;
+            const fluidHelper = new FluidHelper(signer);
+
+            // Step 1: Create a position (supply collateral and borrow)
+            await supplyAndBorrowOnFluid();
+
+            // Step 2: Get current debt amount
+            const debtBefore = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
+            console.log("Debt before exit:", ethers.formatUnits(debtBefore, 6));
+            expect(debtBefore).to.be.gt(0);
+
+            // Step 3: Send debt tokens to SafeModule to repay the debt
+            const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+            const repayAmount = debtBefore + ethers.parseUnits("10", 6); // Add buffer
+            const transferTx = await debtContract.transfer(safeModuleAddress, repayAmount);
+            await transferTx.wait();
+            console.log("Debt tokens transferred to module");
+
+            const moduleDebtBalance = await debtContract.balanceOf(safeModuleAddress);
+            console.log("Module debt token balance:", ethers.formatUnits(moduleDebtBalance, 6));
+
+            // Step 4: Get collateral amount
+            const collateralAmount = ethers.parseEther(DEFAULT_SUPPLY_AMOUNT);
+            console.log("Collateral amount:", ethers.formatUnits(collateralAmount, 18));
+
+            // Step 5: Get collateral balance before exit
+            const collateralContract = new ethers.Contract(cbETH_ADDRESS, ERC20_ABI, signer);
+            const collateralBalanceBefore = await collateralContract.balanceOf(safeAddress);
+            console.log("Collateral balance before exit:", ethers.formatUnits(collateralBalanceBefore, 18));
+
+            // Step 6: Get extra data for Fluid
+            const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
+            const extraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address", "uint256", "bool"],
+                [vaultAddress, nftId, true], // isFullRepay = true
+            );
+
+            // Step 7: Create Safe transaction to call exit
+            const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress);
+
+            const exitCallData: MetaTransactionData = {
+                to: safeModuleAddress,
+                value: "0",
+                data: moduleContract.interface.encodeFunctionData("exit", [
+                    Protocols.FLUID,
+                    USDC_ADDRESS,
+                    debtBefore,
+                    [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                    safeAddress,
+                    extraData,
+                ]),
+                operation: OperationType.Call,
+            };
+
+            const safeTransaction = await safeWallet.createTransaction({
+                transactions: [exitCallData],
+            });
+
+            await safeWallet.executeTransaction(safeTransaction);
+            console.log("Exit transaction completed via Safe");
+
+            // Step 8: Verify debt is repaid
+            const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
+            console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+            expect(debtAfter).to.equal(0);
+
+            // Step 9: Verify collateral is withdrawn (balance should increase)
+            const collateralBalanceAfter = await collateralContract.balanceOf(safeAddress);
+            console.log("Collateral balance after exit:", ethers.formatUnits(collateralBalanceAfter, 18));
+            expect(collateralBalanceAfter).to.be.gt(collateralBalanceBefore);
+
+            // The withdrawn collateral should approximately equal the collateral amount
+            const withdrawnAmount = collateralBalanceAfter - collateralBalanceBefore;
+            console.log("Withdrawn collateral:", ethers.formatUnits(withdrawnAmount, 18));
+            const tolerance = ethers.parseEther("0.001");
+            expect(withdrawnAmount).to.be.closeTo(collateralAmount, tolerance);
+        });
+
         it("Should exit a Morpho position successfully", async function () {
             const marketId = morphoMarket1Id;
             const morphoHelper = new MorphoHelper(signer);

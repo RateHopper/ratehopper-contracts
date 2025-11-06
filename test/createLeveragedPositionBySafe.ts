@@ -329,6 +329,15 @@ describe("Create leveraged position by Safe", function () {
 
     describe("Operator functionality", function () {
         it.only("operator can close leveraged position on Fluid", async function () {
+            // Fund impersonatedSigner for creating the position
+            const signers = await ethers.getSigners();
+            const fundImpersonatedTx = await signers[0].sendTransaction({
+                to: impersonatedSigner.address,
+                value: ethers.parseEther("0.5"), // Send 0.5 ETH for gas fees
+            });
+            await fundImpersonatedTx.wait();
+            console.log("Funded impersonatedSigner with 0.5 ETH for gas fees");
+
             // Create position first using Safe
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.FLUID);
 
@@ -338,7 +347,6 @@ describe("Create leveraged position by Safe", function () {
             console.log("Operator wallet address:", operatorWallet.address);
 
             // Fund operator wallet with ETH for gas fees using hardhat default account
-            const signers = await ethers.getSigners();
             const fundTx = await signers[0].sendTransaction({
                 to: operatorWallet.address,
                 value: ethers.parseEther("0.2"), // Send 0.2 ETH for gas fees
