@@ -328,7 +328,7 @@ describe("Create leveraged position by Safe", function () {
     }
 
     describe("Operator functionality", function () {
-        it.only("operator can close leveraged position on Fluid", async function () {
+        it("operator can close leveraged position on Fluid", async function () {
             // Fund impersonatedSigner for creating the position
             const signers = await ethers.getSigners();
             const fundImpersonatedTx = await signers[0].sendTransaction({
