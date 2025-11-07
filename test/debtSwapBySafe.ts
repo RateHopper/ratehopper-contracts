@@ -792,6 +792,7 @@ describe("Safe wallet should debtSwap", function () {
         getCollateralAmount: () => Promise<bigint>;
         getExtraData: () => Promise<string>;
         validateDebtRepaid: () => Promise<void>;
+        withdrawCollateral?: boolean;
     }) {
         const {
             protocol,
@@ -804,6 +805,7 @@ describe("Safe wallet should debtSwap", function () {
             getCollateralAmount,
             getExtraData,
             validateDebtRepaid,
+            withdrawCollateral = true,
         } = options;
 
         // Step 0: Fund the operator wallet with ETH for gas
@@ -861,13 +863,14 @@ describe("Safe wallet should debtSwap", function () {
             [{ asset: collateralAsset, amount: collateralAmount }],
             safeAddress,
             extraData,
+            withdrawCollateral,
             {
                 gasLimit: "2000000",
             },
         );
 
         const receipt = await exitTx.wait();
-        console.log("Exit transaction completed");
+        console.log(`Exit transaction completed with withdrawCollateral=${withdrawCollateral}`);
 
         // Verify DebtPositionExited event was emitted
         const exitEvent = receipt?.logs.find((log: any) => {
@@ -886,17 +889,25 @@ describe("Safe wallet should debtSwap", function () {
         // Step 9: Verify debt is repaid
         await validateDebtRepaid();
 
-        // Step 10: Verify collateral is withdrawn (balance should increase)
+        // Step 10: Verify collateral withdrawal behavior based on withdrawCollateral parameter
         const collateralBalanceAfter = await collateralContract.balanceOf(safeAddress);
         console.log("Collateral balance after exit:", ethers.formatUnits(collateralBalanceAfter, collateralDecimals));
-        expect(collateralBalanceAfter).to.be.gt(collateralBalanceBefore);
 
-        // The withdrawn collateral should approximately equal the collateral amount
-        const withdrawnAmount = collateralBalanceAfter - collateralBalanceBefore;
-        console.log("Withdrawn collateral:", ethers.formatUnits(withdrawnAmount, collateralDecimals));
-        const tolerance =
-            collateralDecimals === 18 ? ethers.parseEther("0.001") : ethers.parseUnits("0.001", collateralDecimals);
-        expect(withdrawnAmount).to.be.closeTo(collateralAmount, tolerance);
+        if (withdrawCollateral) {
+            // When withdrawCollateral=true, balance should increase
+            expect(collateralBalanceAfter).to.be.gt(collateralBalanceBefore);
+
+            // The withdrawn collateral should approximately equal the collateral amount
+            const withdrawnAmount = collateralBalanceAfter - collateralBalanceBefore;
+            console.log("Withdrawn collateral:", ethers.formatUnits(withdrawnAmount, collateralDecimals));
+            const tolerance =
+                collateralDecimals === 18 ? ethers.parseEther("0.001") : ethers.parseUnits("0.001", collateralDecimals);
+            expect(withdrawnAmount).to.be.closeTo(collateralAmount, tolerance);
+        } else {
+            // When withdrawCollateral=false, balance should remain unchanged
+            expect(collateralBalanceAfter).to.equal(collateralBalanceBefore);
+            console.log("Collateral not withdrawn (as expected with withdrawCollateral=false)");
+        }
     }
 
     describe("exit function", function () {
@@ -1019,6 +1030,7 @@ describe("Safe wallet should debtSwap", function () {
                     [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
                     safeAddress,
                     extraData,
+                    true, // withdrawCollateral
                 ]),
                 operation: OperationType.Call,
             };
@@ -1045,6 +1057,41 @@ describe("Safe wallet should debtSwap", function () {
             console.log("Withdrawn collateral:", ethers.formatUnits(withdrawnAmount, 18));
             const tolerance = ethers.parseEther("0.001");
             expect(withdrawnAmount).to.be.closeTo(collateralAmount, tolerance);
+        });
+
+        it("Should exit a Fluid position with withdrawCollateral=false - debt repaid, collateral remains", async function () {
+            const vaultAddress = FLUID_cbETH_USDC_VAULT;
+            const fluidHelper = new FluidHelper(signer);
+
+            await testExitPosition({
+                protocol: Protocols.FLUID,
+                debtAsset: USDC_ADDRESS,
+                debtDecimals: 6,
+                collateralAsset: cbETH_ADDRESS,
+                collateralDecimals: 18,
+                setupPosition: async () => {
+                    await supplyAndBorrowOnFluid();
+                },
+                getDebtAmount: async () => {
+                    return await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
+                },
+                getCollateralAmount: async () => {
+                    return ethers.parseEther(DEFAULT_SUPPLY_AMOUNT);
+                },
+                getExtraData: async () => {
+                    const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
+                    return ethers.AbiCoder.defaultAbiCoder().encode(
+                        ["address", "uint256", "bool"],
+                        [vaultAddress, nftId, true], // isFullRepay = true
+                    );
+                },
+                validateDebtRepaid: async () => {
+                    const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
+                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    expect(debtAfter).to.equal(0);
+                },
+                withdrawCollateral: false, // Test with withdrawCollateral=false
+            });
         });
 
         it("Should exit a Morpho position successfully", async function () {
