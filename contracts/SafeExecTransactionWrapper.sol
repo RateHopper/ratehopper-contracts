@@ -12,6 +12,14 @@ import "./interfaces/safe/ISafe.sol";
 contract SafeExecTransactionWrapper {
     error TransactionExecutionFailed();
 
+    event RateHopperSuccess(
+        bytes metadata
+    );
+
+    event RateHopperFailure(
+        bytes metadata
+    );
+
     /**
      * @notice Executes a transaction on a Safe wallet and reverts if it fails
      * @dev Calls execTransaction on the specified Safe and reverts if the return value is false
@@ -26,6 +34,7 @@ contract SafeExecTransactionWrapper {
      * @param gasToken Token address (or 0 if ETH) that is used for the payment
      * @param refundReceiver Address of receiver of gas payment (or 0 if tx.origin)
      * @param signatures Packed signature data ({bytes32 r}{bytes32 s}{uint8 v})
+     * @param metadata Additional metadata to be included in the emitted events
      */
     function execTransaction(
         address safe,
@@ -38,7 +47,8 @@ contract SafeExecTransactionWrapper {
         uint256 gasPrice,
         address gasToken,
         address payable refundReceiver,
-        bytes memory signatures
+        bytes memory signatures,
+        bytes calldata metadata
     ) external payable {
         bool success = ISafe(safe).execTransaction{value: msg.value}(
             to,
@@ -54,7 +64,10 @@ contract SafeExecTransactionWrapper {
         );
 
         if (!success) {
+            emit RateHopperFailure(metadata);
             revert TransactionExecutionFailed();
         }
+
+        emit RateHopperSuccess(metadata);
     }
 }

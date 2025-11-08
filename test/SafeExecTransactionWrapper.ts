@@ -138,6 +138,34 @@ describe("SafeExecTransactionWrapper", function () {
         const txData = safeTx.data;
 
         // Execute all operations via wrapper in one call
+        const metadata = ethers.AbiCoder.defaultAbiCoder().encode(
+            [
+                "uint8",
+                "uint8",
+                "address",
+                "address",
+                "address",
+                "uint8",
+                "address",
+                "uint256",
+                "uint256",
+                "address",
+                "bytes",
+            ],
+            [
+                0, // operation: 0 = open agent
+                0, // strategyType
+                safeAddress, // user
+                collateralTokenAddress, // collateralAsset
+                USDC_ADDRESS, // debtAsset
+                3, // borrowProtocol
+                vaultAddress, // borrowMarketId
+                supplyAmount, // collateralAmount
+                ethers.parseUnits("1", 6), // debtAmount
+                ethers.ZeroAddress, // additionalInteractionContract
+                "0x", // customData (empty bytes)
+            ],
+        );
         const wrapperTx = await wrapperContract.execTransaction(
             safeAddress,
             txData.to,
@@ -150,6 +178,7 @@ describe("SafeExecTransactionWrapper", function () {
             ethers.ZeroAddress, // gasToken
             ethers.ZeroAddress, // refundReceiver
             signature.data,
+            metadata,
             {
                 gasLimit: "10000000",
             },
@@ -222,6 +251,34 @@ describe("SafeExecTransactionWrapper", function () {
         const txData = safeTx.data;
 
         // Execute via wrapper - should revert (Safe will revert with GS013 for failed transaction)
+        const metadata = ethers.AbiCoder.defaultAbiCoder().encode(
+            [
+                "uint8",
+                "uint8",
+                "address",
+                "address",
+                "address",
+                "uint8",
+                "address",
+                "uint256",
+                "uint256",
+                "address",
+                "bytes",
+            ],
+            [
+                0, // operation: 0 = open agent
+                0, // strategyType
+                safeAddress, // user
+                cbETH_ADDRESS, // collateralAsset
+                USDC_ADDRESS, // debtAsset
+                3, // borrowProtocol
+                vaultAddress, // borrowMarketId
+                0, // collateralAmount (0 - no collateral)
+                ethers.parseUnits("1", 6), // debtAmount
+                ethers.ZeroAddress, // additionalInteractionContract
+                "0x", // customData (empty bytes)
+            ],
+        );
         await expect(
             wrapperContract.execTransaction(
                 safeAddress,
@@ -235,6 +292,7 @@ describe("SafeExecTransactionWrapper", function () {
                 ethers.ZeroAddress, // gasToken
                 ethers.ZeroAddress, // refundReceiver
                 signature.data,
+                metadata,
                 {
                     gasLimit: "10000000",
                 },
