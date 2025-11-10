@@ -30,16 +30,13 @@ const config: HardhatUserConfig = {
         ],
     },
     etherscan: {
-        apiKey: {
-            base: process.env.EXPLORER_KEY!,
-            baseSepolia: process.env.EXPLORER_KEY!,
-        },
+        apiKey: process.env.EXPLORER_KEY!,
         customChains: [
             {
                 network: "base",
                 chainId: 8453,
                 urls: {
-                    apiURL: "https://api.etherscan.io/v2/api?chainid=8453",
+                    apiURL: "https://api.etherscan.io/v2/api",
                     browserURL: "https://basescan.org",
                 },
             },
@@ -47,7 +44,7 @@ const config: HardhatUserConfig = {
                 network: "baseSepolia",
                 chainId: 84532,
                 urls: {
-                    apiURL: "https://api.etherscan.io/v2/api?chainid=84532",
+                    apiURL: "https://api.etherscan.io/v2/api",
                     browserURL: "https://sepolia.basescan.org",
                 },
             },

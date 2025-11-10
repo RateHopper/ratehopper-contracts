@@ -14,9 +14,10 @@
         "coverage": "node --max-old-space-size=12288 ./node_modules/.bin/hardhat coverage",
         "clean": "npx hardhat clean",
         "run-script": "ts-node scripts/paraswap.ts",
-        "deploy:infrastructure": "npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base",
-        "deploy:safe-debt-manager": "npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base",
-        "deploy:leveraged-position": "npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base"
+        "deploy:safe-debt-manager": "npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base && npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base",
+        "deploy:leveraged-position": "npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base && npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base",
+        "verify:safe-debt-manager": "npx hardhat run scripts/verify-safe-debt-manager.ts --network base",
+        "verify:leveraged-position": "npx hardhat run scripts/verify-leveraged-position.ts --network base"
     },
     "author": "",
     "license": "ISC",
