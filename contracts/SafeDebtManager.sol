@@ -27,6 +27,8 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     address public paraswapTokenTransferProxy;
     address public paraswapRouter;
     mapping(Protocol => address) public protocolHandlers;
+    mapping(Protocol => bool) public protocolEnabledForSwitchFrom;
+    mapping(Protocol => bool) public protocolEnabledForSwitchTo;
 
     struct FlashCallbackData {
         Protocol fromProtocol;
@@ -63,13 +65,15 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
     event ProtocolFeeSet(uint8 oldFee, uint8 newFee);
 
+    event ProtocolStatusChanged(Protocol indexed protocol, string operationType, bool enabled);
+
     event EmergencyWithdrawn(address indexed token, uint256 amount, address indexed to);
 
     modifier onlyOwnerOroperator(address onBehalfOf) {
         require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
         
-        // Check if caller is operator or the onBehalfOf address itself
-        require(msg.sender == operator || msg.sender == onBehalfOf, "Caller is not authorized");
+        // Check if caller is operator or the onBehalfOf address itself or an owner of the Safe
+        require(msg.sender == operator || msg.sender == onBehalfOf || ISafe(onBehalfOf).isOwner(msg.sender), "Caller is not authorized");
         _;
     }
 
@@ -89,6 +93,8 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         for (uint256 i = 0; i < protocols.length; i++) {
             require(handlers[i] != address(0), "Invalid handler address");
             protocolHandlers[protocols[i]] = handlers[i];
+            protocolEnabledForSwitchFrom[protocols[i]] = true; // Enable switchFrom by default
+            protocolEnabledForSwitchTo[protocols[i]] = true; // Enable switchTo by default
         }
 
         operator = msg.sender;
@@ -122,6 +128,18 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         paraswapRouter = _paraswapRouter;
     }
 
+    function setProtocolEnabledForSwitchFrom(Protocol _protocol, bool _enabled) external onlyPauser {
+        require(protocolHandlers[_protocol] != address(0), "Protocol handler not set");
+        protocolEnabledForSwitchFrom[_protocol] = _enabled;
+        emit ProtocolStatusChanged(_protocol, "switchFrom", _enabled);
+    }
+
+    function setProtocolEnabledForSwitchTo(Protocol _protocol, bool _enabled) external onlyPauser {
+        require(protocolHandlers[_protocol] != address(0), "Protocol handler not set");
+        protocolEnabledForSwitchTo[_protocol] = _enabled;
+        emit ProtocolStatusChanged(_protocol, "switchTo", _enabled);
+    }
+
     function executeDebtSwap(
         address _flashloanPool,
         Protocol _fromProtocol,
@@ -138,6 +156,17 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         require(_toDebtAsset != address(0), "Invalid to asset address");
         require(_amount > 0, "_amount cannot be zero");
 
+        // Validate protocol handlers and check if protocols are enabled
+        address fromHandler = protocolHandlers[_fromProtocol];
+        require(fromHandler != address(0), "Invalid from protocol handler");
+
+        address toHandler = protocolHandlers[_toProtocol];
+        require(toHandler != address(0), "Invalid to protocol handler");
+
+        // Check if protocols are enabled for their respective operations
+        require(protocolEnabledForSwitchFrom[_fromProtocol], "SwitchFrom is disabled for from protocol");
+        require(protocolEnabledForSwitchTo[_toProtocol], "SwitchTo is disabled for to protocol");
+
         IUniswapV3Pool pool = IUniswapV3Pool(_flashloanPool);
         uint256 debtAmount = _amount;
 
@@ -149,9 +178,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         }
 
         if (_amount == type(uint256).max) {
-            address handler = protocolHandlers[_fromProtocol];
-
-            debtAmount = IProtocolHandler(handler).getDebtAmount(_fromDebtAsset, _onBehalfOf, _extraData[0]);
+            debtAmount = IProtocolHandler(fromHandler).getDebtAmount(_fromDebtAsset, _onBehalfOf, _extraData[0]);
         }
 
         uint256 amount0 = _fromDebtAsset == token0 ? debtAmount : 0;
@@ -220,10 +247,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         uint256 amountTotal = amountInMax + flashloanFee + protocolFeeAmount;
 
         address fromHandler = protocolHandlers[decoded.fromProtocol];
-        require(fromHandler != address(0), "Invalid from protocol handler");
-
         address toHandler = protocolHandlers[decoded.toProtocol];
-        require(toHandler != address(0), "Invalid to protocol handler");
 
         if (decoded.fromProtocol == decoded.toProtocol) {
             (bool success, ) = fromHandler.delegatecall(
@@ -331,7 +355,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
      * @dev Repays the debt first, then optionally withdraws the collateral assets
      * @param _protocol The protocol to exit from
      * @param _debtAsset The address of the debt asset to repay
-     * @param _debtAmount The amount of debt to repay (can be type(uint256).max for full repayment)
+     * @param _debtAmount The amount of debt to repay (pass type(uint256).max to use all available debt tokens in this contract)
      * @param _collateralAssets Array of collateral assets and amounts to withdraw
      * @param _onBehalfOf The address of the Safe wallet
      * @param _extraData Additional data required by the protocol handler
@@ -355,11 +379,29 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         address handler = protocolHandlers[_protocol];
         require(handler != address(0), "Invalid protocol handler");
 
+        // Determine repay amount - if max, get actual debt from handler
+        uint256 repayAmount = _debtAmount;
+        if (_debtAmount == type(uint256).max) {
+            uint256 debtAmount = IProtocolHandler(handler).getDebtAmount(_debtAsset, _onBehalfOf, _extraData);
+            uint256 safeBalance = IERC20(_debtAsset).balanceOf(_onBehalfOf);
+            // Use the smaller of debt amount or Safe balance
+            repayAmount = debtAmount < safeBalance ? debtAmount : safeBalance;
+        }
+
+        // Transfer debt tokens from Safe to this contract
+        bool transferSuccess = ISafe(_onBehalfOf).execTransactionFromModule(
+            _debtAsset,
+            0,
+            abi.encodeCall(IERC20.transfer, (address(this), repayAmount)),
+            ISafe.Operation.Call
+        );
+        require(transferSuccess, "Transfer debt tokens to contract failed");
+
         // Repay debt
         (bool repaySuccess, ) = handler.delegatecall(
             abi.encodeCall(
                 IProtocolHandler.repay,
-                (_debtAsset, _debtAmount, _onBehalfOf, _extraData)
+                (_debtAsset, repayAmount, _onBehalfOf, _extraData)
             )
         );
         require(repaySuccess, "Repay failed");

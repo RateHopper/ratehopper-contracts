@@ -1,11 +1,7 @@
 import { ethers } from "ethers";
 
 import dotenv from "dotenv";
-import {
-    Protocols,
-    USDbC_ADDRESS,
-    WETH_ADDRESS,
-} from "../test/constants";
+import { Protocols, USDbC_ADDRESS, WETH_ADDRESS } from "../test/constants";
 dotenv.config();
 import debtSwapJson from "../abis/DebtSwap.json";
 
@@ -32,7 +28,7 @@ async function main() {
     };
 
     const tx = await debtSwapContract.executeDebtSwap(
-        // USDC_hyUSD_POOL,
+        // ETH_USDC_POOL,
         "0x07598e2773F7F17e65739280689f30983762A872",
         Protocols.AAVE_V3,
         Protocols.COMPOUND,

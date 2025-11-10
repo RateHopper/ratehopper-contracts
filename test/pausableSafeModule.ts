@@ -2,7 +2,7 @@ import { ethers } from "hardhat";
 import { expect } from "chai";
 import { deploySafeContractFixture } from "./deployUtils";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { Protocols, USDC_ADDRESS, DAI_ADDRESS, USDC_hyUSD_POOL } from "./constants";
+import { Protocols, USDC_ADDRESS, DAI_ADDRESS, ETH_USDC_POOL } from "./constants";
 import { SafeDebtManager } from "../typechain-types";
 
 describe("SafeDebtManager Pausable", function () {
@@ -74,7 +74,7 @@ describe("SafeDebtManager Pausable", function () {
                 safeModuleContract
                     .connect(operator)
                     .executeDebtSwap(
-                        USDC_hyUSD_POOL,
+                        ETH_USDC_POOL,
                         Protocols.AAVE_V3,
                         Protocols.AAVE_V3,
                         USDC_ADDRESS,

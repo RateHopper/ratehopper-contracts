@@ -20,7 +20,7 @@ import {
     cbETH_ETH_POOL,
     cbBTC_ADDRESS,
     cbBTC_USDC_POOL,
-    USDC_hyUSD_POOL,
+    ETH_USDC_POOL,
     ETH_USDC_POOL,
 } from "./constants";
 
@@ -348,7 +348,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.AAVE_V3);
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.AAVE_V3);
         });
 
         it("create and close position with WETH collateral", async function () {
@@ -356,7 +356,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
         });
 
         it("partial close position with cbETH collateral", async function () {
@@ -365,14 +365,7 @@ describe("Create leveraged position", function () {
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             // Partially close 50% of the position
-            await closeLeveragedPosition(
-                USDC_hyUSD_POOL,
-                Protocols.AAVE_V3,
-                cbETH_ADDRESS,
-                USDC_ADDRESS,
-                undefined,
-                50,
-            );
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.AAVE_V3, cbETH_ADDRESS, USDC_ADDRESS, undefined, 50);
         });
 
         it("with cbETH collateral and USDbC debt", async function () {
@@ -412,7 +405,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.COMPOUND);
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.COMPOUND);
         });
 
         // USDbC is no longer available in Compound
@@ -437,7 +430,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
         });
     });
 
@@ -455,13 +448,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(
-                USDC_hyUSD_POOL,
-                Protocols.MORPHO,
-                cbETH_ADDRESS,
-                USDC_ADDRESS,
-                morphoMarket1Id,
-            );
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.MORPHO, cbETH_ADDRESS, USDC_ADDRESS, morphoMarket1Id);
         });
 
         it("with cbETH collateral and protocol fee", async function () {
@@ -517,7 +504,7 @@ describe("Create leveraged position", function () {
 
         it("with USDC collateral and WETH debt", async function () {
             await createLeveragedPosition(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 Protocols.MORPHO,
                 USDC_ADDRESS,
                 WETH_ADDRESS,
@@ -546,7 +533,7 @@ describe("Create leveraged position", function () {
 
             // Create leveraged position with USDC collateral (6 decimals) and WETH debt (18 decimals)
             await createLeveragedPosition(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 Protocols.MORPHO,
                 USDC_ADDRESS,
                 WETH_ADDRESS,
@@ -581,13 +568,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(
-                USDC_hyUSD_POOL,
-                Protocols.MORPHO,
-                WETH_ADDRESS,
-                USDC_ADDRESS,
-                morphoMarket7Id,
-            );
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.MORPHO, WETH_ADDRESS, USDC_ADDRESS, morphoMarket7Id);
         });
     });
 

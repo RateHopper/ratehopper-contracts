@@ -16,7 +16,7 @@ import {
     TEST_FEE_BENEFICIARY_ADDRESS,
     USDbC_ADDRESS,
     USDC_ADDRESS,
-    USDC_hyUSD_POOL,
+    ETH_USDC_POOL,
     WETH_ADDRESS,
     wstETH_ADDRESS,
 } from "./constants";
@@ -225,18 +225,18 @@ describe("Safe wallet should debtSwap", function () {
         it("Aave from USDC to USDbC", async function () {
             await supplyAndBorrow(Protocols.AAVE_V3);
 
-            await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
         });
         // USDbC is not available on Compound anymore
         it.skip("Compound from USDC to USDbC", async function () {
             await supplyAndBorrow(Protocols.COMPOUND);
-            await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.COMPOUND, Protocols.COMPOUND);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.COMPOUND, Protocols.COMPOUND);
         });
 
         it("In Morpho USDC another market", async function () {
             await supplyAndBorrow(Protocols.MORPHO);
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDC_ADDRESS,
                 Protocols.MORPHO,
@@ -251,13 +251,13 @@ describe("Safe wallet should debtSwap", function () {
 
         it("In Moonwell from USDC to DAI", async function () {
             await supplyAndBorrow(Protocols.MOONWELL);
-            await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, DAI_ADDRESS, Protocols.MOONWELL, Protocols.MOONWELL);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, DAI_ADDRESS, Protocols.MOONWELL, Protocols.MOONWELL);
         });
 
         it("In Fluid from USDC to sUSDS with cbBTC collateral", async function () {
             await supplyAndBorrowOnFluid(FLUID_wstETH_USDC_VAULT, wstETH_ADDRESS);
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 sUSDS_ADDRESS,
                 Protocols.FLUID,
@@ -273,7 +273,7 @@ describe("Safe wallet should debtSwap", function () {
         it("In Fluid from USDC to EURC with cbETH collateral", async function () {
             await supplyAndBorrowOnFluid();
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 EURC_ADDRESS,
                 Protocols.FLUID,
@@ -289,28 +289,28 @@ describe("Safe wallet should debtSwap", function () {
 
     it("from Compound to Moonwell", async function () {
         await supplyAndBorrow(Protocols.COMPOUND);
-        await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.COMPOUND, Protocols.MOONWELL);
+        await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.COMPOUND, Protocols.MOONWELL);
     });
 
     it("from Moonwell to Compound", async function () {
         await supplyAndBorrow(Protocols.MOONWELL);
-        await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.COMPOUND);
+        await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.COMPOUND);
     });
 
     it("from Fluid to Moonwell", async function () {
         await supplyAndBorrowOnFluid();
-        await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.MOONWELL);
+        await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.MOONWELL);
     });
 
     it("from Fluid to Aave", async function () {
         await supplyAndBorrowOnFluid();
-        await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.AAVE_V3);
+        await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.AAVE_V3);
     });
 
     it("from Fluid to Aave with WETH collateral", async function () {
         await supplyAndBorrowOnFluid(FLUID_WETH_USDC_VAULT, WETH_ADDRESS);
         await executeDebtSwap(
-            USDC_hyUSD_POOL,
+            ETH_USDC_POOL,
             USDC_ADDRESS,
             USDC_ADDRESS,
             Protocols.FLUID,
@@ -325,7 +325,7 @@ describe("Safe wallet should debtSwap", function () {
     it("from Fluid to Morpho", async function () {
         await supplyAndBorrowOnFluid();
         await executeDebtSwap(
-            USDC_hyUSD_POOL,
+            ETH_USDC_POOL,
             USDC_ADDRESS,
             USDC_ADDRESS,
             Protocols.FLUID,
@@ -339,20 +339,20 @@ describe("Safe wallet should debtSwap", function () {
 
     it("from Fluid to Compound", async function () {
         await supplyAndBorrowOnFluid();
-        await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.COMPOUND);
+        await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.COMPOUND);
     });
 
     it("from Moonwell to Fluid", async function () {
         await supplyAndBorrow(Protocols.MOONWELL);
 
-        await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.FLUID);
+        await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.FLUID);
     });
 
     it("from Moonwell to Fluid with WETH collateral", async function () {
         await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS, WETH_ADDRESS);
 
         await executeDebtSwap(
-            USDC_hyUSD_POOL,
+            ETH_USDC_POOL,
             USDC_ADDRESS,
             USDC_ADDRESS,
             Protocols.MOONWELL,
@@ -368,7 +368,7 @@ describe("Safe wallet should debtSwap", function () {
         await supplyAndBorrow(Protocols.AAVE_V3, USDC_ADDRESS, WETH_ADDRESS);
 
         await executeDebtSwap(
-            USDC_hyUSD_POOL,
+            ETH_USDC_POOL,
             USDC_ADDRESS,
             USDC_ADDRESS,
             Protocols.AAVE_V3,
@@ -387,13 +387,13 @@ describe("Safe wallet should debtSwap", function () {
 
     it("from Moonwell to Aave", async function () {
         await supplyAndBorrow(Protocols.MOONWELL);
-        await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.AAVE_V3);
+        await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.AAVE_V3);
     });
 
     it("from Aave to Moonwell", async function () {
         await supplyAndBorrow(Protocols.AAVE_V3);
 
-        await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.MOONWELL);
+        await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.MOONWELL);
     });
 
     it("from Aave to Moonwell with protocol fee", async function () {
@@ -408,7 +408,7 @@ describe("Safe wallet should debtSwap", function () {
 
         await supplyAndBorrow(Protocols.AAVE_V3);
 
-        await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.MOONWELL);
+        await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.MOONWELL);
     });
 
     // TODO: Fix this test
@@ -456,7 +456,7 @@ describe("Safe wallet should debtSwap", function () {
 
         await supplyAndBorrow(Protocols.MOONWELL);
         await executeDebtSwap(
-            USDC_hyUSD_POOL,
+            ETH_USDC_POOL,
             USDC_ADDRESS,
             USDC_ADDRESS,
             Protocols.MOONWELL,
@@ -478,7 +478,7 @@ describe("Safe wallet should debtSwap", function () {
         await supplyAndBorrow(Protocols.MOONWELL);
         await expect(
             executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDC_ADDRESS,
                 Protocols.MOONWELL,
@@ -793,6 +793,7 @@ describe("Safe wallet should debtSwap", function () {
         getExtraData: () => Promise<string>;
         validateDebtRepaid: () => Promise<void>;
         withdrawCollateral?: boolean;
+        debtAmountOverride?: bigint;
     }) {
         const {
             protocol,
@@ -806,6 +807,7 @@ describe("Safe wallet should debtSwap", function () {
             getExtraData,
             validateDebtRepaid,
             withdrawCollateral = true,
+            debtAmountOverride,
         } = options;
 
         // Step 0: Fund the operator wallet with ETH for gas
@@ -824,15 +826,12 @@ describe("Safe wallet should debtSwap", function () {
         console.log("Debt before exit:", ethers.formatUnits(debtBefore, debtDecimals));
         expect(debtBefore).to.be.gt(0);
 
-        // Step 3: Send debt tokens to SafeModule to repay the debt
+        // Step 3: Send debt tokens to Safe to cover the repayment (including any accrued interest)
         const debtContract = new ethers.Contract(debtAsset, ERC20_ABI, signer);
-        const repayAmount = debtBefore + ethers.parseUnits("10", debtDecimals); // Add buffer
-        const transferTx = await debtContract.transfer(safeModuleAddress, repayAmount);
+        const repayAmount = debtBefore + ethers.parseUnits("10", debtDecimals); // Add buffer for interest
+        const transferTx = await debtContract.transfer(safeAddress, repayAmount);
         await transferTx.wait();
-        console.log("Debt tokens transferred to module");
-
-        const moduleDebtBalance = await debtContract.balanceOf(safeModuleAddress);
-        console.log("Module debt token balance:", ethers.formatUnits(moduleDebtBalance, debtDecimals));
+        console.log("Debt tokens transferred to Safe");
 
         // Step 4: Get collateral amount
         const collateralAmount = await getCollateralAmount();
@@ -856,10 +855,13 @@ describe("Safe wallet should debtSwap", function () {
         // Step 8: Call exit function using operator wallet
         const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operatorWallet);
 
+        // Use override amount if provided, otherwise use actual debt amount with 1% buffer
+        const debtAmountToUse = debtAmountOverride !== undefined ? debtAmountOverride : (debtBefore * 101n) / 100n;
+
         const exitTx = await moduleContract.exit(
             protocol,
             debtAsset,
-            debtBefore, // Repay full debt
+            debtAmountToUse,
             [{ asset: collateralAsset, amount: collateralAmount }],
             safeAddress,
             extraData,
@@ -991,15 +993,12 @@ describe("Safe wallet should debtSwap", function () {
             console.log("Debt before exit:", ethers.formatUnits(debtBefore, 6));
             expect(debtBefore).to.be.gt(0);
 
-            // Step 3: Send debt tokens to SafeModule to repay the debt
+            // Step 3: Send debt tokens to Safe to cover the repayment (including any accrued interest)
             const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
-            const repayAmount = debtBefore + ethers.parseUnits("10", 6); // Add buffer
-            const transferTx = await debtContract.transfer(safeModuleAddress, repayAmount);
+            const repayAmount = debtBefore + ethers.parseUnits("10", 6); // Add buffer for interest
+            const transferTx = await debtContract.transfer(safeAddress, repayAmount);
             await transferTx.wait();
-            console.log("Debt tokens transferred to module");
-
-            const moduleDebtBalance = await debtContract.balanceOf(safeModuleAddress);
-            console.log("Module debt token balance:", ethers.formatUnits(moduleDebtBalance, 6));
+            console.log("Debt tokens transferred to Safe");
 
             // Step 4: Get collateral amount
             const collateralAmount = ethers.parseEther(DEFAULT_SUPPLY_AMOUNT);
@@ -1157,6 +1156,263 @@ describe("Safe wallet should debtSwap", function () {
                     expect(debtAfter).to.equal(0);
                 },
             });
+        });
+
+        it("Should exit a Fluid position using type(uint256).max for debt amount", async function () {
+            const vaultAddress = FLUID_cbETH_USDC_VAULT;
+            const fluidHelper = new FluidHelper(signer);
+
+            await testExitPosition({
+                protocol: Protocols.FLUID,
+                debtAsset: USDC_ADDRESS,
+                debtDecimals: 6,
+                collateralAsset: cbETH_ADDRESS,
+                collateralDecimals: 18,
+                setupPosition: async () => {
+                    await supplyAndBorrowOnFluid();
+                },
+                getDebtAmount: async () => {
+                    return await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
+                },
+                getCollateralAmount: async () => {
+                    return ethers.parseEther(DEFAULT_SUPPLY_AMOUNT);
+                },
+                getExtraData: async () => {
+                    const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
+                    return ethers.AbiCoder.defaultAbiCoder().encode(
+                        ["address", "uint256", "bool"],
+                        [vaultAddress, nftId, true], // isFullRepay = true
+                    );
+                },
+                validateDebtRepaid: async () => {
+                    const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
+                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    expect(debtAfter).to.equal(0);
+                },
+                debtAmountOverride: ethers.MaxUint256, // Use type(uint256).max
+            });
+        });
+    });
+
+    describe.only("Protocol Enable/Disable", function () {
+        it("Should revert when switchFrom is disabled for from protocol", async function () {
+            await supplyAndBorrowOnFluid();
+
+            // Get pauser signer (4th signer, index 3)
+            const signers = await ethers.getSigners();
+            const pauser = signers[3];
+            const contractByPauser = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, pauser);
+
+            // Disable switchFrom for Fluid
+            const disableTx = await contractByPauser.setProtocolEnabledForSwitchFrom(Protocols.FLUID, false);
+            await disableTx.wait();
+            console.log("Disabled switchFrom for Fluid");
+
+            // Try to execute debt swap - should fail
+            await expect(
+                executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.AAVE_V3),
+            ).to.be.revertedWith("SwitchFrom is disabled for from protocol");
+        });
+
+        it("Should revert when switchTo is disabled for to protocol", async function () {
+            await supplyAndBorrowOnFluid();
+
+            // Get pauser signer (4th signer, index 3)
+            const signers = await ethers.getSigners();
+            const pauser = signers[3];
+            const contractByPauser = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, pauser);
+
+            // Disable switchTo for Aave
+            const disableTx = await contractByPauser.setProtocolEnabledForSwitchTo(Protocols.AAVE_V3, false);
+            await disableTx.wait();
+            console.log("Disabled switchTo for Aave");
+
+            // Try to execute debt swap - should fail
+            await expect(
+                executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.AAVE_V3),
+            ).to.be.revertedWith("SwitchTo is disabled for to protocol");
+        });
+
+        it("Should allow debt swap after re-enabling protocols", async function () {
+            await supplyAndBorrowOnFluid();
+
+            // Get pauser signer (4th signer, index 3)
+            const signers = await ethers.getSigners();
+            const pauser = signers[3];
+            const contractByPauser = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, pauser);
+
+            // Disable switchFrom for Fluid
+            let disableTx = await contractByPauser.setProtocolEnabledForSwitchFrom(Protocols.FLUID, false);
+            await disableTx.wait();
+            console.log("Disabled switchFrom for Fluid");
+
+            // Verify it's disabled
+            const isDisabled = await contractByPauser.protocolEnabledForSwitchFrom(Protocols.FLUID);
+            expect(isDisabled).to.be.false;
+
+            // Re-enable switchFrom for Fluid
+            const enableTx = await contractByPauser.setProtocolEnabledForSwitchFrom(Protocols.FLUID, true);
+            await enableTx.wait();
+            console.log("Re-enabled switchFrom for Fluid");
+
+            // Verify it's enabled
+            const isEnabled = await contractByPauser.protocolEnabledForSwitchFrom(Protocols.FLUID);
+            expect(isEnabled).to.be.true;
+
+            // Now debt swap should work
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.AAVE_V3);
+        });
+
+        it("Should only allow pauser to disable/enable protocols", async function () {
+            const [_, wallet2] = await ethers.getSigners();
+            const contractByWallet2 = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, wallet2);
+
+            // Try to disable switchFrom as non-pauser - should fail
+            await expect(contractByWallet2.setProtocolEnabledForSwitchFrom(Protocols.FLUID, false)).to.be.revertedWith(
+                "Caller is not authorized to pause",
+            );
+
+            // Try to disable switchTo as non-pauser - should fail
+            await expect(contractByWallet2.setProtocolEnabledForSwitchTo(Protocols.FLUID, false)).to.be.revertedWith(
+                "Caller is not authorized to pause",
+            );
+        });
+
+        it("Should emit ProtocolStatusChanged event when enabling/disabling", async function () {
+            // Get pauser signer (4th signer, index 3)
+            const signers = await ethers.getSigners();
+            const pauser = signers[3];
+            const contractByPauser = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, pauser);
+
+            // Test switchFrom event
+            await expect(contractByPauser.setProtocolEnabledForSwitchFrom(Protocols.FLUID, false))
+                .to.emit(contractByPauser, "ProtocolStatusChanged")
+                .withArgs(Protocols.FLUID, "switchFrom", false);
+
+            await expect(contractByPauser.setProtocolEnabledForSwitchFrom(Protocols.FLUID, true))
+                .to.emit(contractByPauser, "ProtocolStatusChanged")
+                .withArgs(Protocols.FLUID, "switchFrom", true);
+
+            // Test switchTo event
+            await expect(contractByPauser.setProtocolEnabledForSwitchTo(Protocols.FLUID, false))
+                .to.emit(contractByPauser, "ProtocolStatusChanged")
+                .withArgs(Protocols.FLUID, "switchTo", false);
+
+            await expect(contractByPauser.setProtocolEnabledForSwitchTo(Protocols.FLUID, true))
+                .to.emit(contractByPauser, "ProtocolStatusChanged")
+                .withArgs(Protocols.FLUID, "switchTo", true);
+        });
+
+        it("Should allow disabling switchFrom while keeping switchTo enabled", async function () {
+            // Get pauser signer (4th signer, index 3)
+            const signers = await ethers.getSigners();
+            const pauser = signers[3];
+            const contractByPauser = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, pauser);
+
+            // Disable switchFrom for Fluid, but keep switchTo enabled
+            const disableTx = await contractByPauser.setProtocolEnabledForSwitchFrom(Protocols.FLUID, false);
+            await disableTx.wait();
+
+            // Verify states
+            const switchFromEnabled = await contractByPauser.protocolEnabledForSwitchFrom(Protocols.FLUID);
+            const switchToEnabled = await contractByPauser.protocolEnabledForSwitchTo(Protocols.FLUID);
+
+            expect(switchFromEnabled).to.be.false;
+            expect(switchToEnabled).to.be.true;
+
+            // Setup position on Aave (since we can't use Fluid as from protocol)
+            await supplyAndBorrow(Protocols.AAVE_V3);
+
+            // Should be able to switch TO Fluid (since switchTo is enabled)
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.FLUID);
+
+            // Re-enable switchFrom for cleanup
+            const enableTx = await contractByPauser.setProtocolEnabledForSwitchFrom(Protocols.FLUID, true);
+            await enableTx.wait();
+        });
+
+        it("Should allow disabling switchTo while keeping switchFrom enabled", async function () {
+            // Get pauser signer (4th signer, index 3)
+            const signers = await ethers.getSigners();
+            const pauser = signers[3];
+            const contractByPauser = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, pauser);
+
+            // Disable switchTo for Fluid, but keep switchFrom enabled
+            const disableTx = await contractByPauser.setProtocolEnabledForSwitchTo(Protocols.FLUID, false);
+            await disableTx.wait();
+
+            // Verify states
+            const switchFromEnabled = await contractByPauser.protocolEnabledForSwitchFrom(Protocols.FLUID);
+            const switchToEnabled = await contractByPauser.protocolEnabledForSwitchTo(Protocols.FLUID);
+
+            expect(switchFromEnabled).to.be.true;
+            expect(switchToEnabled).to.be.false;
+
+            // Setup position on Fluid
+            await supplyAndBorrowOnFluid();
+
+            // Should be able to switch FROM Fluid (since switchFrom is enabled)
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.AAVE_V3);
+
+            // Re-enable switchTo for cleanup
+            const enableTx = await contractByPauser.setProtocolEnabledForSwitchTo(Protocols.FLUID, true);
+            await enableTx.wait();
+        });
+
+        it("Should revert switchIn when either switchFrom or switchTo is disabled", async function () {
+            await supplyAndBorrowOnFluid();
+
+            // Get pauser signer (4th signer, index 3)
+            const signers = await ethers.getSigners();
+            const pauser = signers[3];
+            const contractByPauser = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, pauser);
+
+            // Disable switchFrom for Fluid
+            const disableTx = await contractByPauser.setProtocolEnabledForSwitchFrom(Protocols.FLUID, false);
+            await disableTx.wait();
+
+            // Try switchIn - should fail because switchFrom is disabled
+            await expect(
+                executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    EURC_ADDRESS,
+                    Protocols.FLUID,
+                    Protocols.FLUID,
+                    cbETH_ADDRESS,
+                    {
+                        fromFluidVaultAddress: FLUID_cbETH_USDC_VAULT,
+                        tofluidVaultAddress: FLUID_cbETH_EURC_VAULT,
+                    },
+                ),
+            ).to.be.revertedWith("SwitchFrom is disabled for from protocol");
+
+            // Re-enable switchFrom and disable switchTo
+            const enableFromTx = await contractByPauser.setProtocolEnabledForSwitchFrom(Protocols.FLUID, true);
+            await enableFromTx.wait();
+
+            const disableToTx = await contractByPauser.setProtocolEnabledForSwitchTo(Protocols.FLUID, false);
+            await disableToTx.wait();
+
+            // Try switchIn again - should fail because switchTo is disabled
+            await expect(
+                executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    EURC_ADDRESS,
+                    Protocols.FLUID,
+                    Protocols.FLUID,
+                    cbETH_ADDRESS,
+                    {
+                        fromFluidVaultAddress: FLUID_cbETH_USDC_VAULT,
+                        tofluidVaultAddress: FLUID_cbETH_EURC_VAULT,
+                    },
+                ),
+            ).to.be.revertedWith("SwitchTo is disabled for to protocol");
+
+            // Re-enable for cleanup
+            const enableToTx = await contractByPauser.setProtocolEnabledForSwitchTo(Protocols.FLUID, true);
+            await enableToTx.wait();
         });
     });
 });

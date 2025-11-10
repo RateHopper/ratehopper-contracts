@@ -13,7 +13,7 @@ import {
     USDC_ADDRESS,
     USDbC_ADDRESS,
     TEST_ADDRESS,
-    USDC_hyUSD_POOL,
+    ETH_USDC_POOL,
     ETH_USDbC_POOL,
     Protocols,
     cbETH_ADDRESS,
@@ -66,7 +66,7 @@ describe("DebtSwap should switch", function () {
             await aaveV3Helper.supply(cbETH_ADDRESS);
             await aaveV3Helper.borrow(USDC_ADDRESS);
 
-            await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
         });
 
         it("from USDC to USDbC with amount, cbETH Collateral", async function () {
@@ -74,7 +74,7 @@ describe("DebtSwap should switch", function () {
             await aaveV3Helper.borrow(USDC_ADDRESS);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDbC_ADDRESS,
                 Protocols.AAVE_V3,
@@ -97,7 +97,7 @@ describe("DebtSwap should switch", function () {
             await aaveV3Helper.borrow(USDC_ADDRESS);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDbC_ADDRESS,
                 Protocols.AAVE_V3,
@@ -131,7 +131,7 @@ describe("DebtSwap should switch", function () {
             await compoundHelper.borrow(USDC_ADDRESS);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDS_ADDRESS,
                 Protocols.COMPOUND,
@@ -147,7 +147,7 @@ describe("DebtSwap should switch", function () {
             await morphoHelper.borrow(morphoMarket1Id);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDC_ADDRESS,
                 Protocols.MORPHO,
@@ -165,7 +165,7 @@ describe("DebtSwap should switch", function () {
             await morphoHelper.borrow(morphoMarket2Id);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDC_ADDRESS,
                 Protocols.MORPHO,
@@ -183,7 +183,7 @@ describe("DebtSwap should switch", function () {
             await morphoHelper.borrow(morphoMarket1Id);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 MAI_ADDRESS,
                 Protocols.MORPHO,
@@ -223,7 +223,7 @@ describe("DebtSwap should switch", function () {
             await aaveV3Helper.supply(cbETH_ADDRESS);
             await aaveV3Helper.borrow(USDC_ADDRESS);
 
-            await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
         });
 
         it("should switch USDC debt from Aave to Compound with protocol fee", async function () {
@@ -239,7 +239,7 @@ describe("DebtSwap should switch", function () {
             await aaveV3Helper.supply(cbETH_ADDRESS);
             await aaveV3Helper.borrow(USDC_ADDRESS);
 
-            await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
         });
 
         it("should switch USDC debt to MAI with protocol fee - tests decimal mismatch", async function () {
@@ -264,7 +264,7 @@ describe("DebtSwap should switch", function () {
 
             // Execute debt swap from USDC (6 decimals) to MAI (18 decimals)
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 MAI_ADDRESS,
                 Protocols.MORPHO,
@@ -292,14 +292,14 @@ describe("DebtSwap should switch", function () {
             await compoundHelper.supply(USDC_COMET_ADDRESS, cbETH_ADDRESS);
             await compoundHelper.borrow(USDC_ADDRESS);
 
-            await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.COMPOUND, Protocols.AAVE_V3);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.COMPOUND, Protocols.AAVE_V3);
         });
 
         it.skip("USDC debt on Aave to USDbC on Compound", async function () {
             await aaveV3Helper.supply(cbETH_ADDRESS);
             await aaveV3Helper.borrow(USDC_ADDRESS);
 
-            await executeDebtSwap(USDC_hyUSD_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
         });
 
         it("USDbC debt on Aave to USDC on Compound", async function () {
@@ -321,7 +321,7 @@ describe("DebtSwap should switch", function () {
             await aaveV3Helper.borrow(USDC_ADDRESS);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDC_ADDRESS,
                 Protocols.AAVE_V3,
@@ -338,7 +338,7 @@ describe("DebtSwap should switch", function () {
             await morphoHelper.borrow(morphoMarket1Id);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDC_ADDRESS,
                 Protocols.MORPHO,
@@ -355,7 +355,7 @@ describe("DebtSwap should switch", function () {
             await morphoHelper.borrow(morphoMarket1Id);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDC_ADDRESS,
                 Protocols.MORPHO,
@@ -373,7 +373,7 @@ describe("DebtSwap should switch", function () {
             await compoundHelper.borrow(USDC_ADDRESS);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDC_ADDRESS,
                 Protocols.COMPOUND,
@@ -390,7 +390,7 @@ describe("DebtSwap should switch", function () {
             await morphoHelper.borrow(morphoMarket1Id);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDbC_ADDRESS,
                 Protocols.MORPHO,
@@ -425,7 +425,7 @@ describe("DebtSwap should switch", function () {
             console.log("cbETH collateralAmountInCompoundBefore:", ethers.formatEther(cbETHAmountInCompoundBefore));
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDC_ADDRESS,
                 Protocols.AAVE_V3,
@@ -452,7 +452,7 @@ describe("DebtSwap should switch", function () {
             await compoundHelper.borrow(USDC_ADDRESS);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDbC_ADDRESS,
                 Protocols.COMPOUND,
@@ -494,7 +494,7 @@ describe("DebtSwap should switch", function () {
 
             await expect(
                 executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     USDC_ADDRESS,
                     USDbC_ADDRESS,
                     Protocols.AAVE_V3,
@@ -540,7 +540,7 @@ describe("DebtSwap should switch", function () {
 
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     9,
                     USDC_ADDRESS,
@@ -560,7 +560,7 @@ describe("DebtSwap should switch", function () {
 
             await expect(
                 executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     USDC_ADDRESS,
                     USDbC_ADDRESS,
                     Protocols.AAVE_V3,
@@ -589,7 +589,7 @@ describe("DebtSwap should switch", function () {
 
             await expect(
                 myDebtSwapMalicious.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -623,7 +623,7 @@ describe("DebtSwap should switch", function () {
         it("if fromTokenAddress is zero address", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     zeroAddress,
@@ -640,7 +640,7 @@ describe("DebtSwap should switch", function () {
         it("if toTokenAddress is zero address", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -657,7 +657,7 @@ describe("DebtSwap should switch", function () {
         it("if collateralArray is empty", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -674,7 +674,7 @@ describe("DebtSwap should switch", function () {
         it("if collateralArray contains zero address", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -691,7 +691,7 @@ describe("DebtSwap should switch", function () {
         it("if collateralArray contains zero amount", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -708,7 +708,7 @@ describe("DebtSwap should switch", function () {
         it("if debtAmount is zero", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -725,7 +725,7 @@ describe("DebtSwap should switch", function () {
         it("if fromProtocol is invalid (out of range)", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     99, // Invalid protocol number
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -742,7 +742,7 @@ describe("DebtSwap should switch", function () {
         it("if toProtocol is invalid (out of range)", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     99, // Invalid protocol number
                     USDC_ADDRESS,
@@ -759,7 +759,7 @@ describe("DebtSwap should switch", function () {
         it("if fromTokenAddress is not a valid ERC20 token", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     "0x1234567890123456789012345678901234567890", // Invalid token address
@@ -776,7 +776,7 @@ describe("DebtSwap should switch", function () {
         it("if toTokenAddress is not a valid ERC20 token", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -793,7 +793,7 @@ describe("DebtSwap should switch", function () {
         it("if collateralArray asset is not a valid ERC20 token", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -815,7 +815,7 @@ describe("DebtSwap should switch", function () {
         it("if paraswapData has excessively large srcAmount", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -832,7 +832,7 @@ describe("DebtSwap should switch", function () {
         it("if collateralArray has mixed valid and invalid assets", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -852,7 +852,7 @@ describe("DebtSwap should switch", function () {
         it("if collateralArray has excessively large amount", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -873,7 +873,7 @@ describe("DebtSwap should switch", function () {
 
             await expect(
                 contractByFreshSigner.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     USDC_ADDRESS,
@@ -890,7 +890,7 @@ describe("DebtSwap should switch", function () {
         it("if same fromProtocol and toProtocol but different invalid tokens", async function () {
             await expect(
                 myContract.executeDebtSwap(
-                    USDC_hyUSD_POOL,
+                    ETH_USDC_POOL,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     "0x1111111111111111111111111111111111111111",
@@ -911,7 +911,7 @@ describe("DebtSwap should switch", function () {
             await aaveV3Helper.borrow(USDC_ADDRESS);
 
             await executeDebtSwap(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 USDC_ADDRESS,
                 USDbC_ADDRESS,
                 Protocols.AAVE_V3,

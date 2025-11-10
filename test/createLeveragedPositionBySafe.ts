@@ -18,7 +18,7 @@ import {
     cbETH_ETH_POOL,
     cbBTC_ADDRESS,
     cbBTC_USDC_POOL,
-    USDC_hyUSD_POOL,
+    ETH_USDC_POOL,
     ETH_USDC_POOL,
     ETH_USDbC_POOL,
 } from "./constants";
@@ -392,7 +392,7 @@ describe("Create leveraged position by Safe", function () {
 
             // Call closeLeveragedPosition from operator wallet
             const tx = await contractByOperator.closeLeveragedPosition(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 Protocols.FLUID,
                 cbETH_ADDRESS,
                 collateralAmountBefore,
@@ -420,7 +420,7 @@ describe("Create leveraged position by Safe", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.MOONWELL);
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.MOONWELL);
         });
 
         it("create and close position with WETH collateral", async function () {
@@ -428,7 +428,7 @@ describe("Create leveraged position by Safe", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.MOONWELL, WETH_ADDRESS, USDC_ADDRESS);
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.MOONWELL, WETH_ADDRESS, USDC_ADDRESS);
         });
 
         it("with cbBTC collateral", async function () {
@@ -465,7 +465,7 @@ describe("Create leveraged position by Safe", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.FLUID, WETH_ADDRESS, USDC_ADDRESS);
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.FLUID, WETH_ADDRESS, USDC_ADDRESS);
         });
 
         it("create and close position with cbETH collateral", async function () {
@@ -473,7 +473,7 @@ describe("Create leveraged position by Safe", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(USDC_hyUSD_POOL, Protocols.FLUID);
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.FLUID);
         });
 
         it("with cbBTC collateral", async function () {
