@@ -442,16 +442,16 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Pauses the contract, preventing debt swap operations
-     * @dev Only callable by the pauser or owner
+     * @notice Pauses the contract
+     * @dev Only callable by the pauser
      */
     function pause() external onlyPauser {
         _pause();
     }
 
     /**
-     * @notice Unpauses the contract, allowing debt swap operations
-     * @dev Only callable by the pauser or owner
+     * @notice Unpauses the contract
+     * @dev Only callable by the pauser
      */
     function unpause() external onlyPauser {
         _unpause();

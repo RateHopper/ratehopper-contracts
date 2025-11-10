@@ -58,12 +58,16 @@ describe("Safe wallet should debtSwap", function () {
     this.timeout(300000); // 5 minutes
 
     const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, ethers.provider);
-    const operatorWallet = new ethers.Wallet(process.env.OPERATOR_PRIVATE_KEY!, ethers.provider);
+    let operator: HardhatEthersSigner;
     let safeWallet;
     let safeModuleContract;
     let safeModuleAddress;
 
     this.beforeEach(async () => {
+        // Get the operator (third signer)
+        const signers = await ethers.getSigners();
+        operator = signers[2];
+
         safeWallet = await Safe.init({
             provider: eip1193Provider,
             signer: process.env.PRIVATE_KEY,
@@ -810,13 +814,13 @@ describe("Safe wallet should debtSwap", function () {
             debtAmountOverride,
         } = options;
 
-        // Step 0: Fund the operator wallet with ETH for gas
+        // Step 0: Fund the operator with ETH for gas
         const fundTx = await signer.sendTransaction({
-            to: operatorWallet.address,
+            to: operator.address,
             value: ethers.parseEther("0.01"),
         });
         await fundTx.wait();
-        console.log("Operator wallet funded with ETH");
+        console.log("Operator funded with ETH");
 
         // Step 1: Create a position (supply collateral and borrow)
         await setupPosition();
@@ -845,15 +849,15 @@ describe("Safe wallet should debtSwap", function () {
         // Step 6: Set operator in SafeDebtManager
         const signers = await ethers.getSigners();
         const moduleContractByOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
-        const setOperatorTx = await moduleContractByOwner.setoperator(operatorWallet.address);
+        const setOperatorTx = await moduleContractByOwner.setoperator(operator.address);
         await setOperatorTx.wait();
-        console.log("Operator set to:", operatorWallet.address);
+        console.log("Operator set to:", operator.address);
 
         // Step 7: Get extra data for protocol-specific parameters
         const extraData = await getExtraData();
 
-        // Step 8: Call exit function using operator wallet
-        const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operatorWallet);
+        // Step 8: Call exit function using operator
+        const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
 
         // Use override amount if provided, otherwise use actual debt amount with 1% buffer
         const debtAmountToUse = debtAmountOverride !== undefined ? debtAmountOverride : (debtBefore * 101n) / 100n;
@@ -1194,7 +1198,7 @@ describe("Safe wallet should debtSwap", function () {
         });
     });
 
-    describe.only("Protocol Enable/Disable", function () {
+    describe("Protocol Enable/Disable", function () {
         it("Should revert when switchFrom is disabled for from protocol", async function () {
             await supplyAndBorrowOnFluid();
 

@@ -190,10 +190,11 @@ export async function deployLeveragedPositionContractFixture() {
 
     await leveragedPosition.setParaswapAddresses(PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS);
 
-    // Set operator from OPERATOR_PRIVATE_KEY environment variable
-    const operatorWallet = new ethers.Wallet(process.env.OPERATOR_PRIVATE_KEY!, ethers.provider);
-    await leveragedPosition.setOperator(operatorWallet.address);
-    console.log("Operator set to:", operatorWallet.address);
+    // Set operator from third signer
+    const signers = await ethers.getSigners();
+    const operator = signers[2];
+    await leveragedPosition.setOperator(operator.address);
+    console.log("Operator set to:", operator.address);
 
     return leveragedPosition;
 }

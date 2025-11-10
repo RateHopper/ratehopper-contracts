@@ -47,11 +47,15 @@ describe("Create leveraged position by Safe", function () {
     const cbBTCPrincipleAmount = 0.00006;
 
     let safeWallet;
-    const operatorWallet = new ethers.Wallet(process.env.OPERATOR_PRIVATE_KEY!, ethers.provider);
+    let operator: HardhatEthersSigner;
     const safeOwnerWallet = new ethers.Wallet(process.env.PRIVATE_KEY!, ethers.provider);
 
     this.beforeEach(async () => {
         impersonatedSigner = await ethers.getImpersonatedSigner(TEST_ADDRESS);
+
+        // Get the operator (third signer)
+        const signers = await ethers.getSigners();
+        operator = signers[2];
 
         const leveragedPosition = await loadFixture(deployLeveragedPositionContractFixture);
         deployedContractAddress = await leveragedPosition.getAddress();
@@ -344,11 +348,12 @@ describe("Create leveraged position by Safe", function () {
             // await time.increaseTo((await time.latest()) + 3600); // 1 hour
             await time.increaseTo((await time.latest()) + 600); // 10 minutes
 
-            console.log("Operator wallet address:", operatorWallet.address);
+            console.log("Operator wallet address:", operator.address);
 
             // Fund operator wallet with ETH for gas fees using hardhat default account
+            const signers = await ethers.getSigners();
             const fundTx = await signers[0].sendTransaction({
-                to: operatorWallet.address,
+                to: operator.address,
                 value: ethers.parseEther("0.2"), // Send 0.2 ETH for gas fees
             });
             await fundTx.wait();
@@ -383,11 +388,11 @@ describe("Create leveraged position by Safe", function () {
                 debtAmountBefore,
             );
 
-            // Connect contract to operator wallet
+            // Connect contract to operator
             const contractByOperator = await ethers.getContractAt(
                 "LeveragedPosition",
                 deployedContractAddress,
-                operatorWallet,
+                operator,
             );
 
             // Call closeLeveragedPosition from operator wallet

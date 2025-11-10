@@ -40,18 +40,18 @@ const config: HardhatUserConfig = {
                 chainId: 8453,
                 urls: {
                     apiURL: "https://api.etherscan.io/v2/api?chainid=8453",
-                    browserURL: "https://basescan.org"
-                }
+                    browserURL: "https://basescan.org",
+                },
             },
             {
                 network: "baseSepolia",
                 chainId: 84532,
                 urls: {
                     apiURL: "https://api.etherscan.io/v2/api?chainid=84532",
-                    browserURL: "https://sepolia.basescan.org"
-                }
-            }
-        ]
+                    browserURL: "https://sepolia.basescan.org",
+                },
+            },
+        ],
     },
     mocha: {
         timeout: 300000, // 5 minutes for memory-intensive tests
@@ -67,19 +67,19 @@ const config: HardhatUserConfig = {
             url: baseUrl,
             chainId: 8453,
             timeout: 10_000_000,
-            accounts: [process.env.PRIVATE_KEY!],
+            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
             gasPrice: "auto",
             gasMultiplier: 1.2,
         },
         baseSepolia: {
             url: "https://sepolia.base.org",
             chainId: 84532,
-            accounts: [process.env.PRIVATE_KEY!],
+            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
         },
         sepolia: {
             url: "https://eth-sepolia.public.blastapi.io",
             chainId: 11155111,
-            accounts: [process.env.PRIVATE_KEY!],
+            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
         },
         localhost: {
             url: "http://localhost:8545",
@@ -96,7 +96,7 @@ const config: HardhatUserConfig = {
             },
             forking: {
                 url: baseUrl,
-                // blockNumber: 37465161,
+                // blockNumber: 37856369,
             },
         },
     },

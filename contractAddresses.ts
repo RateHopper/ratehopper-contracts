@@ -18,6 +18,39 @@ import {
     AERO_ADDRESS,
 } from "./test/constants";
 
+// Uniswap V3
+export const UNISWAP_V3_FACTORY_ADRESS = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD";
+
+// Paraswap
+export const PARASWAP_ROUTER_ADDRESS = "0x59C7C832e96D2568bea6db468C1aAdcbbDa08A52";
+export const PARASWAP_TOKEN_TRANSFER_PROXY_ADDRESS = "0x93aAAe79a53759cD164340E4C8766E4Db5331cD7";
+export const PARASWAP_V6_CONTRACT_ADDRESS = "0x6a000f20005980200259b80c5102003040001068";
+
+// Fluid
+export const FLUID_VAULT_RESOLVER = "0x1500d70d8551b828f8fb56fa739c977d113444df";
+
+// Aave V3
+export const AAVE_V3_POOL_ADDRESS = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5";
+export const AAVE_V3_DATA_PROVIDER_ADDRESS = "0xd82a47fdebB5bf5329b09441C3DaB4b5df2153Ad";
+
+// Morpho
+export const MORPHO_ADDRESS = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
+
+// Moonwell (Comptroller)
+export const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
+
+// Team owner wallet (for ownership transfer after deployment)
+export const TEAM_OWNER_WALLET = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
+
+// Protocol enum
+export enum Protocol {
+    AAVE_V3,
+    COMPOUND,
+    MORPHO,
+    FLUID,
+    MOONWELL,
+}
+
 export const USDC_COMET_ADDRESS = "0xb125E6687d4313864e53df431d5425969c15Eb2F";
 export const USDbC_COMET_ADDRESS = "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf";
 export const WETH_COMET_ADDRESS = "0x46e6b214b524310239732D51387075E0e70970bf";

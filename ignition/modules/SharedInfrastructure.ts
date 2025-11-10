@@ -1,7 +1,14 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
-import { ProtocolRegistryModule } from "./deployRegistry";
-import { UNISWAP_V3_FACTORY_ADRESS, FLUID_VAULT_RESOLVER } from "./constants";
-import { getCTokenMappingArrays, getMTokenMappingArrays } from "../../contractAddresses";
+import {
+    getCTokenMappingArrays,
+    getMTokenMappingArrays,
+    UNISWAP_V3_FACTORY_ADRESS,
+    FLUID_VAULT_RESOLVER,
+    AAVE_V3_POOL_ADDRESS,
+    AAVE_V3_DATA_PROVIDER_ADDRESS,
+    MORPHO_ADDRESS,
+    COMPTROLLER_ADDRESS,
+} from "../../contractAddresses";
 import {
     WETH_ADDRESS,
     USDC_ADDRESS,
@@ -25,16 +32,20 @@ import {
     VIRTUAL_ADDRESS,
 } from "../../test/constants";
 
-// Protocol constants
-const AAVE_V3_POOL_ADDRESS = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5";
-const AAVE_V3_DATA_PROVIDER_ADDRESS = "0xd82a47fdebB5bf5329b09441C3DaB4b5df2153Ad";
-const MORPHO_ADDRESS = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
-const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
+// ProtocolRegistry module
+const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
+    const wethAddress = m.getParameter("wethAddress", WETH_ADDRESS);
+    const registry = m.contract("ProtocolRegistry", [wethAddress]);
+    return { registry };
+});
 
 /**
  * Comprehensive module that deploys the entire shared infrastructure:
  * - ProtocolRegistry
  * - All protocol handlers (Aave, Compound, Morpho, Fluid, Moonwell)
+ *
+ * Environment Variables Required:
+ * - TEAM_OWNER_WALLET: Address to transfer ProtocolRegistry ownership to after deployment
  *
  * Usage:
  * npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base --verify
@@ -123,8 +134,13 @@ export default buildModule("SharedInfrastructure", (m) => {
         LBTC_ADDRESS,
         VIRTUAL_ADDRESS,
     ];
-    m.call(registry, "addToWhitelistBatch", [tokens], {
+    const addToWhitelist = m.call(registry, "addToWhitelistBatch", [tokens], {
         after: [setFluidResolver]
+    });
+
+    // Transfer ownership to team owner wallet (after all setup is complete)
+    m.call(registry, "transferOwnership", [process.env.TEAM_OWNER_WALLET!], {
+        after: [addToWhitelist]
     });
 
     return {
