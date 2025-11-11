@@ -54,11 +54,7 @@ export const eip1193Provider: Eip1193Provider = {
 export const safeAddress = "0x2f9054Eb6209bb5B94399115117044E4f150B2De";
 
 // Export helper functions for reuse in other test files
-export function createSafeTestHelpers(context: {
-    signer: ethers.Wallet;
-    safeWallet: any;
-    safeModuleAddress: string;
-}) {
+export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWallet: any; safeModuleAddress: string }) {
     const { signer, safeWallet, safeModuleAddress } = context;
 
     async function sendCollateralToSafe(tokenAddress = cbETH_ADDRESS, protocol?: Protocols) {
@@ -285,10 +281,11 @@ describe("Safe wallet should debtSwap", function () {
     });
 
     // Use helper functions from the factory
-    const supplyAndBorrow = (...args: Parameters<ReturnType<typeof createSafeTestHelpers>['supplyAndBorrow']>) =>
+    const supplyAndBorrow = (...args: Parameters<ReturnType<typeof createSafeTestHelpers>["supplyAndBorrow"]>) =>
         helpers.supplyAndBorrow(...args);
-    const supplyAndBorrowOnFluid = (...args: Parameters<ReturnType<typeof createSafeTestHelpers>['supplyAndBorrowOnFluid']>) =>
-        helpers.supplyAndBorrowOnFluid(...args);
+    const supplyAndBorrowOnFluid = (
+        ...args: Parameters<ReturnType<typeof createSafeTestHelpers>["supplyAndBorrowOnFluid"]>
+    ) => helpers.supplyAndBorrowOnFluid(...args);
     describe("switch In", function () {
         it("Aave from USDC to USDbC", async function () {
             await supplyAndBorrow(Protocols.AAVE_V3);

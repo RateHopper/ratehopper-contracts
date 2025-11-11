@@ -21,7 +21,6 @@ import {
     cbBTC_ADDRESS,
     cbBTC_USDC_POOL,
     ETH_USDC_POOL,
-    ETH_USDC_POOL,
 } from "./constants";
 
 import { AaveV3Helper } from "./protocols/aaveV3";

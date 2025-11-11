@@ -5,11 +5,10 @@ import "dotenv/config";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { LeveragedPosition } from "../typechain-types";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { approve, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
-import Safe, { Eip1193Provider, RequestArguments } from "@safe-global/protocol-kit";
+import { getDecimals, getParaswapData, protocolHelperMap } from "./utils";
+import Safe from "@safe-global/protocol-kit";
 import {
     USDC_ADDRESS,
-    USDbC_ADDRESS,
     cbETH_ADDRESS,
     TEST_ADDRESS,
     Protocols,
@@ -23,16 +22,10 @@ import {
 } from "./constants";
 import { MaxUint256 } from "ethers";
 import { deployLeveragedPositionContractFixture } from "./deployUtils";
-import { mcbETH, mContractAddressMap, MoonwellHelper } from "./protocols/moonwell";
+import { mContractAddressMap } from "./protocols/moonwell";
 import { eip1193Provider, safeAddress } from "./debtSwapBySafe";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import {
-    FLUID_cbBTC_sUSDS_VAULT,
-    FLUID_cbBTC_USDC_VAULT,
-    FLUID_cbETH_USDC_VAULT,
-    fluidVaultMap,
-    FluidHelper,
-} from "./protocols/fluid";
+import { fluidVaultMap, FluidHelper } from "./protocols/fluid";
 
 describe("Create leveraged position by Safe", function () {
     this.timeout(3000000); // 50 minutes
@@ -55,6 +48,14 @@ describe("Create leveraged position by Safe", function () {
         // Get the operator (third signer)
         const signers = await ethers.getSigners();
         operator = signers[2];
+
+        // Fund impersonatedSigner with ETH for gas fees
+        const fundImpersonatedTx = await signers[0].sendTransaction({
+            to: impersonatedSigner.address,
+            value: ethers.parseEther("1"), // Send 1 ETH for gas fees
+        });
+        await fundImpersonatedTx.wait();
+        console.log("Funded impersonatedSigner with 1 ETH for gas fees");
 
         const leveragedPosition = await loadFixture(deployLeveragedPositionContractFixture);
         deployedContractAddress = await leveragedPosition.getAddress();
