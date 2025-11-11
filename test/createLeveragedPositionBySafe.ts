@@ -19,7 +19,6 @@ import {
     cbBTC_ADDRESS,
     cbBTC_USDC_POOL,
     ETH_USDC_POOL,
-    ETH_USDC_POOL,
     ETH_USDbC_POOL,
 } from "./constants";
 import { MaxUint256 } from "ethers";
@@ -351,7 +350,6 @@ describe("Create leveraged position by Safe", function () {
             console.log("Operator wallet address:", operator.address);
 
             // Fund operator wallet with ETH for gas fees using hardhat default account
-            const signers = await ethers.getSigners();
             const fundTx = await signers[0].sendTransaction({
                 to: operator.address,
                 value: ethers.parseEther("0.2"), // Send 0.2 ETH for gas fees
