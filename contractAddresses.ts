@@ -40,7 +40,7 @@ export const MORPHO_ADDRESS = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
 export const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
 
 // Team owner wallet (for ownership transfer after deployment)
-export const TEAM_OWNER_WALLET = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
+export const ADMIN_WALLET = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
 
 // Protocol enum
 export enum Protocol {

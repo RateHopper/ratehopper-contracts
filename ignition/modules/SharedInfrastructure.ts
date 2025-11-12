@@ -45,7 +45,7 @@ const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
  * - All protocol handlers (Aave, Compound, Morpho, Fluid, Moonwell)
  *
  * Environment Variables Required:
- * - TEAM_OWNER_WALLET: Address to transfer ProtocolRegistry ownership to after deployment
+ * - ADMIN_WALLET: Address to transfer ProtocolRegistry ownership to after deployment
  *
  * Usage:
  * npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base --verify
@@ -63,52 +63,38 @@ export default buildModule("SharedInfrastructure", (m) => {
         registry,
     ]);
 
-    const compoundHandler = m.contract("CompoundHandler", [
-        registry,
-        UNISWAP_V3_FACTORY_ADRESS
-    ], {
-        after: [aaveV3Handler]
+    const compoundHandler = m.contract("CompoundHandler", [registry, UNISWAP_V3_FACTORY_ADRESS], {
+        after: [aaveV3Handler],
     });
 
-    const morphoHandler = m.contract("MorphoHandler", [
-        MORPHO_ADDRESS,
-        UNISWAP_V3_FACTORY_ADRESS,
-        registry
-    ], {
-        after: [compoundHandler]
+    const morphoHandler = m.contract("MorphoHandler", [MORPHO_ADDRESS, UNISWAP_V3_FACTORY_ADRESS, registry], {
+        after: [compoundHandler],
     });
 
-    const fluidSafeHandler = m.contract("FluidSafeHandler", [
-        UNISWAP_V3_FACTORY_ADRESS,
-        registry
-    ], {
-        after: [morphoHandler]
+    const fluidSafeHandler = m.contract("FluidSafeHandler", [UNISWAP_V3_FACTORY_ADRESS, registry], {
+        after: [morphoHandler],
     });
 
-    const moonwellHandler = m.contract("MoonwellHandler", [
-        COMPTROLLER_ADDRESS,
-        UNISWAP_V3_FACTORY_ADRESS,
-        registry
-    ], {
-        after: [fluidSafeHandler]
+    const moonwellHandler = m.contract("MoonwellHandler", [COMPTROLLER_ADDRESS, UNISWAP_V3_FACTORY_ADRESS, registry], {
+        after: [fluidSafeHandler],
     });
 
     // Configure registry after all handlers are deployed
     // Set up Moonwell token mappings (first call)
     const [mTokens, mContracts] = getMTokenMappingArrays();
     const setMoonwellMappings = m.call(registry, "batchSetTokenMContracts", [mTokens, mContracts], {
-        after: [moonwellHandler]
+        after: [moonwellHandler],
     });
 
     // Set up Compound token mappings (after Moonwell mappings)
     const [cTokens, cContracts] = getCTokenMappingArrays();
     const setCompoundMappings = m.call(registry, "batchSetTokenCContracts", [cTokens, cContracts], {
-        after: [setMoonwellMappings]
+        after: [setMoonwellMappings],
     });
 
     // Set Fluid vault resolver (after Compound mappings)
     const setFluidResolver = m.call(registry, "setFluidVaultResolver", [FLUID_VAULT_RESOLVER], {
-        after: [setCompoundMappings]
+        after: [setCompoundMappings],
     });
 
     // Add tokens to whitelist (after Fluid resolver)
@@ -135,12 +121,12 @@ export default buildModule("SharedInfrastructure", (m) => {
         VIRTUAL_ADDRESS,
     ];
     const addToWhitelist = m.call(registry, "addToWhitelistBatch", [tokens], {
-        after: [setFluidResolver]
+        after: [setFluidResolver],
     });
 
     // Transfer ownership to team owner wallet (after all setup is complete)
-    m.call(registry, "transferOwnership", [process.env.TEAM_OWNER_WALLET!], {
-        after: [addToWhitelist]
+    m.call(registry, "transferOwnership", [process.env.ADMIN_WALLET!], {
+        after: [addToWhitelist],
     });
 
     return {

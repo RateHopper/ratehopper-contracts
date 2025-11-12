@@ -147,15 +147,4 @@ contract ProtocolRegistry is Ownable {
         fluidVaultResolver = _fluidVaultResolver;
         emit FluidVaultResolverUpdated(oldResolver, _fluidVaultResolver);
     }
-
-    /**
-     * @dev Set the operator address (SafeDebtManager)
-     * @param _operator The new operator address
-     */
-    function setOperator(address _operator) external onlyOwner {
-        if (_operator == address(0)) revert ZeroAddress();
-        address oldOperator = operator;
-        operator = _operator;
-        emit OperatorUpdated(oldOperator, _operator);
-    }
 }

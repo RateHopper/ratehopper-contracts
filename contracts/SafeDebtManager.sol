@@ -21,7 +21,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     using GPv2SafeERC20 for IERC20;
     uint8 public protocolFee;
     address public feeBeneficiary;
-    address public operator;
+    address public safeOperator;
     address public pauser;
     address public uniswapV3Factory;
     address public paraswapTokenTransferProxy;
@@ -69,11 +69,11 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
     event EmergencyWithdrawn(address indexed token, uint256 amount, address indexed to);
 
-    modifier onlyOwnerOroperator(address onBehalfOf) {
+    modifier onlyOwnerOrOperator(address onBehalfOf) {
         require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
         
-        // Check if caller is operator or the onBehalfOf address itself or an owner of the Safe
-        require(msg.sender == operator || msg.sender == onBehalfOf || ISafe(onBehalfOf).isOwner(msg.sender), "Caller is not authorized");
+        // Check if caller is safeOperator or the onBehalfOf address itself or an owner of the Safe
+        require(msg.sender == safeOperator || msg.sender == onBehalfOf || ISafe(onBehalfOf).isOwner(msg.sender), "Caller is not authorized");
         _;
     }
 
@@ -97,7 +97,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
             protocolEnabledForSwitchTo[protocols[i]] = true; // Enable switchTo by default
         }
 
-        operator = msg.sender;
+        safeOperator = msg.sender;
         pauser = _pauser;
         uniswapV3Factory = _uniswapV3Factory;
     }
@@ -116,9 +116,9 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         emit FeeBeneficiarySet(oldBeneficiary, _feeBeneficiary);
     }
 
-    function setoperator(address _operator) public onlyOwner {
-        require(_operator != address(0), "_operator cannot be zero address");
-        operator = _operator;
+    function setsafeOperator(address _safeOperator) public onlyOwner {
+        require(_safeOperator != address(0), "_safeOperator cannot be zero address");
+        safeOperator = _safeOperator;
     }
 
     function setParaswapAddresses(address _paraswapTokenTransferProxy, address _paraswapRouter) external onlyOwner {
@@ -151,7 +151,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         address _onBehalfOf,
         bytes[2] calldata _extraData,
         ParaswapParams calldata _paraswapParams
-    ) public onlyOwnerOroperator(_onBehalfOf) whenNotPaused {
+    ) public onlyOwnerOrOperator(_onBehalfOf) whenNotPaused {
         require(_fromDebtAsset != address(0), "Invalid from asset address");
         require(_toDebtAsset != address(0), "Invalid to asset address");
         require(_amount > 0, "_amount cannot be zero");
@@ -369,7 +369,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         address _onBehalfOf,
         bytes calldata _extraData,
         bool _withdrawCollateral
-    ) external onlyOwnerOroperator(_onBehalfOf) whenNotPaused {
+    ) external onlyOwnerOrOperator(_onBehalfOf) whenNotPaused {
         require(_debtAsset != address(0), "Invalid debt asset address");
         require(_debtAmount > 0, "Debt amount cannot be zero");
         if (_withdrawCollateral) {
