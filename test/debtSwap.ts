@@ -943,7 +943,7 @@ describe("DebtSwap should switch", function () {
     });
 
     it.skip("test with real position 2", async function () {
-        const signer = await ethers.getImpersonatedSigner("0x9e073c36f63bf1c611026fda1ff6007a81932231");
+        const signer = await ethers.getImpersonatedSigner(process.env.PAUSER_ADDRESS!);
 
         // Fund the impersonated account with ETH for gas fees
         const [deployer] = await ethers.getSigners();

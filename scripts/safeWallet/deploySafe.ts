@@ -8,8 +8,7 @@ import { TEST_ADDRESS } from "../../test/constants";
 
 async function main() {
     const safeAccountConfig: SafeAccountConfig = {
-        // owners: [TEST_ADDRESS],
-        owners: ["0x9E073c36F63BF1c611026fdA1fF6007A81932231"],
+        owners: [process.env.PAUSER_ADDRESS!],
         threshold: 1,
     };
 
