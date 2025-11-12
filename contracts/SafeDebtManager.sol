@@ -10,6 +10,7 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 import "./Types.sol";
 import "./interfaces/safe/ISafe.sol";
 import {IProtocolHandler} from "./interfaces/IProtocolHandler.sol";
+import "./ProtocolRegistry.sol";
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -24,8 +25,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     address public safeOperator;
     address public pauser;
     address public uniswapV3Factory;
-    address public paraswapTokenTransferProxy;
-    address public paraswapRouter;
+    ProtocolRegistry public immutable registry;
     mapping(Protocol => address) public protocolHandlers;
     mapping(Protocol => bool) public protocolEnabledForSwitchFrom;
     mapping(Protocol => bool) public protocolEnabledForSwitchTo;
@@ -84,11 +84,13 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
     constructor(
         address _uniswapV3Factory,
+        address _registry,
         Protocol[] memory protocols,
         address[] memory handlers,
         address _pauser
     ) Ownable(msg.sender) {
         require(protocols.length == handlers.length, "Protocols and handlers length mismatch");
+        require(_registry != address(0), "Registry cannot be zero address");
 
         for (uint256 i = 0; i < protocols.length; i++) {
             require(handlers[i] != address(0), "Invalid handler address");
@@ -100,6 +102,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         safeOperator = msg.sender;
         pauser = _pauser;
         uniswapV3Factory = _uniswapV3Factory;
+        registry = ProtocolRegistry(_registry);
     }
 
     function setProtocolFee(uint8 _fee) public onlyOwner {
@@ -116,16 +119,9 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         emit FeeBeneficiarySet(oldBeneficiary, _feeBeneficiary);
     }
 
-    function setsafeOperator(address _safeOperator) public onlyOwner {
+    function setOperator(address _safeOperator) public onlyOwner {
         require(_safeOperator != address(0), "_safeOperator cannot be zero address");
         safeOperator = _safeOperator;
-    }
-
-    function setParaswapAddresses(address _paraswapTokenTransferProxy, address _paraswapRouter) external onlyOwner {
-        require(_paraswapTokenTransferProxy != address(0), "paraswapTokenTransferProxy cannot be zero address");
-        require(_paraswapRouter != address(0), "paraswapRouter cannot be zero address");
-        paraswapTokenTransferProxy = _paraswapTokenTransferProxy;
-        paraswapRouter = _paraswapRouter;
     }
 
     function setProtocolEnabledForSwitchFrom(Protocol _protocol, bool _enabled) external onlyPauser {
@@ -339,14 +335,14 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         uint256 minAmountOut,
         bytes memory _txParams
     ) internal {
-        TransferHelper.safeApprove(srcAsset, paraswapTokenTransferProxy, amount);
-        (bool success, ) = paraswapRouter.call(_txParams);
+        TransferHelper.safeApprove(srcAsset, registry.paraswapTokenTransferProxy(), amount);
+        (bool success, ) = registry.paraswapRouter().call(_txParams);
         require(success, "Token swap by paraSwap failed");
 
         require(IERC20(dstAsset).balanceOf(address(this)) >= minAmountOut, "Insufficient token balance after swap");
 
         //remove approval
-        TransferHelper.safeApprove(srcAsset, paraswapTokenTransferProxy, 0);
+        TransferHelper.safeApprove(srcAsset, registry.paraswapTokenTransferProxy(), 0);
     }
 
 

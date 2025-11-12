@@ -32,6 +32,10 @@ contract ProtocolRegistry is Ownable {
     /// @notice The operator address (SafeDebtManager) that can call functions via delegatecall
     address public operator;
 
+    // Paraswap addresses
+    address public paraswapTokenTransferProxy;
+    address public paraswapRouter;
+
     error ZeroAddress();
     error ArrayLengthMismatch();
 
@@ -46,6 +50,9 @@ contract ProtocolRegistry is Ownable {
 
     /// @notice Event emitted when the operator is updated
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
+
+    /// @notice Event emitted when Paraswap addresses are updated
+    event ParaswapAddressesUpdated(address indexed tokenTransferProxy, address indexed router);
 
     function setTokenMContract(address token, address mContract) external onlyOwner {
         if (token == address(0)) revert ZeroAddress();
@@ -146,5 +153,18 @@ contract ProtocolRegistry is Ownable {
         address oldResolver = fluidVaultResolver;
         fluidVaultResolver = _fluidVaultResolver;
         emit FluidVaultResolverUpdated(oldResolver, _fluidVaultResolver);
+    }
+
+    /**
+     * @dev Set the Paraswap addresses
+     * @param _paraswapTokenTransferProxy The Paraswap token transfer proxy address
+     * @param _paraswapRouter The Paraswap router address
+     */
+    function setParaswapAddresses(address _paraswapTokenTransferProxy, address _paraswapRouter) external onlyOwner {
+        if (_paraswapTokenTransferProxy == address(0)) revert ZeroAddress();
+        if (_paraswapRouter == address(0)) revert ZeroAddress();
+        paraswapTokenTransferProxy = _paraswapTokenTransferProxy;
+        paraswapRouter = _paraswapRouter;
+        emit ParaswapAddressesUpdated(_paraswapTokenTransferProxy, _paraswapRouter);
     }
 }
