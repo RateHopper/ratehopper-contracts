@@ -45,7 +45,7 @@ const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
  * - All protocol handlers (Aave, Compound, Morpho, Fluid, Moonwell)
  *
  * Environment Variables Required:
- * - ADMIN_WALLET: Address to transfer ProtocolRegistry ownership to after deployment
+ * - ADMIN_ADDRESS: Address to transfer ProtocolRegistry ownership to after deployment
  *
  * Usage:
  * npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base --verify
@@ -125,7 +125,7 @@ export default buildModule("SharedInfrastructure", (m) => {
     });
 
     // Transfer ownership to team owner wallet (after all setup is complete)
-    m.call(registry, "transferOwnership", [process.env.ADMIN_WALLET!], {
+    m.call(registry, "transferOwnership", [process.env.ADMIN_ADDRESS!], {
         after: [addToWhitelist],
     });
 

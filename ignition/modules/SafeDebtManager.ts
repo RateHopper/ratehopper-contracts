@@ -11,7 +11,7 @@ import SharedInfrastructureModule from "./SharedInfrastructure";
  * Environment Variables Required:
  * - PAUSER_ADDRESS: Address that can pause/unpause the contract
  * - SAFE_OPERATOR_ADDRESS: Address that can operate the contract
- * - ADMIN_WALLET: Address to transfer ownership to after deployment
+ * - ADMIN_ADDRESS: Address to transfer ownership to after deployment
  *
  * Usage:
  * npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base --verify
@@ -47,7 +47,7 @@ export default buildModule("SafeDebtManagerDeploy", (m) => {
     });
 
     // Transfer ownership to team owner wallet (after all setup is complete)
-    m.call(safeDebtManager, "transferOwnership", [process.env.ADMIN_WALLET!], {
+    m.call(safeDebtManager, "transferOwnership", [process.env.ADMIN_ADDRESS!], {
         after: [setOperator],
     });
 
