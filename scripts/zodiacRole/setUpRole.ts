@@ -1,7 +1,8 @@
 import { ethers } from "hardhat";
 import { allow } from "zodiac-roles-sdk/kit";
-import { processPermissions, applyTargets } from "zodiac-roles-sdk";
+import { processPermissions, planApplyRole } from "zodiac-roles-sdk";
 import dotenv from "dotenv";
+import rolesAbi from "../../externalAbi/zodiac/role.json";
 dotenv.config();
 
 /**
@@ -11,7 +12,7 @@ dotenv.config();
  * - eth-sdk for contract definitions
  * - allow() for permission definitions
  * - processPermissions() to generate permission calls
- * - applyTargets() to apply to the Roles contract
+ * - planApplyRole() to apply to the Roles contract
  *
  * Prerequisites:
  * 1. Run: yarn eth-sdk (to generate contract types)
@@ -25,14 +26,13 @@ dotenv.config();
 // ============================================
 
 const CONFIG = {
-    rolesModAddress: "",
+    rolesModAddress: "0xa98bed23d1C9416D674F656b5e178594a10Fb557",
     operatorAddress: process.env.SAFE_OPERATOR_ADDRESS!,
     chainId: 8453, // Base mainnet
 
     // Define role keys
     roles: {
         DEBT_OPERATOR: ethers.keccak256(ethers.toUtf8Bytes("DEBT_OPERATOR")),
-        TRADER: ethers.keccak256(ethers.toUtf8Bytes("TRADER")),
     },
 };
 
@@ -51,7 +51,7 @@ async function definePermissionsWithSDK() {
         // ========================================
 
         // Allow USDC transfers
-        allow.base.usdc.transfer(),
+        // allow.base.usdc.transfer(),
 
         // Allow USDC approvals (for protocols)
         allow.base.usdc.approve(),
@@ -62,10 +62,10 @@ async function definePermissionsWithSDK() {
 
         // Allow debt swap execution
         // Note: The SDK will automatically handle the function signature
-        allow.base.safeDebtManager.executeDebtSwap(),
+        // allow.base.safeDebtManager.executeDebtSwap(),
 
         // Allow position exits
-        allow.base.safeDebtManager.exit(),
+        // allow.base.safeDebtManager.exit(),
 
         // ========================================
         // Advanced: With Parameter Conditions
@@ -95,16 +95,55 @@ async function definePermissionsWithSDK() {
 async function applyPermissionsToRole(targets: any[]) {
     console.log("\n⚙️  Step 2: Applying Permissions to Role\n");
 
-    const [signer] = await ethers.getSigners();
+    // Use Safe owner key if provided, otherwise fall back to default signer
+    const signer = process.env.MY_SAFE_OWNER_KEY
+        ? new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY, ethers.provider)
+        : (await ethers.getSigners())[0];
+
+    // Check if signer is the owner of the Roles Modifier
+    const rolesContract = new ethers.Contract(CONFIG.rolesModAddress, rolesAbi, signer);
+
+    const owner = await rolesContract.owner();
+    console.log("Roles Modifier Owner:", owner);
+    console.log("Current Signer:", signer.address);
+
+    if (owner.toLowerCase() !== signer.address.toLowerCase()) {
+        console.log("\n⚠️  WARNING: Current signer is not the owner of the Roles Modifier!");
+        console.log("These calls must be executed by the Safe that owns the Roles Modifier.");
+        console.log("\nℹ️  You have two options:");
+        console.log("1. Execute these calls through the Safe UI using the Transaction Builder");
+        console.log("2. Use the Safe SDK to propose and execute these transactions\n");
+    }
 
     // Generate the transaction calls needed to apply these permissions
-    const calls = applyTargets(CONFIG.roles.DEBT_OPERATOR, targets, {
-        chainId: CONFIG.chainId,
-        address: CONFIG.rolesModAddress,
-        mode: "replace", // Options: 'replace' | 'extend'
-    });
+    // planApplyRole creates a RoleFragment with the key and targets
+    const calls = await planApplyRole(
+        {
+            key: CONFIG.roles.DEBT_OPERATOR,
+            targets,
+        },
+        {
+            chainId: CONFIG.chainId,
+            address: CONFIG.rolesModAddress,
+        },
+    );
 
     console.log(`Generated ${calls.length} transaction calls`);
+
+    // If not owner, just show the calls without executing
+    if (owner.toLowerCase() !== signer.address.toLowerCase()) {
+        console.log("\n📋 Transaction calls to execute through Safe:\n");
+        for (let i = 0; i < calls.length; i++) {
+            const call = calls[i];
+            console.log(`Call ${i + 1}/${calls.length}:`);
+            console.log("- To:", call.to);
+            console.log("- Value:", "0");
+            console.log("- Data:", call.data);
+            console.log();
+        }
+        console.log("⚠️  Skipping execution - use Safe to execute these calls\n");
+        return;
+    }
 
     // Execute each call to set up the permissions
     for (let i = 0; i < calls.length; i++) {
@@ -112,13 +151,13 @@ async function applyPermissionsToRole(targets: any[]) {
 
         console.log(`\n📤 Executing call ${i + 1}/${calls.length}`);
         console.log("- To:", call.to);
-        console.log("- Value:", call.value?.toString() || "0");
+        console.log("- Value:", "0");
         console.log("- Data:", call.data.substring(0, 66) + "...");
 
         const tx = await signer.sendTransaction({
-            to: call.to,
-            value: call.value || 0,
-            data: call.data,
+            to: call.to as string,
+            value: 0,
+            data: call.data as string,
         });
 
         console.log("- TX Hash:", tx.hash);
@@ -136,16 +175,14 @@ async function applyPermissionsToRole(targets: any[]) {
 async function assignRoleToOperator() {
     console.log("\n👤 Step 3: Assigning Role to Operator\n");
 
-    const [signer] = await ethers.getSigners();
+    // Use Safe owner key if provided, otherwise fall back to default signer
+    const signer = process.env.MY_SAFE_OWNER_KEY
+        ? new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY, ethers.provider)
+        : (await ethers.getSigners())[0];
 
-    const rolesContract = new ethers.Contract(
-        CONFIG.rolesModAddress,
-        [
-            "function assignRoles(address module, bytes32[] roleKeys, bool[] memberOf) external",
-            "function setDefaultRole(address module, bytes32 defaultRole) external",
-        ],
-        signer,
-    );
+    const rolesContract = new ethers.Contract(CONFIG.rolesModAddress, rolesAbi, signer);
+
+    const owner = await rolesContract.owner();
 
     // Assign DEBT_OPERATOR role to the operator address
     console.log("Assigning DEBT_OPERATOR role to:", CONFIG.operatorAddress);
@@ -179,17 +216,12 @@ async function assignRoleToOperator() {
 async function verifyConfiguration() {
     console.log("\n🔍 Step 4: Verifying Configuration\n");
 
-    const [signer] = await ethers.getSigners();
+    // Use Safe owner key if provided, otherwise fall back to default signer
+    const signer = process.env.MY_SAFE_OWNER_KEY
+        ? new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY, ethers.provider)
+        : (await ethers.getSigners())[0];
 
-    const rolesContract = new ethers.Contract(
-        CONFIG.rolesModAddress,
-        [
-            "function defaultRoles(address) view returns (bytes32)",
-            "function owner() view returns (address)",
-            "function avatar() view returns (address)",
-        ],
-        signer,
-    );
+    const rolesContract = new ethers.Contract(CONFIG.rolesModAddress, rolesAbi, signer);
 
     // Check configuration
     const [defaultRole, owner, avatar] = await Promise.all([
@@ -212,48 +244,6 @@ async function verifyConfiguration() {
     console.log("\n✅ Step 4 Complete: Configuration verified\n");
 
     return defaultRole === CONFIG.roles.DEBT_OPERATOR;
-}
-
-// ============================================
-// Step 5: Usage Example
-// ============================================
-
-async function showUsageExample() {
-    console.log("\n📚 Step 5: How to Use the Configured Roles\n");
-
-    console.log("Your operator can now execute transactions through the Roles Modifier:\n");
-
-    console.log("```typescript");
-    console.log("// Connect to Roles contract as operator");
-    console.log("const roles = new ethers.Contract(");
-    console.log(`  "${CONFIG.rolesModAddress}",`);
-    console.log("  ROLES_ABI,");
-    console.log("  operatorSigner");
-    console.log(");");
-    console.log("");
-    console.log("// Prepare SafeDebtManager call");
-    console.log("const safeDebtManager = new ethers.Contract(");
-    console.log('  "0xYourSafeDebtManagerAddress", // From eth-sdk config');
-    console.log("  SAFE_DEBT_MANAGER_ABI");
-    console.log(");");
-    console.log("");
-    console.log("const callData = safeDebtManager.interface.encodeFunctionData(");
-    console.log('  "executeDebtSwap",');
-    console.log("  [flashloanPool, fromProtocol, toProtocol, ...]");
-    console.log(");");
-    console.log("");
-    console.log("// Execute through Roles (uses default role automatically)");
-    console.log("const tx = await roles.execTransactionFromModule(");
-    console.log('  "0xYourSafeDebtManagerAddress", // From eth-sdk config');
-    console.log("  0, // value");
-    console.log("  callData,");
-    console.log("  0 // Operation.Call");
-    console.log(");");
-    console.log("");
-    console.log("await tx.wait();");
-    console.log("console.log('✅ Debt swap executed!');");
-    console.log("```");
-    console.log("");
 }
 
 // ============================================
@@ -287,9 +277,10 @@ async function main() {
         const verified = await verifyConfiguration();
 
         if (verified) {
-            await showUsageExample();
             console.log("🎉 All steps completed successfully!\n");
             console.log("✅ Your operator can now execute permitted functions through the Roles Modifier.");
+            console.log("\n💡 To see usage examples, run:");
+            console.log("   yarn operator:execute");
         } else {
             console.warn("⚠️  Configuration may not be correct. Please review.");
         }

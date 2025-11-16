@@ -16,11 +16,10 @@
         "run-script": "ts-node scripts/paraswap.ts",
         "deploy:safe-debt-manager": "npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base && npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base",
         "deploy:leveraged-position": "npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base && npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base",
-        "deploy:zodiac-roles": "npx hardhat ignition deploy ignition/modules/ZodiacRoles.ts --network base --verify",
         "deploy:zodiac-roles-proxy": "npx hardhat run scripts/deployRolesProxy.ts --network base",
+        "configure:roles": "npx hardhat run scripts/zodiacRole/setUpRole.ts --network base",
+        "operator:execute": "npx hardhat run scripts/zodiacRole/operatorUseRoles.ts --network base",
         "eth-sdk": "eth-sdk",
-        "configure:roles": "npx hardhat run scripts/examples/rolesSDKProperExample.ts --network base",
-        "configure:roles-manual": "npx hardhat run scripts/examples/rolesSDKExample.ts --network base",
         "verify:safe-debt-manager": "npx hardhat run scripts/verify-safe-debt-manager.ts --network base",
         "verify:leveraged-position": "npx hardhat run scripts/verify-leveraged-position.ts --network base"
     },

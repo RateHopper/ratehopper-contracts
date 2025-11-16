@@ -1,12 +1,16 @@
 import { ethers } from "hardhat";
+import Safe from "@safe-global/protocol-kit";
 import dotenv from "dotenv";
+import rolesAbi from "../externalAbi/zodiac/role.json";
 dotenv.config();
 
 /**
  * Deploy Zodiac Roles Modifier using ModuleProxyFactory
  *
- * This script deploys a minimal proxy pointing to the canonical Roles mastercopy
- * using the official Zodiac ModuleProxyFactory pattern.
+ * This script:
+ * 1. Deploys a minimal proxy pointing to the canonical Roles mastercopy
+ * 2. Initializes it with the Safe as avatar and owner
+ * 3. Automatically enables the module on the Safe using Safe SDK
  *
  * Addresses on Base Mainnet:
  * - ModuleProxyFactory: 0x000000000000aDdB49795b0f9bA5BC298cDda236
@@ -14,7 +18,7 @@ dotenv.config();
  *
  * Environment Variables Required:
  * - SAFE_WALLET_ADDRESS: Your Safe wallet address (avatar)
- * - ADMIN_ADDRESS: Address that will own the Roles modifier
+ * - MY_SAFE_OWNER_KEY: Private key of a Safe owner (to enable module)
  */
 
 // Contract addresses on Base Mainnet
@@ -26,9 +30,6 @@ const MODULE_PROXY_FACTORY_ABI = [
     "function deployModule(address masterCopy, bytes memory initializer, uint256 saltNonce) public returns (address proxy)",
     "event ModuleProxyCreation(address indexed proxy, address indexed masterCopy)",
 ];
-
-// Roles setUp function signature for initialization
-const ROLES_SETUP_ABI = ["function setUp(bytes memory initializeParams) public"];
 
 async function main() {
     console.log("\n🚀 Deploying Roles Modifier Proxy using ModuleProxyFactory...\n");
@@ -65,7 +66,7 @@ async function main() {
     );
 
     // Encode the setUp call
-    const rolesInterface = new ethers.Interface(ROLES_SETUP_ABI);
+    const rolesInterface = new ethers.Interface(rolesAbi);
     const initializer = rolesInterface.encodeFunctionData("setUp", [initializeParams]);
 
     // Generate a unique salt nonce (using timestamp)
@@ -113,42 +114,57 @@ async function main() {
 
     // Verify the deployment
     console.log("🔍 Verifying deployment...");
-    const rolesProxy = new ethers.Contract(
-        proxyAddress,
-        [
-            "function owner() view returns (address)",
-            "function avatar() view returns (address)",
-            "function target() view returns (address)",
-        ],
-        deployer,
-    );
+    const rolesProxy = new ethers.Contract(proxyAddress, rolesAbi, deployer);
 
     const deployedOwner = await rolesProxy.owner();
     const deployedAvatar = await rolesProxy.avatar();
-    const deployedTarget = await rolesProxy.target();
 
     console.log("Owner:", deployedOwner);
     console.log("Avatar:", deployedAvatar);
-    console.log("Target:", deployedTarget);
-    console.log();
 
-    if (deployedOwner !== ownerAddress || deployedAvatar !== safeAddress || deployedTarget !== safeAddress) {
+    if (deployedOwner !== ownerAddress || deployedAvatar !== safeAddress) {
         console.warn("⚠️  Warning: Deployed parameters don't match expected values!");
     } else {
         console.log("✅ Deployment verified successfully!");
     }
 
+    // Enable the module on the Safe using Safe SDK
     console.log();
-    console.log("📋 Next Steps:");
-    console.log("1. Add this module to your Safe:");
-    console.log(`   - Go to: https://app.safe.global/home?safe=base:${safeAddress}`);
-    console.log("   - Settings → Modules → Add Module");
-    console.log(`   - Enter address: ${proxyAddress}`);
+    console.log("📌 Enabling module on Safe...");
+
+    if (!process.env.MY_SAFE_OWNER_KEY) {
+        throw new Error("❌ MY_SAFE_OWNER_KEY not set in .env file");
+    }
+
+    try {
+        const safeWallet = await Safe.init({
+            provider: "https://base.llamarpc.com",
+            signer: process.env.MY_SAFE_OWNER_KEY,
+            safeAddress: safeAddress,
+        });
+
+        const enableModuleTx = await safeWallet.createEnableModuleTx(proxyAddress);
+        const safeTxHash = await safeWallet.executeTransaction(enableModuleTx);
+
+        console.log("✅ Safe transaction hash:", safeTxHash);
+        console.log();
+        console.log("🎉 Roles Modifier is now active on your Safe!");
+        console.log();
+
+        // Verify modules
+        const modules = await safeWallet.getModules();
+        console.log("📋 Enabled modules:", modules);
+    } catch (error: any) {
+        console.log();
+        console.log("⚠️  Could not enable module automatically.");
+        console.log("This is expected if the module is already enabled.");
+        console.log();
+        console.log("Error details:", error.message);
+        throw error;
+    }
+
     console.log();
-    console.log("2. Or use Safe transaction builder to call:");
-    console.log(`   enableModule(${proxyAddress})`);
-    console.log();
-    console.log("3. View on BaseScan:");
+    console.log("🔗 View on BaseScan:");
     console.log(`   https://basescan.org/address/${proxyAddress}`);
     console.log();
 
