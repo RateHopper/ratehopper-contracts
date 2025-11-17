@@ -350,7 +350,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
             IERC20(decoded.collateralAsset).safeTransfer(decoded.onBehalfOf, remainingCollateral);
         }
 
-        // Transfer remaining debt asset back to user
+        // Transfer remaining debt asset(dust amount if exists) back to user
         uint256 remainingDebtAsset = IERC20(decoded.debtAsset).balanceOf(address(this));
         if (remainingDebtAsset > 0) {
             IERC20(decoded.debtAsset).safeTransfer(decoded.onBehalfOf, remainingDebtAsset);

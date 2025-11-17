@@ -34,26 +34,30 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         (address vaultAddress, uint256 nftId) = abi.decode(fromExtraData, (address, uint256));
 
         IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+        uint256 debtAmount;
 
         // If nftId is provided, use positionByNftId for more efficient lookup
         if (nftId > 0) {
             (Structs.UserPosition memory userPosition, ) = resolver.positionByNftId(nftId);
-            uint256 debtAmount = userPosition.borrow;
-            // add tiny amount buffer to avoid repay amount is slightly increased and revert
-            return (debtAmount * 100001) / 100000;
+            debtAmount = userPosition.borrow;
+        } else {
+            // Fallback to positionsByUser if nftId is not provided
+            (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
+                .positionsByUser(onBehalfOf);
+
+            bool vaultFound = false;
+            for (uint256 i = 0; i < vaultsData_.length; i++) {
+                if (vaultsData_[i].vault == vaultAddress) {
+                    debtAmount = userPositions_[i].borrow;
+                    vaultFound = true;
+                    break;
+                }
+            }
+            require(vaultFound, "Vault not found");
         }
 
-        // Fallback to positionsByUser if nftId is not provided
-        (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
-            .positionsByUser(onBehalfOf);
-        for (uint256 i = 0; i < vaultsData_.length; i++) {
-            if (vaultsData_[i].vault == vaultAddress) {
-                uint256 debtAmount = userPositions_[i].borrow;
-                // add tiny amount buffer to avoid repay amount is slightly increased and revert
-                return (debtAmount * 100001) / 100000;
-            }
-        }
-        revert("Vault not found");
+        // Add tiny amount buffer to avoid repay amount slightly increasing and causing revert
+        return (debtAmount * 10001) / 10000;
     }
 
     function switchIn(

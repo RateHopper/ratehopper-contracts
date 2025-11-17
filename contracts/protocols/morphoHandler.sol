@@ -125,11 +125,10 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
 
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(extraData, (MarketParams, uint256));
 
-        // Approve max if repaying by shares, otherwise approve the specific amount
         uint256 approvalAmount = borrowShares > 0 ? type(uint256).max : amount;
         TransferHelper.safeApprove(asset, address(morpho), approvalAmount);
 
-        // If borrowShares > 0, repay by shares (full repayment), otherwise repay by amount
+        // If borrowShares > 0, repay by shares (for full repayment), otherwise repay by amount
         if (borrowShares > 0) {
             morpho.repay(marketParams, 0, borrowShares, onBehalfOf, "");
         } else {
