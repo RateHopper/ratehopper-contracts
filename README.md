@@ -382,16 +382,7 @@ npm install
 
 Create a `.env` file in the project root with the following variables:
 
-```bash
-# Private key for the main signer/deployer (Safe owner)
-PRIVATE_KEY=your_private_key_here
-
-# Private key for the operator address
-# The operator can call exit() and other SafeDebtManager functions
-OPERATOR_PRIVATE_KEY=your_operator_private_key_here
-```
-
-You can use `.env.example` as a template.
+You can use `.env.sample` as a template.
 
 3. Compile contracts:
 

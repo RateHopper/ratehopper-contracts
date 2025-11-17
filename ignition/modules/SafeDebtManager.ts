@@ -21,8 +21,8 @@ export default buildModule("SafeDebtManagerDeploy", (m) => {
     const pauserAddress = m.getParameter("pauserAddress", process.env.PAUSER_ADDRESS);
     const operatorAddress = m.getParameter("operatorAddress", process.env.SAFE_OPERATOR_ADDRESS);
 
-    // Use the SharedInfrastructure module to get deployed handlers
-    const { aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler } =
+    // Use the SharedInfrastructure module to get deployed handlers and registry
+    const { registry, aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler } =
         m.useModule(SharedInfrastructureModule);
 
     const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
@@ -30,21 +30,14 @@ export default buildModule("SafeDebtManagerDeploy", (m) => {
 
     const safeDebtManager = m.contract("SafeDebtManager", [
         UNISWAP_V3_FACTORY_ADRESS,
+        registry,
         protocols,
         handlers,
         pauserAddress,
     ]);
 
-    // Set Paraswap addresses (first call)
-    const setParaswap = m.call(safeDebtManager, "setParaswapAddresses", [
-        PARASWAP_V6_CONTRACT_ADDRESS,
-        PARASWAP_V6_CONTRACT_ADDRESS,
-    ]);
-
-    // Set operator (after Paraswap)
-    const setOperator = m.call(safeDebtManager, "setoperator", [operatorAddress], {
-        after: [setParaswap],
-    });
+    // Set operator
+    const setOperator = m.call(safeDebtManager, "setOperator", [operatorAddress]);
 
     // Transfer ownership to team owner wallet (after all setup is complete)
     m.call(safeDebtManager, "transferOwnership", [process.env.ADMIN_ADDRESS!], {

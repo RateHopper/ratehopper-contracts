@@ -93,7 +93,6 @@ const config: HardhatUserConfig = {
             },
             forking: {
                 url: baseUrl,
-                blockNumber: 38023884,
             },
         },
     },

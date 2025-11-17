@@ -170,11 +170,12 @@ export async function deployDebtSwapContractFixture() {
 
 export async function deployLeveragedPositionContractFixture() {
     // Contracts are deployed using the first signer/account by default
-    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler } = await deployHandlers();
+    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } = await deployHandlers();
 
     const LeveragedPosition = await hre.ethers.getContractFactory("LeveragedPosition");
     const leveragedPosition = await LeveragedPosition.deploy(
         UNISWAP_V3_FACTORY_ADRESS,
+        await protocolRegistry.getAddress(),
         [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO, Protocols.MOONWELL, Protocols.FLUID],
         [
             await aaveV3Handler.getAddress(),
@@ -188,8 +189,6 @@ export async function deployLeveragedPositionContractFixture() {
 
     console.log("LeveragedPosition deployed to:", await leveragedPosition.getAddress());
 
-    await leveragedPosition.setParaswapAddresses(PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS);
-
     // Set operator from third signer
     const signers = await ethers.getSigners();
     const operator = signers[2];
@@ -202,22 +201,12 @@ export async function deployLeveragedPositionContractFixture() {
 export async function deploySafeContractFixture() {
     const [owner, _, __, pauser] = await ethers.getSigners();
 
-    // Pre-calculate SafeModule address to use as operator in registry
+    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } = await deployHandlers();
+
     const SafeModule = await hre.ethers.getContractFactory("SafeDebtManager");
-    const nonce = await ethers.provider.getTransactionCount(owner.address);
-    // Account for all the transactions that will happen before SafeModule deployment:
-    // Registry + setOperator + Moonwell mappings + Compound mappings + Fluid resolver + 5 Handlers + whitelist = 11 transactions
-    const safeModuleAddress = ethers.getCreateAddress({
-        from: owner.address,
-        nonce: nonce + 11
-    });
-    console.log("Predicted SafeModule address:", safeModuleAddress);
-    console.log("Current nonce:", nonce);
-
-    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler } = await deployHandlers(safeModuleAddress);
-
     const safeModule = await SafeModule.deploy(
         UNISWAP_V3_FACTORY_ADRESS,
+        await protocolRegistry.getAddress(),
         [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO, Protocols.MOONWELL, Protocols.FLUID],
         [
             await aaveV3Handler.getAddress(),
@@ -231,8 +220,6 @@ export async function deploySafeContractFixture() {
     );
 
     console.log("SafeModule deployed to:", await safeModule.getAddress());
-
-    await safeModule.setParaswapAddresses(PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS);
 
     return safeModule;
 }
