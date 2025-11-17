@@ -1,27 +1,6 @@
 import { ethers } from "hardhat";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { Contract, MaxUint256 } from "ethers";
-import {
-    AERO_ADDRESS,
-    cbBTC_ADDRESS,
-    cbETH_ADDRESS,
-    DAI_ADDRESS,
-    DEFAULT_SUPPLY_AMOUNT,
-    EURC_ADDRESS,
-    LBTC_ADDRESS,
-    rETH_ADDRESS,
-    tBTC_ADDRESS,
-    TEST_ADDRESS,
-    USDC_ADDRESS,
-    USDS_ADDRESS,
-    VIRTUAL_ADDRESS,
-    weETH_ADDRESS,
-    WELL_ADDRESS,
-    WETH_ADDRESS,
-    wrsETH_ADDRESS,
-    wstETH_ADDRESS,
-} from "../constants";
-
+import { cbETH_ADDRESS, DEFAULT_SUPPLY_AMOUNT, TEST_ADDRESS } from "../constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { approve, defaultProvider, formatAmount, getDecimals } from "../utils";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
@@ -45,7 +24,9 @@ export class MoonwellHelper {
         const collaterals = await viewContract.getUserBalances(userAddress || TEST_ADDRESS);
         console.log("mContractAddress:", mContractAddress);
 
-        const collateralEntry = collaterals.find((collateral) => collateral[1].toLowerCase() === mContractAddress.toLowerCase());
+        const collateralEntry = collaterals.find(
+            (collateral) => collateral[1].toLowerCase() === mContractAddress.toLowerCase(),
+        );
 
         const mToken = new ethers.Contract(mContractAddress, MErc20DelegatorAbi, this.signer);
         const exchangeRate = await mToken.exchangeRateStored();
@@ -59,7 +40,14 @@ export class MoonwellHelper {
     }
 
     async getDebtAmount(tokenAddress: string, userAddress?: string): Promise<bigint> {
-        const mContractAddress = mContractAddressMap.get(tokenAddress)!;
+        const mContractAddress = mContractAddressMap.get(tokenAddress);
+
+        if (!mContractAddress) {
+            throw new Error(
+                `Moonwell mToken address not found for token: ${tokenAddress}. Available tokens: ${Array.from(mContractAddressMap.keys()).join(", ")}`,
+            );
+        }
+
         const mToken = new ethers.Contract(mContractAddress, MErc20DelegatorAbi, this.signer);
         const debtAmount = await mToken.borrowBalanceStored(userAddress || TEST_ADDRESS);
 
@@ -108,7 +96,10 @@ export class MoonwellHelper {
         console.log("withdrawn collateral from moonwell:", withdrawAmount);
     }
 
-    async getSupplyAndBorrowTxdata(debtTokenAddress, collateralAddress = cbETH_ADDRESS): Promise<MetaTransactionData[]> {
+    async getSupplyAndBorrowTxdata(
+        debtTokenAddress,
+        collateralAddress = cbETH_ADDRESS,
+    ): Promise<MetaTransactionData[]> {
         const collateralMTokenAddress = mContractAddressMap.get(collateralAddress)!;
         const collateralMToken = new ethers.Contract(collateralMTokenAddress, MErc20DelegatorAbi, defaultProvider);
 
@@ -116,7 +107,10 @@ export class MoonwellHelper {
         const approveTransactionData: MetaTransactionData = {
             to: collateralAddress,
             value: "0",
-            data: collateralContract.interface.encodeFunctionData("approve", [collateralMTokenAddress, ethers.parseEther("1")]),
+            data: collateralContract.interface.encodeFunctionData("approve", [
+                collateralMTokenAddress,
+                ethers.parseEther("1"),
+            ]),
             operation: OperationType.Call,
         };
 

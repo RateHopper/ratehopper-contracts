@@ -5,20 +5,20 @@ import {
     USDC_ADDRESS,
     DAI_ADDRESS,
     WETH_ADDRESS,
-    USDbC_ADDRESS,
     cbBTC_ADDRESS,
     USDS_ADDRESS,
     AERO_ADDRESS,
     weETH_ADDRESS,
     EURC_ADDRESS,
     wstETH_ADDRESS,
+    PARASWAP_V6_CONTRACT_ADDRESS,
 } from "./constants";
-import { USDC_COMET_ADDRESS, USDbC_COMET_ADDRESS, WETH_COMET_ADDRESS } from "./protocols/compound";
+import { USDC_COMET_ADDRESS, WETH_COMET_ADDRESS } from "./protocols/compound";
 import { mAERO, mcbBTC, mEURC, mWeETH, mWETH, mwstETH, USDS_COMET_ADDRESS } from "../contractAddresses";
 import { getGasOptions } from "./deployUtils";
 import { FLUID_VAULT_RESOLVER } from "./protocols/fluid";
 
-export async function deployProtocolRegistry(operatorAddress?: string) {
+export async function deployProtocolRegistry() {
     const ProtocolRegistry = await ethers.getContractFactory("ProtocolRegistry");
     const gasOptions = await getGasOptions();
     const protocolRegistry = await ProtocolRegistry.deploy(WETH_ADDRESS, gasOptions);
@@ -26,12 +26,6 @@ export async function deployProtocolRegistry(operatorAddress?: string) {
     console.log("ProtocolRegistry deployed to:", await protocolRegistry.getAddress());
 
     const registry = await ethers.getContractAt("ProtocolRegistry", await protocolRegistry.getAddress());
-
-    // Set operator if provided
-    if (operatorAddress) {
-        await registry.setOperator(operatorAddress);
-        console.log("Operator set to:", operatorAddress);
-    }
 
     // Set Moonwell token mappings using batch function
     await registry.batchSetTokenMContracts(
@@ -61,6 +55,10 @@ export async function deployProtocolRegistry(operatorAddress?: string) {
     // Set Fluid vault resolver
     await registry.setFluidVaultResolver(FLUID_VAULT_RESOLVER);
     console.log("Fluid vault resolver set in ProtocolRegistry");
+
+    // Set Paraswap V6 address
+    await registry.setParaswapV6(PARASWAP_V6_CONTRACT_ADDRESS);
+    console.log("Paraswap V6 address set in ProtocolRegistry");
 
     return registry;
 }

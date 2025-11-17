@@ -47,8 +47,8 @@ export async function deployMaliciousUniswapV3Pool(targetHandler: string) {
     return maliciousPool;
 }
 
-export async function deployHandlers(operatorAddress?: string) {
-    const protocolRegistry = await deployProtocolRegistry(operatorAddress);
+export async function deployHandlers() {
+    const protocolRegistry = await deployProtocolRegistry();
     const registryAddress = await protocolRegistry.getAddress();
 
     const gasOptions = await getGasOptions();
@@ -134,16 +134,16 @@ export async function deployHandlers(operatorAddress?: string) {
 // and reset Hardhat Network to that snapshot in every test.
 export async function deployDebtSwapContractWithMaliciousHandlerFixture() {
     const maliciousContract = await deployMaliciousContract();
+    const { protocolRegistry } = await deployHandlers();
     const DebtSwap = await hre.ethers.getContractFactory("DebtSwap");
     const debtSwapMalicious = await DebtSwap.deploy(
         UNISWAP_V3_FACTORY_ADRESS,
+        await protocolRegistry.getAddress(),
         [Protocols.AAVE_V3],
         [await maliciousContract.getAddress()],
         await getGasOptions(),
     );
     console.log("DebtSwapMalicious deployed to:", await debtSwapMalicious.getAddress());
-
-    debtSwapMalicious.setParaswapAddresses(PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS);
 
     return debtSwapMalicious;
 }
@@ -152,18 +152,17 @@ export async function deployDebtSwapContractWithMaliciousHandlerFixture() {
 // We use loadFixture to run this setup once, snapshot that state,
 // and reset Hardhat Network to that snapshot in every test.
 export async function deployDebtSwapContractFixture() {
-    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler } = await deployHandlers();
+    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } = await deployHandlers();
     const DebtSwap = await hre.ethers.getContractFactory("DebtSwap");
     const debtSwap = await DebtSwap.deploy(
         UNISWAP_V3_FACTORY_ADRESS,
+        await protocolRegistry.getAddress(),
         [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO],
         [await aaveV3Handler.getAddress(), await compoundHandler.getAddress(), await morphoHandler.getAddress()],
         await getGasOptions(),
     );
     await debtSwap.waitForDeployment();
     console.log("DebtSwap deployed to:", await debtSwap.getAddress());
-
-    await debtSwap.setParaswapAddresses(PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS);
 
     return debtSwap;
 }

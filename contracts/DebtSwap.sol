@@ -11,14 +11,14 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./Types.sol";
 import "./dependencies/TransferHelper.sol";
+import "./ProtocolRegistry.sol";
 
 contract DebtSwap is Ownable, ReentrancyGuard {
     using GPv2SafeERC20 for IERC20;
     uint8 public protocolFee;
     address public feeBeneficiary;
     address public uniswapV3Factory;
-    address public paraswapTokenTransferProxy;
-    address public paraswapRouter;
+    ProtocolRegistry public immutable registry;
     mapping(Protocol => address) public protocolHandlers;
 
     struct FlashCallbackData {
@@ -50,9 +50,11 @@ contract DebtSwap is Ownable, ReentrancyGuard {
 
     event EmergencyWithdrawn(address indexed token, uint256 amount, address indexed to);
 
-    constructor(address _uniswapV3Factory, Protocol[] memory protocols, address[] memory handlers) Ownable(msg.sender) {
+    constructor(address _uniswapV3Factory, address _registry, Protocol[] memory protocols, address[] memory handlers) Ownable(msg.sender) {
         require(protocols.length == handlers.length, "Protocols and handlers length mismatch");
+        require(_registry != address(0), "Registry cannot be zero address");
         uniswapV3Factory = _uniswapV3Factory;
+        registry = ProtocolRegistry(_registry);
 
         for (uint256 i = 0; i < protocols.length; i++) {
             require(handlers[i] != address(0), "Invalid handler address");
@@ -72,13 +74,6 @@ contract DebtSwap is Ownable, ReentrancyGuard {
         address oldBeneficiary = feeBeneficiary;
         feeBeneficiary = _feeBeneficiary;
         emit FeeBeneficiarySet(oldBeneficiary, _feeBeneficiary);
-    }
-
-    function setParaswapAddresses(address _paraswapTokenTransferProxy, address _paraswapRouter) external onlyOwner {
-        require(_paraswapTokenTransferProxy != address(0), "paraswapTokenTransferProxy cannot be zero address");
-        require(_paraswapRouter != address(0), "paraswapRouter cannot be zero address");
-        paraswapTokenTransferProxy = _paraswapTokenTransferProxy;
-        paraswapRouter = _paraswapRouter;
     }
 
     function executeDebtSwap(
@@ -271,14 +266,14 @@ contract DebtSwap is Ownable, ReentrancyGuard {
         uint256 minAmountOut,
         bytes memory _txParams
     ) internal {
-        TransferHelper.safeApprove(srcAsset, paraswapTokenTransferProxy, amount);
-        (bool success, ) = paraswapRouter.call(_txParams);
+        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), amount);
+        (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");
 
         require(IERC20(dstAsset).balanceOf(address(this)) >= minAmountOut, "Insufficient token balance after swap");
 
         //remove approval
-        TransferHelper.safeApprove(srcAsset, paraswapTokenTransferProxy, 0);
+        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), 0);
     }
 
     function emergencyWithdraw(address token, uint256 amount) external onlyOwner {

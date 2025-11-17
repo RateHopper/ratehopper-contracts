@@ -374,8 +374,8 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         uint256 minAmountOut,
         bytes memory _txParams
     ) internal {
-        TransferHelper.safeApprove(srcAsset, registry.paraswapTokenTransferProxy(), (type(uint256).max));
-        (bool success, ) = registry.paraswapRouter().call(_txParams);
+        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), (type(uint256).max));
+        (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");
 
         uint256 actualBalance = IERC20(dstAsset).balanceOf(address(this));
@@ -384,7 +384,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         }
 
         //remove approval
-        TransferHelper.safeApprove(srcAsset, registry.paraswapTokenTransferProxy(), 0);
+        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), 0);
     }
 
     function emergencyWithdraw(address token, uint256 amount) external onlyOwner {

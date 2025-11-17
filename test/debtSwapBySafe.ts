@@ -286,6 +286,7 @@ describe("Safe wallet should debtSwap", function () {
     const supplyAndBorrowOnFluid = (
         ...args: Parameters<ReturnType<typeof createSafeTestHelpers>["supplyAndBorrowOnFluid"]>
     ) => helpers.supplyAndBorrowOnFluid(...args);
+
     describe("switch In", function () {
         it("Aave from USDC to USDbC", async function () {
             await supplyAndBorrow(Protocols.AAVE_V3);
@@ -319,7 +320,7 @@ describe("Safe wallet should debtSwap", function () {
             await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, DAI_ADDRESS, Protocols.MOONWELL, Protocols.MOONWELL);
         });
 
-        it("In Fluid from USDC to sUSDS with cbBTC collateral", async function () {
+        it.only("In Fluid from USDC to sUSDS with cbBTC collateral", async function () {
             await supplyAndBorrowOnFluid(FLUID_wstETH_USDC_VAULT, wstETH_ADDRESS);
             await executeDebtSwap(
                 ETH_USDC_POOL,

@@ -335,14 +335,14 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         uint256 minAmountOut,
         bytes memory _txParams
     ) internal {
-        TransferHelper.safeApprove(srcAsset, registry.paraswapTokenTransferProxy(), amount);
-        (bool success, ) = registry.paraswapRouter().call(_txParams);
+        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), amount);
+        (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");
 
         require(IERC20(dstAsset).balanceOf(address(this)) >= minAmountOut, "Insufficient token balance after swap");
 
         //remove approval
-        TransferHelper.safeApprove(srcAsset, registry.paraswapTokenTransferProxy(), 0);
+        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), 0);
     }
 
 

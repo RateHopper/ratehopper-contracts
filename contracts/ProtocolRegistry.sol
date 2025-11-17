@@ -32,9 +32,8 @@ contract ProtocolRegistry is Ownable {
     /// @notice The operator address (SafeDebtManager) that can call functions via delegatecall
     address public operator;
 
-    // Paraswap addresses
-    address public paraswapTokenTransferProxy;
-    address public paraswapRouter;
+    // Paraswap V6 address
+    address public paraswapV6;
 
     error ZeroAddress();
     error ArrayLengthMismatch();
@@ -51,8 +50,8 @@ contract ProtocolRegistry is Ownable {
     /// @notice Event emitted when the operator is updated
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
-    /// @notice Event emitted when Paraswap addresses are updated
-    event ParaswapAddressesUpdated(address indexed tokenTransferProxy, address indexed router);
+    /// @notice Event emitted when Paraswap V6 address is updated
+    event ParaswapV6Updated(address indexed oldAddress, address indexed newAddress);
 
     function setTokenMContract(address token, address mContract) external onlyOwner {
         if (token == address(0)) revert ZeroAddress();
@@ -156,15 +155,13 @@ contract ProtocolRegistry is Ownable {
     }
 
     /**
-     * @dev Set the Paraswap addresses
-     * @param _paraswapTokenTransferProxy The Paraswap token transfer proxy address
-     * @param _paraswapRouter The Paraswap router address
+     * @dev Set the Paraswap V6 address
+     * @param _paraswapV6 The Paraswap V6 contract address
      */
-    function setParaswapAddresses(address _paraswapTokenTransferProxy, address _paraswapRouter) external onlyOwner {
-        if (_paraswapTokenTransferProxy == address(0)) revert ZeroAddress();
-        if (_paraswapRouter == address(0)) revert ZeroAddress();
-        paraswapTokenTransferProxy = _paraswapTokenTransferProxy;
-        paraswapRouter = _paraswapRouter;
-        emit ParaswapAddressesUpdated(_paraswapTokenTransferProxy, _paraswapRouter);
+    function setParaswapV6(address _paraswapV6) external onlyOwner {
+        if (_paraswapV6 == address(0)) revert ZeroAddress();
+        address oldAddress = paraswapV6;
+        paraswapV6 = _paraswapV6;
+        emit ParaswapV6Updated(oldAddress, _paraswapV6);
     }
 }
