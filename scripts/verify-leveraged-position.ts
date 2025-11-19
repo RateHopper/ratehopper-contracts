@@ -16,7 +16,7 @@ async function main() {
         "ignition",
         "deployments",
         `chain-${chainId}`,
-        "deployed_addresses.json"
+        "deployed_addresses.json",
     );
 
     if (!fs.existsSync(deploymentPath)) {
@@ -27,6 +27,7 @@ async function main() {
 
     // Get contract addresses
     const leveragedPositionAddress = deployedAddresses["LeveragedPositionDeploy#LeveragedPosition"];
+    const registryAddress = deployedAddresses["ProtocolRegistry#ProtocolRegistry"];
     const aaveV3HandlerAddress = deployedAddresses["SharedInfrastructure#AaveV3Handler"];
     const compoundHandlerAddress = deployedAddresses["SharedInfrastructure#CompoundHandler"];
     const morphoHandlerAddress = deployedAddresses["SharedInfrastructure#MorphoHandler"];
@@ -37,7 +38,12 @@ async function main() {
         throw new Error("LeveragedPosition address not found in deployments");
     }
 
+    if (!registryAddress) {
+        throw new Error("ProtocolRegistry address not found in deployments");
+    }
+
     console.log(`LeveragedPosition address: ${leveragedPositionAddress}`);
+    console.log(`ProtocolRegistry address: ${registryAddress}`);
     console.log("\nHandler addresses:");
     console.log(`  AaveV3Handler: ${aaveV3HandlerAddress}`);
     console.log(`  CompoundHandler: ${compoundHandlerAddress}`);
@@ -55,16 +61,20 @@ async function main() {
         moonwellHandlerAddress,
     ];
 
-    const constructorArgs = [
-        UNISWAP_V3_FACTORY_ADRESS,
-        protocols,
-        handlers,
-    ];
+    // Get pauser address from environment variable (same as used in deployment)
+    const pauserAddress = process.env.PAUSER_ADDRESS;
+    if (!pauserAddress) {
+        throw new Error("PAUSER_ADDRESS environment variable is required");
+    }
+
+    const constructorArgs = [UNISWAP_V3_FACTORY_ADRESS, registryAddress, protocols, handlers, pauserAddress];
 
     console.log("\nConstructor arguments:");
     console.log(`  Uniswap V3 Factory: ${UNISWAP_V3_FACTORY_ADRESS}`);
+    console.log(`  Protocol Registry: ${registryAddress}`);
     console.log(`  Protocols: [${protocols.join(", ")}]`);
     console.log(`  Handlers: [${handlers.join(", ")}]`);
+    console.log(`  Pauser: ${pauserAddress}`);
 
     // Verify contract
     console.log("\nVerifying contract on Basescan...");

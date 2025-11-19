@@ -16,7 +16,7 @@ async function main() {
         "ignition",
         "deployments",
         `chain-${chainId}`,
-        "deployed_addresses.json"
+        "deployed_addresses.json",
     );
 
     if (!fs.existsSync(deploymentPath)) {
@@ -27,6 +27,7 @@ async function main() {
 
     // Get contract addresses
     const safeDebtManagerAddress = deployedAddresses["SafeDebtManagerDeploy#SafeDebtManager"];
+    const registryAddress = deployedAddresses["ProtocolRegistry#ProtocolRegistry"];
     const aaveV3HandlerAddress = deployedAddresses["SharedInfrastructure#AaveV3Handler"];
     const compoundHandlerAddress = deployedAddresses["SharedInfrastructure#CompoundHandler"];
     const morphoHandlerAddress = deployedAddresses["SharedInfrastructure#MorphoHandler"];
@@ -37,7 +38,12 @@ async function main() {
         throw new Error("SafeDebtManager address not found in deployments");
     }
 
+    if (!registryAddress) {
+        throw new Error("ProtocolRegistry address not found in deployments");
+    }
+
     console.log(`SafeDebtManager address: ${safeDebtManagerAddress}`);
+    console.log(`ProtocolRegistry address: ${registryAddress}`);
     console.log("\nHandler addresses:");
     console.log(`  AaveV3Handler: ${aaveV3HandlerAddress}`);
     console.log(`  CompoundHandler: ${compoundHandlerAddress}`);
@@ -61,15 +67,11 @@ async function main() {
         moonwellHandlerAddress,
     ];
 
-    const constructorArgs = [
-        UNISWAP_V3_FACTORY_ADRESS,
-        protocols,
-        handlers,
-        pauserAddress,
-    ];
+    const constructorArgs = [UNISWAP_V3_FACTORY_ADRESS, registryAddress, protocols, handlers, pauserAddress];
 
     console.log("\nConstructor arguments:");
     console.log(`  Uniswap V3 Factory: ${UNISWAP_V3_FACTORY_ADRESS}`);
+    console.log(`  Protocol Registry: ${registryAddress}`);
     console.log(`  Protocols: [${protocols.join(", ")}]`);
     console.log(`  Handlers: [${handlers.join(", ")}]`);
     console.log(`  Pauser: ${pauserAddress}`);

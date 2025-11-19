@@ -14,14 +14,15 @@
         "coverage": "node --max-old-space-size=12288 ./node_modules/.bin/hardhat coverage",
         "clean": "npx hardhat clean",
         "run-script": "ts-node scripts/paraswap.ts",
-        "deploy:safe-debt-manager": "npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base && npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base",
-        "deploy:leveraged-position": "npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base && npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base",
+        "deploy:safe-debt-manager": "npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base",
+        "deploy:leveraged-position": "npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base",
         "deploy:zodiac-roles-proxy": "npx hardhat run ignition/deployRolesProxy.ts --network base",
         "configure:roles": "npx hardhat run scripts/zodiacRole/setUpRole.ts --network base",
         "operator:execute": "npx hardhat run scripts/zodiacRole/operatorUseRoles.ts --network base",
         "eth-sdk": "eth-sdk",
         "verify:safe-debt-manager": "npx hardhat run scripts/verify-safe-debt-manager.ts --network base",
-        "verify:leveraged-position": "npx hardhat run scripts/verify-leveraged-position.ts --network base"
+        "verify:leveraged-position": "npx hardhat run scripts/verify-leveraged-position.ts --network base",
+        "wipe": "npx hardhat ignition wipe chain-8453"
     },
     "author": "",
     "license": "ISC",
