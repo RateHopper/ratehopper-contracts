@@ -320,7 +320,8 @@ describe("Safe wallet should debtSwap", function () {
             await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, DAI_ADDRESS, Protocols.MOONWELL, Protocols.MOONWELL);
         });
 
-        it.only("In Fluid from USDC to sUSDS with cbBTC collateral", async function () {
+        // sUSDS market is not available on Fluid anymore
+        it.skip("In Fluid from USDC to sUSDS with cbBTC collateral", async function () {
             await supplyAndBorrowOnFluid(FLUID_wstETH_USDC_VAULT, wstETH_ADDRESS);
             await executeDebtSwap(
                 ETH_USDC_POOL,
@@ -518,7 +519,7 @@ describe("Safe wallet should debtSwap", function () {
         const [_, wallet2] = await ethers.getSigners();
         const safeModule = await ethers.getContractAt("SafeDebtManager", safeModuleAddress);
 
-        await safeModule.setoperator(wallet2.address);
+        await safeModule.setOperator(wallet2.address);
 
         await supplyAndBorrow(Protocols.MOONWELL);
         await executeDebtSwap(

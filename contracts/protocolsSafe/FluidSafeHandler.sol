@@ -110,7 +110,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         );
         require(successRepay, "Fluid repay failed");
 
-        withdraw(collateralAssets[0].asset, 0, onBehalfOf, extraData);
+        _withdraw(collateralAssets[0].asset, 0, onBehalfOf, extraData);
     }
 
     function switchTo(
@@ -308,6 +308,10 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
     }
 
     function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public override onlyAuthorizedCaller nonReentrant {
+        _withdraw(asset, amount, onBehalfOf, extraData);
+    }
+
+    function _withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) internal {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (address vaultAddress, uint256 nftId, ) = abi.decode(extraData, (address, uint256, bool));

@@ -21,6 +21,8 @@ contract DebtSwap is Ownable, ReentrancyGuard {
     ProtocolRegistry public immutable registry;
     mapping(Protocol => address) public protocolHandlers;
 
+    error InsufficientTokenBalanceAfterSwap(uint256 expected, uint256 actual);
+
     struct FlashCallbackData {
         Protocol fromProtocol;
         Protocol toProtocol;
@@ -270,7 +272,10 @@ contract DebtSwap is Ownable, ReentrancyGuard {
         (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");
 
-        require(IERC20(dstAsset).balanceOf(address(this)) >= minAmountOut, "Insufficient token balance after swap");
+        uint256 actualBalance = IERC20(dstAsset).balanceOf(address(this));
+        if (actualBalance < minAmountOut) {
+            revert InsufficientTokenBalanceAfterSwap(minAmountOut, actualBalance);
+        }
 
         //remove approval
         TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), 0);

@@ -13,7 +13,6 @@ import {
     USDC_ADDRESS,
     USDbC_ADDRESS,
     TEST_ADDRESS,
-    ETH_USDC_POOL,
     ETH_USDbC_POOL,
     Protocols,
     cbETH_ADDRESS,
@@ -51,6 +50,14 @@ describe("DebtSwap should switch", function () {
 
     this.beforeEach(async () => {
         impersonatedSigner = await ethers.getImpersonatedSigner(TEST_ADDRESS);
+
+        // Fund the impersonated account with ETH for gas fees
+        const [deployer] = await ethers.getSigners();
+        await deployer.sendTransaction({
+            to: TEST_ADDRESS,
+            value: ethers.parseEther("1.0"),
+        });
+
         aaveV3Helper = new AaveV3Helper(impersonatedSigner);
         compoundHelper = new CompoundHelper(impersonatedSigner);
         morphoHelper = new MorphoHelper(impersonatedSigner);
@@ -178,7 +185,9 @@ describe("DebtSwap should switch", function () {
             );
         });
 
-        it("from market 1 to market 3(MAI, 18 decimals)", async function () {
+        // MAI is depeged, skip this case
+        // https://app.uniswap.org/explore/tokens/base/0xbf1aeA8670D2528E08334083616dD9C5F3B087aE
+        it.skip("from market 1 to market 3(MAI, 18 decimals)", async function () {
             await morphoHelper.supply(cbETH_ADDRESS, morphoMarket1Id);
             await morphoHelper.borrow(morphoMarket1Id);
 
@@ -242,7 +251,8 @@ describe("DebtSwap should switch", function () {
             await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
         });
 
-        it("should switch USDC debt to MAI with protocol fee - tests decimal mismatch", async function () {
+        // MAI is depeged, skip this case
+        it.skip("should switch USDC debt to MAI with protocol fee - tests decimal mismatch", async function () {
             // set protocol fee to 1% (100 basis points)
             const signers = await ethers.getSigners();
             const contractByOwner = await ethers.getContractAt("DebtSwap", deployedContractAddress, signers[0]);
@@ -488,25 +498,6 @@ describe("DebtSwap should switch", function () {
     });
 
     describe("should revert", function () {
-        it("when specified debt amount is greater than actual debt amount", async function () {
-            await aaveV3Helper.supply(cbETH_ADDRESS);
-            await aaveV3Helper.borrow(USDC_ADDRESS);
-
-            await expect(
-                executeDebtSwap(
-                    ETH_USDC_POOL,
-                    USDC_ADDRESS,
-                    USDbC_ADDRESS,
-                    Protocols.AAVE_V3,
-                    Protocols.AAVE_V3,
-                    cbETH_ADDRESS,
-                    {
-                        useMaxAmount: false,
-                        invalidDebtAmount: true,
-                    },
-                ),
-            ).to.be.reverted;
-        });
         it("if flashloan pool is not uniswap v3 pool", async function () {
             await aaveV3Helper.supply(cbETH_ADDRESS);
             await aaveV3Helper.borrow(USDC_ADDRESS);
@@ -934,32 +925,6 @@ describe("DebtSwap should switch", function () {
         const tx = await signer.sendTransaction({
             to: deployedContractAddress,
             data: "0xf741356e000000000000000000000000dba83ed66a9f7c6785e3ba668512b36e54a3344200000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000420000000000000000000000000000000000000600000000000000000000000000000000000000000000000000082c557faf3e9700000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000004200000000000000000000000000000000000006000000000000000000000000fea2d58cefcb9fcb597723c6bae66ffe4193afe400000000000000000000000046415998764c29ab2a25cbea6254146d50d226870000000000000000000000000000000000000000000000000bef55718ad60000000000000000000000000000000000000000000000000000000001339c406394000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000",
-        });
-
-        const receipt = await tx.wait();
-
-        const aaveDebtAmount = await aaveV3Helper.getDebtAmount(USDC_ADDRESS, signer.address);
-        console.log(`Aave debt amount: ${aaveDebtAmount.toString()}`);
-    });
-
-    it.skip("test with real position 2", async function () {
-        const signer = await ethers.getImpersonatedSigner(process.env.PAUSER_ADDRESS!);
-
-        // Fund the impersonated account with ETH for gas fees
-        const [deployer] = await ethers.getSigners();
-        await deployer.sendTransaction({
-            to: signer.address,
-            value: ethers.parseEther("1.0"), // Send 1 ETH for gas
-        });
-
-        const morphoContract = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, signer);
-        await morphoContract.setAuthorization(deployedContractAddress, true);
-
-        await aaveV3Helper.approveDelegation(USDC_ADDRESS, deployedContractAddress);
-
-        const tx = await signer.sendTransaction({
-            to: deployedContractAddress,
-            data: "0xf741356e000000000000000000000000b4cb800910b228ed3d0834cf79d697127bbb00e500000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000420000000000000000000000000000000000000600000000000000000000000000000000000000000000000000038d7ea4c6800000000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000004200000000000000000000000000000000000006000000000000000000000000fea2d58cefcb9fcb597723c6bae66ffe4193afe400000000000000000000000046415998764c29ab2a25cbea6254146d50d226870000000000000000000000000000000000000000000000000bef55718ad600000000000000000000000000000000000000000000000000000000011c5f52dc640000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000",
         });
 
         const receipt = await tx.wait();

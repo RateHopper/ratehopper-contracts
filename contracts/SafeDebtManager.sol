@@ -30,6 +30,8 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     mapping(Protocol => bool) public protocolEnabledForSwitchFrom;
     mapping(Protocol => bool) public protocolEnabledForSwitchTo;
 
+    error InsufficientTokenBalanceAfterSwap(uint256 expected, uint256 actual);
+
     struct FlashCallbackData {
         Protocol fromProtocol;
         Protocol toProtocol;
@@ -339,7 +341,10 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");
 
-        require(IERC20(dstAsset).balanceOf(address(this)) >= minAmountOut, "Insufficient token balance after swap");
+        uint256 actualBalance = IERC20(dstAsset).balanceOf(address(this));
+        if (actualBalance < minAmountOut) {
+            revert InsufficientTokenBalanceAfterSwap(minAmountOut, actualBalance);
+        }
 
         //remove approval
         TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), 0);
