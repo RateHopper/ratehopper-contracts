@@ -21,7 +21,6 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     address public feeBeneficiary;
     address public safeOperator;
     address public pauser;
-    address public uniswapV3Factory;
     ProtocolRegistry public immutable registry;
     mapping(Protocol => address) public protocolHandlers;
     mapping(Protocol => bool) public protocolEnabledForSwitchFrom;
@@ -82,7 +81,6 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     }
 
     constructor(
-        address _uniswapV3Factory,
         address _registry,
         Protocol[] memory protocols,
         address[] memory handlers,
@@ -100,7 +98,6 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
         safeOperator = msg.sender;
         pauser = _pauser;
-        uniswapV3Factory = _uniswapV3Factory;
         registry = ProtocolRegistry(_registry);
     }
 
@@ -203,7 +200,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         // verify callback
         IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
         PoolAddress.PoolKey memory poolKey = PoolAddress.getPoolKey(pool.token0(), pool.token1(), pool.fee());
-        CallbackValidation.verifyCallback(uniswapV3Factory, poolKey);
+        CallbackValidation.verifyCallback(registry.uniswapV3Factory(), poolKey);
 
         address safe = decoded.onBehalfOf;
 

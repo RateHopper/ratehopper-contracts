@@ -28,7 +28,7 @@ export default buildModule("LeveragedPositionDeploy", (m) => {
     const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
     const handlers = [aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler];
 
-    const leveragedPosition = m.contract("LeveragedPosition", [UNISWAP_V3_FACTORY_ADRESS, registry, protocols, handlers, pauserAddress]);
+    const leveragedPosition = m.contract("LeveragedPosition", [registry, protocols, handlers, pauserAddress]);
 
     // Set operator
     const setOperator = m.call(leveragedPosition, "setOperator", [operatorAddress]);

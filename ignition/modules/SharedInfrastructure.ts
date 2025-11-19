@@ -35,7 +35,8 @@ import {
 // ProtocolRegistry module
 const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
     const wethAddress = m.getParameter("wethAddress", WETH_ADDRESS);
-    const registry = m.contract("ProtocolRegistry", [wethAddress]);
+    const uniswapV3Factory = m.getParameter("uniswapV3Factory", UNISWAP_V3_FACTORY_ADRESS);
+    const registry = m.contract("ProtocolRegistry", [wethAddress, uniswapV3Factory]);
     return { registry };
 });
 

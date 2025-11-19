@@ -9,9 +9,11 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
  * This registry allows protocol handlers to access mappings even when called via delegatecall
  */
 contract ProtocolRegistry is Ownable {
-    constructor(address _wethAddress) Ownable(msg.sender) {
+    constructor(address _wethAddress, address _uniswapV3Factory) Ownable(msg.sender) {
         if (_wethAddress == address(0)) revert ZeroAddress();
+        if (_uniswapV3Factory == address(0)) revert ZeroAddress();
         WETH_ADDRESS = _wethAddress;
+        uniswapV3Factory = _uniswapV3Factory;
     }
 
     // Mapping from underlying token address to corresponding Moonwell mToken contract address
@@ -28,6 +30,9 @@ contract ProtocolRegistry is Ownable {
 
     // WETH address on Base network
     address public immutable WETH_ADDRESS;
+
+    // Uniswap V3 Factory address
+    address public immutable uniswapV3Factory;
 
     /// @notice The operator address (SafeDebtManager) that can call functions via delegatecall
     address public operator;

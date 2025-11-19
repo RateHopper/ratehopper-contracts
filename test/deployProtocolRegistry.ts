@@ -12,6 +12,7 @@ import {
     EURC_ADDRESS,
     wstETH_ADDRESS,
     PARASWAP_V6_CONTRACT_ADDRESS,
+    UNISWAP_V3_FACTORY_ADRESS,
 } from "./constants";
 import { USDC_COMET_ADDRESS, WETH_COMET_ADDRESS } from "./protocols/compound";
 import { mAERO, mcbBTC, mEURC, mWeETH, mWETH, mwstETH, USDS_COMET_ADDRESS } from "../contractAddresses";
@@ -21,7 +22,7 @@ import { FLUID_VAULT_RESOLVER } from "./protocols/fluid";
 export async function deployProtocolRegistry() {
     const ProtocolRegistry = await ethers.getContractFactory("ProtocolRegistry");
     const gasOptions = await getGasOptions();
-    const protocolRegistry = await ProtocolRegistry.deploy(WETH_ADDRESS, gasOptions);
+    const protocolRegistry = await ProtocolRegistry.deploy(WETH_ADDRESS, UNISWAP_V3_FACTORY_ADRESS, gasOptions);
 
     console.log("ProtocolRegistry deployed to:", await protocolRegistry.getAddress());
 

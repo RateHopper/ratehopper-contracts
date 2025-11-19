@@ -29,7 +29,6 @@ export default buildModule("SafeDebtManagerDeploy", (m) => {
     const handlers = [aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler];
 
     const safeDebtManager = m.contract("SafeDebtManager", [
-        UNISWAP_V3_FACTORY_ADRESS,
         registry,
         protocols,
         handlers,

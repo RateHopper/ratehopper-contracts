@@ -67,10 +67,9 @@ async function main() {
         throw new Error("PAUSER_ADDRESS environment variable is required");
     }
 
-    const constructorArgs = [UNISWAP_V3_FACTORY_ADRESS, registryAddress, protocols, handlers, pauserAddress];
+    const constructorArgs = [registryAddress, protocols, handlers, pauserAddress];
 
     console.log("\nConstructor arguments:");
-    console.log(`  Uniswap V3 Factory: ${UNISWAP_V3_FACTORY_ADRESS}`);
     console.log(`  Protocol Registry: ${registryAddress}`);
     console.log(`  Protocols: [${protocols.join(", ")}]`);
     console.log(`  Handlers: [${handlers.join(", ")}]`);

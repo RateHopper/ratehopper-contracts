@@ -19,7 +19,6 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     using GPv2SafeERC20 for IERC20;
     uint8 public protocolFee;
     address public feeBeneficiary;
-    address public uniswapV3Factory;
     ProtocolRegistry public immutable registry;
     mapping(Protocol => address) public protocolHandlers;
     address public safeOperator;
@@ -91,11 +90,10 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
     event EmergencyWithdrawn(address indexed token, uint256 amount, address indexed to);
 
-    constructor(address _uniswapV3Factory, address _registry, Protocol[] memory protocols, address[] memory handlers, address _pauser) Ownable(msg.sender) {
+    constructor(address _registry, Protocol[] memory protocols, address[] memory handlers, address _pauser) Ownable(msg.sender) {
         require(protocols.length == handlers.length, "Protocols and handlers length mismatch");
         require(_registry != address(0), "Registry cannot be zero address");
         require(_pauser != address(0), "Pauser cannot be zero address");
-        uniswapV3Factory = _uniswapV3Factory;
         registry = ProtocolRegistry(_registry);
 
         for (uint256 i = 0; i < protocols.length; i++) {
@@ -230,7 +228,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         // Verify callback
         IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
         PoolAddress.PoolKey memory poolKey = PoolAddress.getPoolKey(pool.token0(), pool.token1(), pool.fee());
-        CallbackValidation.verifyCallback(uniswapV3Factory, poolKey);
+        CallbackValidation.verifyCallback(registry.uniswapV3Factory(), poolKey);
 
         // Suppose either of fee0 or fee1 is 0
         uint totalFee = fee0 + fee1;

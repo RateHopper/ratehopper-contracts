@@ -14,6 +14,7 @@
         "coverage": "node --max-old-space-size=12288 ./node_modules/.bin/hardhat coverage",
         "clean": "npx hardhat clean",
         "run-script": "ts-node scripts/paraswap.ts",
+        "deploy:all": "npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base --reset && npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base",
         "deploy:safe-debt-manager": "npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base",
         "deploy:leveraged-position": "npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base",
         "deploy:zodiac-roles-proxy": "npx hardhat run ignition/deployRolesProxy.ts --network base",

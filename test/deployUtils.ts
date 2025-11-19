@@ -169,7 +169,6 @@ export async function deployLeveragedPositionContractFixture() {
 
     const LeveragedPosition = await hre.ethers.getContractFactory("LeveragedPosition");
     const leveragedPosition = await LeveragedPosition.deploy(
-        UNISWAP_V3_FACTORY_ADRESS,
         await protocolRegistry.getAddress(),
         [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO, Protocols.MOONWELL, Protocols.FLUID],
         [
@@ -202,7 +201,6 @@ export async function deploySafeContractFixture() {
 
     const SafeModule = await hre.ethers.getContractFactory("SafeDebtManager");
     const safeModule = await SafeModule.deploy(
-        UNISWAP_V3_FACTORY_ADRESS,
         await protocolRegistry.getAddress(),
         [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO, Protocols.MOONWELL, Protocols.FLUID],
         [
