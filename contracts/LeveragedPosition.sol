@@ -9,18 +9,21 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 import {IProtocolHandler} from "./interfaces/IProtocolHandler.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "./Types.sol";
+import "./interfaces/safe/ISafe.sol";
 import "./dependencies/TransferHelper.sol";
 import "./ProtocolRegistry.sol";
 
-contract LeveragedPosition is Ownable, ReentrancyGuard {
+contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     using GPv2SafeERC20 for IERC20;
     uint8 public protocolFee;
     address public feeBeneficiary;
     address public uniswapV3Factory;
     ProtocolRegistry public immutable registry;
     mapping(Protocol => address) public protocolHandlers;
-    address public operator;
+    address public safeOperator;
+    address public pauser;
 
     error InsufficientTokenBalanceAfterSwap(uint256 expected, uint256 actual);
 
@@ -29,8 +32,13 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
     modifier onlyOwnerOrOperator(address onBehalfOf) {
         require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
 
-        // Check if caller is operator or the onBehalfOf address itself
-        require(msg.sender == operator || msg.sender == onBehalfOf, "Caller is not authorized");
+        // Check if caller is safeOperator or the onBehalfOf address itself
+        require(msg.sender == safeOperator || msg.sender == onBehalfOf || ISafe(onBehalfOf).isOwner(msg.sender), "Caller is not authorized");
+        _;
+    }
+
+    modifier onlyPauser() {
+        require(msg.sender == pauser, "Caller is not authorized to pause");
         _;
     }
 
@@ -83,9 +91,10 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
 
     event EmergencyWithdrawn(address indexed token, uint256 amount, address indexed to);
 
-    constructor(address _uniswapV3Factory, address _registry, Protocol[] memory protocols, address[] memory handlers) Ownable(msg.sender) {
+    constructor(address _uniswapV3Factory, address _registry, Protocol[] memory protocols, address[] memory handlers, address _pauser) Ownable(msg.sender) {
         require(protocols.length == handlers.length, "Protocols and handlers length mismatch");
         require(_registry != address(0), "Registry cannot be zero address");
+        require(_pauser != address(0), "Pauser cannot be zero address");
         uniswapV3Factory = _uniswapV3Factory;
         registry = ProtocolRegistry(_registry);
 
@@ -94,7 +103,8 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
             protocolHandlers[protocols[i]] = handlers[i];
         }
 
-        operator = msg.sender;
+        safeOperator = msg.sender;
+        pauser = _pauser;
     }
 
     function setProtocolFee(uint8 _fee) public onlyOwner {
@@ -113,7 +123,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
 
     function setOperator(address _safeOperator) public onlyOwner {
         require(_safeOperator != address(0), "_safeOperator cannot be zero address");
-        operator = _safeOperator;
+        safeOperator = _safeOperator;
     }
 
     function createLeveragedPosition(
@@ -125,7 +135,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         address _debtAsset,
         bytes calldata _extraData,
         ParaswapParams calldata _paraswapParams
-    ) public nonReentrant {
+    ) public nonReentrant whenNotPaused {
         require(_collateralAsset != address(0), "Invalid collateral asset address");
         require(_debtAsset != address(0), "Invalid debt asset address");
 
@@ -173,7 +183,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         address _onBehalfOf,
         bytes calldata _extraData,
         ParaswapParams calldata _paraswapParams
-    ) public nonReentrant onlyOwnerOrOperator(_onBehalfOf) {
+    ) public nonReentrant whenNotPaused onlyOwnerOrOperator(_onBehalfOf) {
         require(_collateralAsset != address(0), "Invalid collateral asset address");
         require(_debtAsset != address(0), "Invalid debt asset address");
         require(_collateralAmount > 0, "Invalid collateral amount");
@@ -393,6 +403,14 @@ contract LeveragedPosition is Ownable, ReentrancyGuard {
         require(amount <= balance, "Insufficient balance");
         IERC20(token).safeTransfer(owner(), amount);
         emit EmergencyWithdrawn(token, amount, owner());
+    }
+
+    function pause() external onlyPauser {
+        _pause();
+    }
+
+    function unpause() external onlyPauser {
+        _unpause();
     }
 
     // Allow contract to receive ETH (e.g., from protocols like Moonwell or Fluid)

@@ -6,16 +6,13 @@ import {IERC20} from "./dependencies/IERC20.sol";
 import {PoolAddress} from "./dependencies/uniswapV3/PoolAddress.sol";
 import {GPv2SafeERC20} from "./dependencies/GPv2SafeERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-
 import "./Types.sol";
 import "./interfaces/safe/ISafe.sol";
 import {IProtocolHandler} from "./interfaces/IProtocolHandler.sol";
 import "./ProtocolRegistry.sol";
-
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
-
 import "./dependencies/TransferHelper.sol";
 
 contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {

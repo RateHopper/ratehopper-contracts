@@ -10,14 +10,16 @@ import SharedInfrastructureModule from "./SharedInfrastructure";
  *
  * Environment Variables Required:
  * - SAFE_OPERATOR_ADDRESS: Address that can operate the contract
+ * - PAUSER_ADDRESS: Address that can pause/unpause the contract
  * - ADMIN_ADDRESS: Address to transfer ownership to after deployment
  *
  * Usage:
  * npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base --verify
  */
 export default buildModule("LeveragedPositionDeploy", (m) => {
-    // Load operator address from environment variables
+    // Load operator and pauser addresses from environment variables
     const operatorAddress = m.getParameter("operatorAddress", process.env.SAFE_OPERATOR_ADDRESS);
+    const pauserAddress = m.getParameter("pauserAddress", process.env.PAUSER_ADDRESS);
 
     // Use the SharedInfrastructure module to get deployed handlers and registry
     const { registry, aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler } =
@@ -26,7 +28,7 @@ export default buildModule("LeveragedPositionDeploy", (m) => {
     const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
     const handlers = [aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler];
 
-    const leveragedPosition = m.contract("LeveragedPosition", [UNISWAP_V3_FACTORY_ADRESS, registry, protocols, handlers]);
+    const leveragedPosition = m.contract("LeveragedPosition", [UNISWAP_V3_FACTORY_ADRESS, registry, protocols, handlers, pauserAddress]);
 
     // Set operator
     const setOperator = m.call(leveragedPosition, "setOperator", [operatorAddress]);

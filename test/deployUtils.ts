@@ -19,9 +19,8 @@ import {
     wstETH_ADDRESS,
 } from "./constants";
 import { MORPHO_ADDRESS } from "./protocols/morpho";
-import { COMPTROLLER_ADDRESS, mcbETH, mDAI, mUSDC } from "./protocols/moonwell";
+import { COMPTROLLER_ADDRESS } from "./protocols/moonwell";
 import { deployProtocolRegistry } from "./deployProtocolRegistry";
-import { FLUID_VAULT_RESOLVER } from "./protocols/fluid";
 
 async function deployMaliciousContract() {
     const [_, maliciousAddress] = await ethers.getSigners();
@@ -65,11 +64,7 @@ export async function deployHandlers() {
     console.log("AaveV3Handler deployed to:", await aaveV3Handler.getAddress());
 
     const CompoundHandler = await hre.ethers.getContractFactory("CompoundHandler");
-    const compoundHandler = await CompoundHandler.deploy(
-        registryAddress,
-        UNISWAP_V3_FACTORY_ADRESS,
-        gasOptions,
-    );
+    const compoundHandler = await CompoundHandler.deploy(registryAddress, UNISWAP_V3_FACTORY_ADRESS, gasOptions);
     await compoundHandler.waitForDeployment();
     console.log("CompoundHandler deployed to:", await compoundHandler.getAddress());
 
@@ -84,11 +79,7 @@ export async function deployHandlers() {
     console.log("MoonwellHandler deployed to:", await moonwellHandler.getAddress());
 
     const FluidHandler = await hre.ethers.getContractFactory("FluidSafeHandler");
-    const fluidHandler = await FluidHandler.deploy(
-        UNISWAP_V3_FACTORY_ADRESS,
-        registryAddress,
-        gasOptions,
-    );
+    const fluidHandler = await FluidHandler.deploy(UNISWAP_V3_FACTORY_ADRESS, registryAddress, gasOptions);
     await fluidHandler.waitForDeployment();
     console.log("FluidHandler deployed to:", await fluidHandler.getAddress());
 
@@ -152,7 +143,8 @@ export async function deployDebtSwapContractWithMaliciousHandlerFixture() {
 // We use loadFixture to run this setup once, snapshot that state,
 // and reset Hardhat Network to that snapshot in every test.
 export async function deployDebtSwapContractFixture() {
-    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } = await deployHandlers();
+    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } =
+        await deployHandlers();
     const DebtSwap = await hre.ethers.getContractFactory("DebtSwap");
     const debtSwap = await DebtSwap.deploy(
         UNISWAP_V3_FACTORY_ADRESS,
@@ -169,7 +161,11 @@ export async function deployDebtSwapContractFixture() {
 
 export async function deployLeveragedPositionContractFixture() {
     // Contracts are deployed using the first signer/account by default
-    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } = await deployHandlers();
+    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } =
+        await deployHandlers();
+
+    const signers = await ethers.getSigners();
+    const pauser = signers[3]; // Use fourth signer as pauser
 
     const LeveragedPosition = await hre.ethers.getContractFactory("LeveragedPosition");
     const leveragedPosition = await LeveragedPosition.deploy(
@@ -183,16 +179,17 @@ export async function deployLeveragedPositionContractFixture() {
             await moonwellHandler.getAddress(),
             await fluidHandler.getAddress(),
         ],
+        pauser.address, // Add pauser address
         await getGasOptions(),
     );
 
     console.log("LeveragedPosition deployed to:", await leveragedPosition.getAddress());
 
     // Set operator from third signer
-    const signers = await ethers.getSigners();
     const operator = signers[2];
     await leveragedPosition.setOperator(operator.address);
     console.log("Operator set to:", operator.address);
+    console.log("Pauser set to:", pauser.address);
 
     return leveragedPosition;
 }
@@ -200,7 +197,8 @@ export async function deployLeveragedPositionContractFixture() {
 export async function deploySafeContractFixture() {
     const [owner, _, __, pauser] = await ethers.getSigners();
 
-    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } = await deployHandlers();
+    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } =
+        await deployHandlers();
 
     const SafeModule = await hre.ethers.getContractFactory("SafeDebtManager");
     const safeModule = await SafeModule.deploy(
