@@ -25,11 +25,11 @@ abstract contract BaseProtocolHandler is IProtocolHandler {
      * @notice Validates that the caller is either:
      *         1. A Uniswap V3 pool deployed by the official factory (for flashloan callbacks)
      *         2. The operator contract calling via delegatecall (for exit and other operations)
-     *         The operator address is retrieved from the registry which each handler must implement
+     *         The operator address is retrieved from the registry
      */
     modifier onlyAuthorizedCaller() {
         // Get operator address from the registry
-        address operatorAddress = _getOperatorAddress();
+        address operatorAddress = registry.operator();
 
         // Check if being called via delegatecall from operator
         // During delegatecall, address(this) will be the operator's address
@@ -56,14 +56,6 @@ abstract contract BaseProtocolHandler is IProtocolHandler {
         require(_registry != address(0), "Invalid registry address");
         uniswapV3Factory = _uniswapV3Factory;
         registry = ProtocolRegistry(_registry);
-    }
-
-    /**
-     * @dev Internal function to get the operator address from the registry
-     * @return The operator address from the registry
-     */
-    function _getOperatorAddress() internal view returns (address) {
-        return registry.operator();
     }
     
     /**

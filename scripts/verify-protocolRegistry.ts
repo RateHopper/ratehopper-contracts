@@ -1,11 +1,33 @@
 import hre from "hardhat";
+import * as fs from "fs";
+import * as path from "path";
 import { WETH_ADDRESS } from "../test/constants";
+import { UNISWAP_V3_FACTORY_ADRESS } from "../contractAddresses";
 
 async function main() {
-    const contractAddress = "0xa34FE914Cf16005cEeBDAfa3Ce3026698fA44Bb7";
+    const chainId = (await hre.ethers.provider.getNetwork()).chainId;
+
+    // Read deployed addresses from ignition
+    const deploymentPath = path.join(
+        __dirname,
+        "..",
+        "ignition",
+        "deployments",
+        `chain-${chainId}`,
+        "deployed_addresses.json",
+    );
+
+    if (!fs.existsSync(deploymentPath)) {
+        throw new Error(`Deployment file not found: ${deploymentPath}`);
+    }
+
+    const deployedAddresses = JSON.parse(fs.readFileSync(deploymentPath, "utf-8"));
+
+    const contractAddress = deployedAddresses["ProtocolRegistry#ProtocolRegistry"];
 
     const constructorArguments = [
         WETH_ADDRESS, // WETH address on Base network
+        UNISWAP_V3_FACTORY_ADRESS, // Uniswap V3 Factory address on Base network
     ];
 
     console.log("Verifying ProtocolRegistry contract at:", contractAddress);

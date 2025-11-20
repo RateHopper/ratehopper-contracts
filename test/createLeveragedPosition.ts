@@ -132,6 +132,7 @@ describe("Create leveraged position", function () {
             ethers.parseUnits(principleAmount.toString(), collateralDecimals),
             parsedTargetAmount,
             debtAsset,
+            impersonatedSigner.address, // _onBehalfOf parameter
             extraData,
             paraswapData,
         );

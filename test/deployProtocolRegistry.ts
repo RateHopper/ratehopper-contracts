@@ -61,5 +61,10 @@ export async function deployProtocolRegistry() {
     await registry.setParaswapV6(PARASWAP_V6_CONTRACT_ADDRESS);
     console.log("Paraswap V6 address set in ProtocolRegistry");
 
+    // Set operator (using deployer as operator for tests)
+    const [deployer] = await ethers.getSigners();
+    await registry.setOperator(deployer.address);
+    console.log("Operator set to:", deployer.address);
+
     return registry;
 }

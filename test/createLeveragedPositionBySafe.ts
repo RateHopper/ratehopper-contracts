@@ -143,6 +143,7 @@ describe("Create leveraged position by Safe", function () {
                 ethers.parseUnits(principleAmount.toString(), collateralDecimals),
                 parsedTargetAmount,
                 debtAddress,
+                safeAddress, // _onBehalfOf parameter
                 extraData,
                 paraswapData,
             ]),

@@ -131,13 +131,14 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         uint256 _principleCollateralAmount,
         uint256 _targetCollateralAmount,
         address _debtAsset,
+        address _onBehalfOf,
         bytes calldata _extraData,
         ParaswapParams calldata _paraswapParams
-    ) public nonReentrant whenNotPaused {
+    ) public nonReentrant whenNotPaused onlyOwnerOrOperator(_onBehalfOf) {
         require(_collateralAsset != address(0), "Invalid collateral asset address");
         require(_debtAsset != address(0), "Invalid debt asset address");
 
-        IERC20(_collateralAsset).transferFrom(msg.sender, address(this), _principleCollateralAmount);
+        IERC20(_collateralAsset).transferFrom(_onBehalfOf, address(this), _principleCollateralAmount);
 
         IUniswapV3Pool pool = IUniswapV3Pool(_flashloanPool);
 
@@ -162,7 +163,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
                 debtAsset: _debtAsset,
                 principleCollateralAmount: _principleCollateralAmount,
                 targetCollateralAmount: _targetCollateralAmount,
-                onBehalfOf: msg.sender,
+                onBehalfOf: _onBehalfOf,
                 extraData: _extraData,
                 paraswapParams: _paraswapParams
             })

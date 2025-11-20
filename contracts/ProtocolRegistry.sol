@@ -169,4 +169,15 @@ contract ProtocolRegistry is Ownable {
         paraswapV6 = _paraswapV6;
         emit ParaswapV6Updated(oldAddress, _paraswapV6);
     }
+
+    /**
+     * @dev Set the operator address
+     * @param _operator The new operator address
+     */
+    function setOperator(address _operator) external onlyOwner {
+        if (_operator == address(0)) revert ZeroAddress();
+        address oldOperator = operator;
+        operator = _operator;
+        emit OperatorUpdated(oldOperator, _operator);
+    }
 }

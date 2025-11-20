@@ -8,6 +8,7 @@ import {
     AAVE_V3_DATA_PROVIDER_ADDRESS,
     MORPHO_ADDRESS,
     COMPTROLLER_ADDRESS,
+    PARASWAP_V6_CONTRACT_ADDRESS,
 } from "../../contractAddresses";
 import {
     WETH_ADDRESS,
@@ -47,11 +48,15 @@ const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
  *
  * Environment Variables Required:
  * - ADMIN_ADDRESS: Address to transfer ProtocolRegistry ownership to after deployment
+ * - SAFE_OPERATOR_ADDRESS: Address that can operate contracts via the registry
  *
  * Usage:
  * npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base --verify
  */
 export default buildModule("SharedInfrastructure", (m) => {
+    // Load operator address from environment variable
+    const operatorAddress = m.getParameter("operatorAddress", process.env.SAFE_OPERATOR_ADDRESS);
+
     // Deploy registry first
     const { registry } = m.useModule(ProtocolRegistryModule);
 
@@ -98,7 +103,17 @@ export default buildModule("SharedInfrastructure", (m) => {
         after: [setCompoundMappings],
     });
 
-    // Add tokens to whitelist (after Fluid resolver)
+    // Set Paraswap V6 address (after Fluid resolver)
+    const setParaswapV6 = m.call(registry, "setParaswapV6", [PARASWAP_V6_CONTRACT_ADDRESS], {
+        after: [setFluidResolver],
+    });
+
+    // Set operator address (after Paraswap V6)
+    const setOperator = m.call(registry, "setOperator", [operatorAddress], {
+        after: [setParaswapV6],
+    });
+
+    // Add tokens to whitelist (after operator is set)
     const tokens = [
         USDC_ADDRESS,
         cbETH_ADDRESS,
@@ -122,7 +137,7 @@ export default buildModule("SharedInfrastructure", (m) => {
         VIRTUAL_ADDRESS,
     ];
     const addToWhitelist = m.call(registry, "addToWhitelistBatch", [tokens], {
-        after: [setFluidResolver],
+        after: [setOperator],
     });
 
     // Transfer ownership to team owner wallet (after all setup is complete)
