@@ -765,21 +765,32 @@ describe("Safe wallet should debtSwap", function () {
         // simulate waiting for user's confirmation
         await time.increaseTo((await time.latest()) + 60);
 
-        await moduleContract.executeDebtSwap(
-            flashloanPool,
-            fromProtocol,
-            toProtocol,
-            fromTokenAddress,
-            toTokenAddress,
-            MaxUint256,
-            [{ asset: collateralTokenAddress, amount: collateralAmount }],
-            safeAddress,
-            [fromExtraData, toExtraData],
-            paraswapData,
-            {
-                gasLimit: "2000000",
-            },
-        );
+        // Create Safe transaction for executeDebtSwap
+        const executeDebtSwapTxData: MetaTransactionData = {
+            to: safeModuleAddress,
+            value: "0",
+            data: safeModuleContract.interface.encodeFunctionData("executeDebtSwap", [
+                flashloanPool,
+                fromProtocol,
+                toProtocol,
+                fromTokenAddress,
+                toTokenAddress,
+                MaxUint256,
+                [{ asset: collateralTokenAddress, amount: collateralAmount }],
+                safeAddress,
+                [fromExtraData, toExtraData],
+                paraswapData,
+            ]),
+            operation: OperationType.Call,
+        };
+
+        const safeTransaction = await safeWallet.createTransaction({
+            transactions: [executeDebtSwapTxData],
+        });
+
+        await safeWallet.executeTransaction(safeTransaction, {
+            gasLimit: "2000000",
+        });
 
         const srcDebtAfter = await fromHelper.getDebtAmount(fromDebtAmountParameter, safeAddress);
         const dstDebtAfter = await toHelper.getDebtAmount(toDebtAmountParameter, safeAddress);

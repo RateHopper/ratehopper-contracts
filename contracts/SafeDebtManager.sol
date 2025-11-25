@@ -69,8 +69,8 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     modifier onlyOwnerOrOperator(address onBehalfOf) {
         require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
 
-        // Check if caller is operator (from registry) or the onBehalfOf address itself or an owner of the Safe
-        require(msg.sender == registry.safeOperator() || msg.sender == onBehalfOf || ISafe(onBehalfOf).isOwner(msg.sender), "Caller is not authorized");
+        // Check if caller is operator (from registry) or the onBehalfOf address itself
+        require(msg.sender == registry.safeOperator() || msg.sender == onBehalfOf, "Caller is not authorized");
         _;
     }
 
