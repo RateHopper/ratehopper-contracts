@@ -11,7 +11,7 @@ import {
     PARASWAP_V6_CONTRACT_ADDRESS,
     Protocols,
     sUSDS_ADDRESS,
-    UNISWAP_V3_FACTORY_ADRESS,
+    UNISWAP_V3_FACTORY_ADDRESS,
     USDbC_ADDRESS,
     USDC_ADDRESS,
     USDS_ADDRESS,
@@ -56,7 +56,7 @@ export async function deployHandlers() {
     const aaveV3Handler = await AaveV3Handler.deploy(
         AAVE_V3_POOL_ADDRESS,
         AAVE_V3_DATA_PROVIDER_ADDRESS,
-        UNISWAP_V3_FACTORY_ADRESS,
+        UNISWAP_V3_FACTORY_ADDRESS,
         registryAddress,
         gasOptions,
     );
@@ -64,14 +64,14 @@ export async function deployHandlers() {
     console.log("AaveV3Handler deployed to:", await aaveV3Handler.getAddress());
 
     const CompoundHandler = await hre.ethers.getContractFactory("CompoundHandler");
-    const compoundHandler = await CompoundHandler.deploy(registryAddress, UNISWAP_V3_FACTORY_ADRESS, gasOptions);
+    const compoundHandler = await CompoundHandler.deploy(registryAddress, UNISWAP_V3_FACTORY_ADDRESS, gasOptions);
     await compoundHandler.waitForDeployment();
     console.log("CompoundHandler deployed to:", await compoundHandler.getAddress());
 
     const MoonwellHandler = await hre.ethers.getContractFactory("MoonwellHandler");
     const moonwellHandler = await MoonwellHandler.deploy(
         COMPTROLLER_ADDRESS,
-        UNISWAP_V3_FACTORY_ADRESS,
+        UNISWAP_V3_FACTORY_ADDRESS,
         registryAddress,
         gasOptions,
     );
@@ -79,14 +79,14 @@ export async function deployHandlers() {
     console.log("MoonwellHandler deployed to:", await moonwellHandler.getAddress());
 
     const FluidHandler = await hre.ethers.getContractFactory("FluidSafeHandler");
-    const fluidHandler = await FluidHandler.deploy(UNISWAP_V3_FACTORY_ADRESS, registryAddress, gasOptions);
+    const fluidHandler = await FluidHandler.deploy(UNISWAP_V3_FACTORY_ADDRESS, registryAddress, gasOptions);
     await fluidHandler.waitForDeployment();
     console.log("FluidHandler deployed to:", await fluidHandler.getAddress());
 
     const MorphoHandler = await hre.ethers.getContractFactory("MorphoHandler");
     const morphoHandler = await MorphoHandler.deploy(
         MORPHO_ADDRESS,
-        UNISWAP_V3_FACTORY_ADRESS,
+        UNISWAP_V3_FACTORY_ADDRESS,
         registryAddress,
         gasOptions,
     );
@@ -128,7 +128,7 @@ export async function deployDebtSwapContractWithMaliciousHandlerFixture() {
     const { protocolRegistry } = await deployHandlers();
     const DebtSwap = await hre.ethers.getContractFactory("DebtSwap");
     const debtSwapMalicious = await DebtSwap.deploy(
-        UNISWAP_V3_FACTORY_ADRESS,
+        UNISWAP_V3_FACTORY_ADDRESS,
         await protocolRegistry.getAddress(),
         [Protocols.AAVE_V3],
         [await maliciousContract.getAddress()],
@@ -147,7 +147,7 @@ export async function deployDebtSwapContractFixture() {
         await deployHandlers();
     const DebtSwap = await hre.ethers.getContractFactory("DebtSwap");
     const debtSwap = await DebtSwap.deploy(
-        UNISWAP_V3_FACTORY_ADRESS,
+        UNISWAP_V3_FACTORY_ADDRESS,
         await protocolRegistry.getAddress(),
         [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO],
         [await aaveV3Handler.getAddress(), await compoundHandler.getAddress(), await morphoHandler.getAddress()],
@@ -184,10 +184,6 @@ export async function deployLeveragedPositionContractFixture() {
 
     console.log("LeveragedPosition deployed to:", await leveragedPosition.getAddress());
 
-    // Set operator from third signer
-    const operator = signers[2];
-    await leveragedPosition.setOperator(operator.address);
-    console.log("Operator set to:", operator.address);
     console.log("Pauser set to:", pauser.address);
 
     return leveragedPosition;
@@ -216,7 +212,7 @@ export async function deploySafeContractFixture() {
 
     console.log("SafeModule deployed to:", await safeModule.getAddress());
 
-    return safeModule;
+    return { safeModule, protocolRegistry };
 }
 
 export async function getGasOptions() {

@@ -242,12 +242,15 @@ describe("Create leveraged position", function () {
                 break;
         }
 
+        // Add 1% buffer to debt amount to account for interest accrual
+        const debtAmountToPass = (debtAmountBefore * 101n) / 100n;
+
         // Get paraswap data to swap collateral to debt asset
         const paraswapData = await getParaswapData(
             debtAsset,
             collateralAddress,
             deployedContractAddress,
-            debtAmountBefore,
+            debtAmountToPass,
         );
 
         // Get user's collateral token balance before closing
@@ -266,9 +269,6 @@ describe("Create leveraged position", function () {
         console.log("paraswapData.swapData length:", paraswapData.swapData.length);
         console.log("=========================================");
 
-        // Add 1% buffer to debt amount to account for interest accrual
-        const debtAmountToPass = (debtAmountBefore * 101n) / 100n;
-
         console.log("Original debt amount:", ethers.formatUnits(debtAmountBefore, debtDecimals));
         console.log("Debt amount with 1% buffer:", ethers.formatUnits(debtAmountToPass, debtDecimals));
 
@@ -278,7 +278,7 @@ describe("Create leveraged position", function () {
             collateralAddress,
             collateralAmountBefore,
             debtAsset,
-            debtAmountToPass,
+            debtAmountBefore,
             impersonatedSigner.address,
             extraData,
             paraswapData,

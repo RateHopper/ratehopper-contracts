@@ -43,7 +43,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         CollateralAsset[] memory collateralAssets,
         bytes calldata fromExtraData,
         bytes calldata toExtraData
-    ) external override onlyAuthorizedCaller nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         switchFrom(fromAsset, amount, onBehalfOf, collateralAssets, fromExtraData);
         switchTo(toAsset, amountTotal, onBehalfOf, collateralAssets, toExtraData);
     }
@@ -54,7 +54,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
-    ) public override onlyAuthorizedCaller {
+    ) public override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
         require(registry.isWhitelisted(collateralAssets[0].asset), "Collateral asset is not whitelisted");
         
@@ -77,7 +77,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
-    ) public override onlyAuthorizedCaller {
+    ) public override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
         require(registry.isWhitelisted(collateralAssets[0].asset), "Collateral asset is not whitelisted");
         
@@ -102,7 +102,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         TransferHelper.safeApprove(marketParams.collateralToken, address(morpho), 0);
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller nonReentrant {
+    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
         
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
@@ -112,7 +112,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         TransferHelper.safeApprove(asset, address(morpho), 0);
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller nonReentrant {
+    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
         
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
@@ -120,7 +120,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         morpho.borrow(marketParams, amount, 0, onBehalfOf, address(this));
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyAuthorizedCaller nonReentrant {
+    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(extraData, (MarketParams, uint256));
@@ -138,7 +138,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         TransferHelper.safeApprove(asset, address(morpho), 0);
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller nonReentrant {
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         // Decode market parameters from extraData

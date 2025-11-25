@@ -4,6 +4,7 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { ProtocolRegistry } from "../typechain-types";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { USDC_ADDRESS, cbETH_ADDRESS, WETH_ADDRESS, DAI_ADDRESS } from "./constants";
+import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS } from "../contractAddresses";
 
 describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", function () {
     let protocolRegistry: ProtocolRegistry;
@@ -13,10 +14,27 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
     let mockCContract: HardhatEthersSigner;
 
     async function deployProtocolRegistryFixture() {
-        const [owner, nonOwner, mockMContract, mockCContract] = await ethers.getSigners();
+        const [owner, nonOwner, operator, mockMContract, mockCContract] = await ethers.getSigners();
+
+        // Deploy a dummy timelock for testing
+        const TimelockController = await ethers.getContractFactory("TimelockController");
+        const timelock = await TimelockController.deploy(
+            0, // 0 delay for testing
+            [owner.address],
+            [owner.address],
+            ethers.ZeroAddress,
+        );
+        await timelock.waitForDeployment();
 
         const ProtocolRegistry = await ethers.getContractFactory("ProtocolRegistry");
-        const protocolRegistry = await ProtocolRegistry.deploy(WETH_ADDRESS);
+        const protocolRegistry = await ProtocolRegistry.deploy(
+            WETH_ADDRESS,
+            UNISWAP_V3_FACTORY_ADDRESS,
+            owner.address, // initial admin
+            await timelock.getAddress(), // timelock
+            operator.address, // operator
+            PARASWAP_V6_CONTRACT_ADDRESS,
+        );
         await protocolRegistry.waitForDeployment();
 
         return {
@@ -76,21 +94,23 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
         });
 
         describe("Access Control", function () {
-            it("Should revert when called by non-owner", async function () {
-                await expect(
-                    protocolRegistry.connect(nonOwner).setTokenMContract(USDC_ADDRESS, mockMContract.address),
-                ).to.be.revertedWithCustomError(protocolRegistry, "OwnableUnauthorizedAccount");
+            it("Should revert when called by non-admin", async function () {
+                const DEFAULT_ADMIN_ROLE = await protocolRegistry.DEFAULT_ADMIN_ROLE();
+                await expect(protocolRegistry.connect(nonOwner).setTokenMContract(USDC_ADDRESS, mockMContract.address))
+                    .to.be.revertedWithCustomError(protocolRegistry, "AccessControlUnauthorizedAccount")
+                    .withArgs(nonOwner.address, DEFAULT_ADMIN_ROLE);
             });
 
-            it("Should only allow owner to call the function", async function () {
-                // Owner should succeed
+            it("Should only allow admin to call the function", async function () {
+                // Owner (has DEFAULT_ADMIN_ROLE) should succeed
                 await expect(protocolRegistry.connect(owner).setTokenMContract(USDC_ADDRESS, mockMContract.address)).to
                     .not.be.reverted;
 
-                // Non-owner should fail
-                await expect(
-                    protocolRegistry.connect(nonOwner).setTokenMContract(cbETH_ADDRESS, mockMContract.address),
-                ).to.be.revertedWithCustomError(protocolRegistry, "OwnableUnauthorizedAccount");
+                // Non-admin should fail
+                const DEFAULT_ADMIN_ROLE = await protocolRegistry.DEFAULT_ADMIN_ROLE();
+                await expect(protocolRegistry.connect(nonOwner).setTokenMContract(cbETH_ADDRESS, mockMContract.address))
+                    .to.be.revertedWithCustomError(protocolRegistry, "AccessControlUnauthorizedAccount")
+                    .withArgs(nonOwner.address, DEFAULT_ADMIN_ROLE);
             });
         });
 
@@ -157,21 +177,23 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
         });
 
         describe("Access Control", function () {
-            it("Should revert when called by non-owner", async function () {
-                await expect(
-                    protocolRegistry.connect(nonOwner).setTokenCContract(USDC_ADDRESS, mockCContract.address),
-                ).to.be.revertedWithCustomError(protocolRegistry, "OwnableUnauthorizedAccount");
+            it("Should revert when called by non-admin", async function () {
+                const DEFAULT_ADMIN_ROLE = await protocolRegistry.DEFAULT_ADMIN_ROLE();
+                await expect(protocolRegistry.connect(nonOwner).setTokenCContract(USDC_ADDRESS, mockCContract.address))
+                    .to.be.revertedWithCustomError(protocolRegistry, "AccessControlUnauthorizedAccount")
+                    .withArgs(nonOwner.address, DEFAULT_ADMIN_ROLE);
             });
 
-            it("Should only allow owner to call the function", async function () {
-                // Owner should succeed
+            it("Should only allow admin to call the function", async function () {
+                // Owner (has DEFAULT_ADMIN_ROLE) should succeed
                 await expect(protocolRegistry.connect(owner).setTokenCContract(USDC_ADDRESS, mockCContract.address)).to
                     .not.be.reverted;
 
-                // Non-owner should fail
-                await expect(
-                    protocolRegistry.connect(nonOwner).setTokenCContract(cbETH_ADDRESS, mockCContract.address),
-                ).to.be.revertedWithCustomError(protocolRegistry, "OwnableUnauthorizedAccount");
+                // Non-admin should fail
+                const DEFAULT_ADMIN_ROLE = await protocolRegistry.DEFAULT_ADMIN_ROLE();
+                await expect(protocolRegistry.connect(nonOwner).setTokenCContract(cbETH_ADDRESS, mockCContract.address))
+                    .to.be.revertedWithCustomError(protocolRegistry, "AccessControlUnauthorizedAccount")
+                    .withArgs(nonOwner.address, DEFAULT_ADMIN_ROLE);
             });
         });
 
@@ -263,28 +285,30 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
         });
 
         describe("Access Control", function () {
-            it("Should revert when called by non-owner", async function () {
+            it("Should revert when called by non-admin", async function () {
                 // Add token first as owner
                 await protocolRegistry.addToWhitelist(USDC_ADDRESS);
 
-                // Try to remove as non-owner
-                await expect(
-                    protocolRegistry.connect(nonOwner).removeFromWhitelist(USDC_ADDRESS),
-                ).to.be.revertedWithCustomError(protocolRegistry, "OwnableUnauthorizedAccount");
+                // Try to remove as non-admin
+                const DEFAULT_ADMIN_ROLE = await protocolRegistry.DEFAULT_ADMIN_ROLE();
+                await expect(protocolRegistry.connect(nonOwner).removeFromWhitelist(USDC_ADDRESS))
+                    .to.be.revertedWithCustomError(protocolRegistry, "AccessControlUnauthorizedAccount")
+                    .withArgs(nonOwner.address, DEFAULT_ADMIN_ROLE);
             });
 
-            it("Should only allow owner to call the function", async function () {
+            it("Should only allow admin to call the function", async function () {
                 // Add tokens first
                 await protocolRegistry.addToWhitelist(USDC_ADDRESS);
                 await protocolRegistry.addToWhitelist(cbETH_ADDRESS);
 
-                // Owner should succeed
+                // Owner (has DEFAULT_ADMIN_ROLE) should succeed
                 await expect(protocolRegistry.connect(owner).removeFromWhitelist(USDC_ADDRESS)).to.not.be.reverted;
 
-                // Non-owner should fail
-                await expect(
-                    protocolRegistry.connect(nonOwner).removeFromWhitelist(cbETH_ADDRESS),
-                ).to.be.revertedWithCustomError(protocolRegistry, "OwnableUnauthorizedAccount");
+                // Non-admin should fail
+                const DEFAULT_ADMIN_ROLE = await protocolRegistry.DEFAULT_ADMIN_ROLE();
+                await expect(protocolRegistry.connect(nonOwner).removeFromWhitelist(cbETH_ADDRESS))
+                    .to.be.revertedWithCustomError(protocolRegistry, "AccessControlUnauthorizedAccount")
+                    .withArgs(nonOwner.address, DEFAULT_ADMIN_ROLE);
             });
         });
 

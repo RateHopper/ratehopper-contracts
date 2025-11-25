@@ -39,7 +39,7 @@ contract CompoundHandler is BaseProtocolHandler, ReentrancyGuard {
         CollateralAsset[] memory collateralAssets,
         bytes calldata fromExtraData,
         bytes calldata toExtraData
-    ) external override onlyAuthorizedCaller nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         switchFrom(fromAsset, amount, onBehalfOf, collateralAssets, fromExtraData);
         switchTo(toAsset, amountTotal, onBehalfOf, collateralAssets, toExtraData);
     }
@@ -50,7 +50,7 @@ contract CompoundHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata /* extraData */
-    ) public override onlyAuthorizedCaller {       
+    ) public override onlyAuthorizedCaller(onBehalfOf) {       
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
  
         address cContract = getCContract(fromAsset);
@@ -75,7 +75,7 @@ contract CompoundHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata /* extraData */
-    ) public override onlyAuthorizedCaller {        
+    ) public override onlyAuthorizedCaller(onBehalfOf) {        
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
         
         address cContract = getCContract(toAsset);
@@ -107,7 +107,7 @@ contract CompoundHandler is BaseProtocolHandler, ReentrancyGuard {
         uint256 amount,
         address onBehalfOf,
         bytes calldata extraData
-    ) external override onlyAuthorizedCaller nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
         
         address cContract = abi.decode(extraData, (address));
@@ -124,7 +124,7 @@ contract CompoundHandler is BaseProtocolHandler, ReentrancyGuard {
         uint256 amount,
         address onBehalfOf,
         bytes calldata /* extraData */
-    ) external override onlyAuthorizedCaller nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
         
         address cContract = getCContract(asset);
@@ -139,7 +139,7 @@ contract CompoundHandler is BaseProtocolHandler, ReentrancyGuard {
         uint256 amount,
         address onBehalfOf,
         bytes calldata /* extraData */
-    ) external override onlyAuthorizedCaller nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         address cContract = getCContract(asset);
@@ -156,7 +156,7 @@ contract CompoundHandler is BaseProtocolHandler, ReentrancyGuard {
         uint256 amount,
         address onBehalfOf,
         bytes calldata extraData
-    ) external override onlyAuthorizedCaller nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         // Decode the comet address from extraData

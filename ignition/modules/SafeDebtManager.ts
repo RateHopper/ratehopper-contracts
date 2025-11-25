@@ -1,5 +1,5 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
-import { UNISWAP_V3_FACTORY_ADRESS, Protocol, PARASWAP_V6_CONTRACT_ADDRESS } from "../../contractAddresses";
+import { UNISWAP_V3_FACTORY_ADDRESS, Protocol, PARASWAP_V6_CONTRACT_ADDRESS } from "../../contractAddresses";
 import SharedInfrastructureModule from "./SharedInfrastructure";
 
 /**
@@ -28,12 +28,7 @@ export default buildModule("SafeDebtManagerDeploy", (m) => {
     const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
     const handlers = [aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler];
 
-    const safeDebtManager = m.contract("SafeDebtManager", [
-        registry,
-        protocols,
-        handlers,
-        pauserAddress,
-    ]);
+    const safeDebtManager = m.contract("SafeDebtManager", [registry, protocols, handlers, pauserAddress]);
 
     // Set operator
     const setOperator = m.call(safeDebtManager, "setOperator", [operatorAddress]);

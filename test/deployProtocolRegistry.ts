@@ -12,7 +12,7 @@ import {
     EURC_ADDRESS,
     wstETH_ADDRESS,
     PARASWAP_V6_CONTRACT_ADDRESS,
-    UNISWAP_V3_FACTORY_ADRESS,
+    UNISWAP_V3_FACTORY_ADDRESS,
 } from "./constants";
 import { USDC_COMET_ADDRESS, WETH_COMET_ADDRESS } from "./protocols/compound";
 import { mAERO, mcbBTC, mEURC, mWeETH, mWETH, mwstETH, USDS_COMET_ADDRESS } from "../contractAddresses";
@@ -20,13 +20,43 @@ import { getGasOptions } from "./deployUtils";
 import { FLUID_VAULT_RESOLVER } from "./protocols/fluid";
 
 export async function deployProtocolRegistry() {
-    const ProtocolRegistry = await ethers.getContractFactory("ProtocolRegistry");
+    const signers = await ethers.getSigners();
+    const deployer = signers[0];
+    const operator = signers[2];
     const gasOptions = await getGasOptions();
-    const protocolRegistry = await ProtocolRegistry.deploy(WETH_ADDRESS, UNISWAP_V3_FACTORY_ADRESS, gasOptions);
+
+    // Deploy TimelockController first
+    const TimelockController = await ethers.getContractFactory("TimelockController");
+    const timelock = await TimelockController.deploy(
+        0, // 0 delay for testing
+        [deployer.address], // proposers
+        [deployer.address], // executors
+        ethers.ZeroAddress, // no admin
+    );
+    await timelock.waitForDeployment();
+    console.log("TimelockController deployed to:", await timelock.getAddress());
+
+    // Deploy ProtocolRegistry with timelock address and initial values
+    const ProtocolRegistry = await ethers.getContractFactory("ProtocolRegistry");
+    const protocolRegistry = await ProtocolRegistry.deploy(
+        WETH_ADDRESS,
+        UNISWAP_V3_FACTORY_ADDRESS,
+        deployer.address, // initial admin
+        await timelock.getAddress(), // timelock
+        operator.address, // initial operator (signers[2])
+        PARASWAP_V6_CONTRACT_ADDRESS, // initial paraswap
+        gasOptions,
+    );
 
     console.log("ProtocolRegistry deployed to:", await protocolRegistry.getAddress());
 
     const registry = await ethers.getContractAt("ProtocolRegistry", await protocolRegistry.getAddress());
+
+    // Note: CRITICAL_ROLE is automatically granted to timelock in constructor
+    // Initial operator and paraswap are set in constructor
+    console.log("CRITICAL_ROLE granted to TimelockController");
+    console.log("Initial operator set to:", operator.address);
+    console.log("Initial Paraswap V6 set to:", PARASWAP_V6_CONTRACT_ADDRESS);
 
     // Set Moonwell token mappings using batch function
     await registry.batchSetTokenMContracts(
@@ -57,14 +87,8 @@ export async function deployProtocolRegistry() {
     await registry.setFluidVaultResolver(FLUID_VAULT_RESOLVER);
     console.log("Fluid vault resolver set in ProtocolRegistry");
 
-    // Set Paraswap V6 address
-    await registry.setParaswapV6(PARASWAP_V6_CONTRACT_ADDRESS);
-    console.log("Paraswap V6 address set in ProtocolRegistry");
-
-    // Set operator (using deployer as operator for tests)
-    const [deployer] = await ethers.getSigners();
-    await registry.setOperator(deployer.address);
-    console.log("Operator set to:", deployer.address);
+    // Note: Paraswap V6 and operator are already set in constructor
+    // No need to call through timelock for initial setup
 
     return registry;
 }

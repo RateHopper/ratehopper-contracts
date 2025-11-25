@@ -1,7 +1,7 @@
 // Import and re-export shared constants from contractAddresses.ts
 export {
     // Protocol addresses
-    UNISWAP_V3_FACTORY_ADRESS,
+    UNISWAP_V3_FACTORY_ADDRESS,
     AAVE_V3_POOL_ADDRESS,
     AAVE_V3_DATA_PROVIDER_ADDRESS,
     PARASWAP_V6_CONTRACT_ADDRESS,

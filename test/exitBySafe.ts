@@ -38,7 +38,7 @@ describe("Safe wallet exit function tests", function () {
             safeAddress: safeAddress,
         });
 
-        const safeModule = await loadFixture(deploySafeContractFixture);
+        const { safeModule } = await loadFixture(deploySafeContractFixture);
         safeModuleContract = safeModule;
         safeModuleAddress = await safeModuleContract.getAddress();
 
@@ -144,16 +144,6 @@ describe("Safe wallet exit function tests", function () {
         const collateralContract = new ethers.Contract(collateralAsset, ERC20_ABI, signer);
         const collateralBalanceBefore = await collateralContract.balanceOf(safeAddress);
         console.log("Collateral balance before exit:", ethers.formatUnits(collateralBalanceBefore, collateralDecimals));
-
-        // Step 6: Set operator in SafeDebtManager (only if not calling via Safe)
-        if (!callViaSafe) {
-            const signers = await ethers.getSigners();
-            const moduleContractByOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
-            const setOperatorTx = await moduleContractByOwner.setoperator(operator.address);
-            await setOperatorTx.wait();
-            console.log("Operator set to:", operator.address);
-        }
-
         // Step 7: Get extra data for protocol-specific parameters
         const extraData = await getExtraData();
 

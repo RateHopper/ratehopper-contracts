@@ -92,7 +92,7 @@ export async function getParaswapData(
         slippage: "200",
         userAddress: contractAddress,
         // exclude Uniswap V3 to avoid conflict with flashloan pool. More sophisticated mechanism should be implemented
-        excludeDEXS: "UniswapV3,BalancerV3",
+        excludeDEXS: "UniswapV3,BalancerV3,UniswapV2",
         version: 6.2,
     };
 

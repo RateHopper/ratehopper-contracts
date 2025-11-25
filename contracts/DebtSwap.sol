@@ -268,6 +268,7 @@ contract DebtSwap is Ownable, ReentrancyGuard {
         uint256 minAmountOut,
         bytes memory _txParams
     ) internal {
+        require(_txParams.length >= 4, "Invalid calldata");
         TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), amount);
         (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");

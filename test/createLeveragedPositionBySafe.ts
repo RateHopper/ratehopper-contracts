@@ -197,7 +197,19 @@ describe("Create leveraged position by Safe", function () {
         protocol: Protocols,
         collateralAddress = cbETH_ADDRESS,
         debtAddress = USDC_ADDRESS,
+        callViaOperator = false,
     ) {
+        // Fund operator wallet with ETH if calling via operator
+        if (callViaOperator) {
+            const signers = await ethers.getSigners();
+            const fundTx = await signers[0].sendTransaction({
+                to: operator.address,
+                value: ethers.parseEther("0.2"),
+            });
+            await fundTx.wait();
+            console.log("Funded operator wallet with 0.2 ETH for gas fees");
+        }
+
         const Helper = protocolHelperMap.get(protocol)!;
         const protocolHelper = new Helper(impersonatedSigner);
 
@@ -231,12 +243,15 @@ describe("Create leveraged position by Safe", function () {
                 break;
         }
 
+        // Add buffer to debt amount to account for interest accrual
+        const debtAmountToPass = (debtAmountBefore * 103n) / 100n;
+
         // Get paraswap data to swap collateral to debt asset
         const paraswapData = await getParaswapData(
             debtAddress,
             collateralAddress,
             deployedContractAddress,
-            debtAmountBefore,
+            debtAmountToPass,
         );
 
         // Get user's collateral token balance before closing
@@ -254,57 +269,89 @@ describe("Create leveraged position by Safe", function () {
         console.log("paraswapData.swapData length:", paraswapData.swapData.length);
         console.log("=========================================");
 
-        // Add buffer to debt amount to account for interest accrual
-        const debtAmountToPass = (debtAmountBefore * 101n) / 100n;
-
         console.log("Original debt amount:", ethers.formatUnits(debtAmountBefore, debtDecimals));
         console.log("Debt amount with 1% buffer:", ethers.formatUnits(debtAmountToPass, debtDecimals));
 
-        // For Moonwell, we need to approve the mToken
-        const transactions: MetaTransactionData[] = [];
+        const debtAmountWithInterestBuffer = (debtAmountBefore * 102n) / 100n;
 
-        if (protocol === Protocols.MOONWELL) {
-            const mTokenAddress = mContractAddressMap.get(collateralAddress)!;
-            transactions.push({
-                to: mTokenAddress,
-                value: "0",
-                data: collateralToken.interface.encodeFunctionData("approve", [deployedContractAddress, MaxUint256]),
-                operation: OperationType.Call,
-            });
-        }
+        if (callViaOperator) {
+            // Call via operator directly
+            console.log("=== Calling via Operator ===");
+            const contractByOperator = await ethers.getContractAt(
+                "LeveragedPosition",
+                deployedContractAddress,
+                operator,
+            );
 
-        // Create close position transaction
-        transactions.push({
-            to: deployedContractAddress,
-            value: "0",
-            data: myContract.interface.encodeFunctionData("closeLeveragedPosition", [
+            const tx = await contractByOperator.closeLeveragedPosition(
                 flashloanPool,
                 protocol,
                 collateralAddress,
                 collateralAmountBefore,
                 debtAddress,
-                debtAmountToPass,
-                safeAddress,
+                debtAmountWithInterestBuffer,
+                safeAddress, // onBehalfOf
                 extraData,
                 paraswapData,
-            ]),
-            operation: OperationType.Call,
-        });
+                {
+                    gasLimit: "10000000",
+                },
+            );
+            await tx.wait();
+            console.log("Operator close transaction completed");
+        } else {
+            // Call via Safe transaction
+            console.log("=== Calling via Safe Transaction ===");
 
-        let safeTransaction;
-        try {
-            safeTransaction = await safeWallet.createTransaction({
-                transactions: transactions,
+            // For Moonwell, we need to approve the mToken
+            const transactions: MetaTransactionData[] = [];
+
+            if (protocol === Protocols.MOONWELL) {
+                const mTokenAddress = mContractAddressMap.get(collateralAddress)!;
+                transactions.push({
+                    to: mTokenAddress,
+                    value: "0",
+                    data: collateralToken.interface.encodeFunctionData("approve", [
+                        deployedContractAddress,
+                        MaxUint256,
+                    ]),
+                    operation: OperationType.Call,
+                });
+            }
+
+            // Create close position transaction
+            transactions.push({
+                to: deployedContractAddress,
+                value: "0",
+                data: myContract.interface.encodeFunctionData("closeLeveragedPosition", [
+                    flashloanPool,
+                    protocol,
+                    collateralAddress,
+                    collateralAmountBefore,
+                    debtAddress,
+                    debtAmountWithInterestBuffer,
+                    safeAddress,
+                    extraData,
+                    paraswapData,
+                ]),
+                operation: OperationType.Call,
             });
-        } catch (error) {
-            console.error("Error creating transaction:", error);
-            throw error;
-        }
 
-        const safeTxHash = await safeWallet.executeTransaction(safeTransaction, {
-            gasLimit: "10000000",
-        });
-        console.log(safeTxHash);
+            let safeTransaction;
+            try {
+                safeTransaction = await safeWallet.createTransaction({
+                    transactions: transactions,
+                });
+            } catch (error) {
+                console.error("Error creating transaction:", error);
+                throw error;
+            }
+
+            const safeTxHash = await safeWallet.executeTransaction(safeTransaction, {
+                gasLimit: "10000000",
+            });
+            console.log(safeTxHash);
+        }
 
         // Verify debt is now 0
         const debtAmountAfter = await protocolHelper.getDebtAmount(addressForDebtAmount, safeAddress);
@@ -346,76 +393,13 @@ describe("Create leveraged position by Safe", function () {
             // Create position first using Safe
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.FLUID);
 
-            // await time.increaseTo((await time.latest()) + 3600); // 1 hour
+            // Wait for some time to accrue interest
             await time.increaseTo((await time.latest()) + 600); // 10 minutes
 
             console.log("Operator wallet address:", operator.address);
 
-            // Fund operator wallet with ETH for gas fees using hardhat default account
-            const fundTx = await signers[0].sendTransaction({
-                to: operator.address,
-                value: ethers.parseEther("0.2"), // Send 0.2 ETH for gas fees
-            });
-            await fundTx.wait();
-            console.log("Funded operator wallet with 0.2 ETH for gas fees");
-
-            // Get protocol helper to query position data
-            const fluidHelper = new FluidHelper(impersonatedSigner);
-            const vaultAddress = fluidVaultMap.get(cbETH_ADDRESS)!;
-            const addressForDebtAmount = vaultAddress;
-            const debtAmountBefore = await fluidHelper.getDebtAmount(addressForDebtAmount, safeAddress);
-            const collateralAmountBefore = await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-            const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-
-            console.log("Debt before operator close:", ethers.formatUnits(debtAmountBefore, 6));
-            console.log("Collateral before operator close:", ethers.formatUnits(collateralAmountBefore, 18));
-            console.log("Fluid Position NFT ID:", nftId.toString());
-
-            // Add 1% buffer to debt amount
-            const debtAmountToPass = (debtAmountBefore * 101n) / 100n;
-
-            // Encode extraData for Fluid with isFullRepay = true
-            const extraData = ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "uint256", "bool"],
-                [vaultAddress, nftId, true],
-            );
-
-            // Get paraswap data
-            const paraswapData = await getParaswapData(
-                USDC_ADDRESS,
-                cbETH_ADDRESS,
-                deployedContractAddress,
-                debtAmountBefore,
-            );
-
-            // Connect contract to operator
-            const contractByOperator = await ethers.getContractAt(
-                "LeveragedPosition",
-                deployedContractAddress,
-                operator,
-            );
-
-            // Call closeLeveragedPosition from operator wallet
-            const tx = await contractByOperator.closeLeveragedPosition(
-                ETH_USDC_POOL,
-                Protocols.FLUID,
-                cbETH_ADDRESS,
-                collateralAmountBefore,
-                USDC_ADDRESS,
-                debtAmountToPass,
-                safeAddress, // onBehalfOf
-                extraData,
-                paraswapData,
-                {
-                    gasLimit: "10000000",
-                },
-            );
-            await tx.wait();
-
-            // Verify debt is now 0
-            const debtAmountAfter = await fluidHelper.getDebtAmount(addressForDebtAmount, safeAddress);
-            console.log("Debt after operator close:", ethers.formatUnits(debtAmountAfter, 6));
-            expect(debtAmountAfter).to.equal(0);
+            // Close position via operator
+            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.FLUID, cbETH_ADDRESS, USDC_ADDRESS, true);
         });
     });
 

@@ -21,18 +21,18 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     address public feeBeneficiary;
     ProtocolRegistry public immutable registry;
     mapping(Protocol => address) public protocolHandlers;
-    address public safeOperator;
     address public pauser;
 
     error InsufficientTokenBalanceAfterSwap(uint256 expected, uint256 actual);
+    error InvalidOperationType(uint8 operationType);
 
     enum OperationType { Create, Close }
 
     modifier onlyOwnerOrOperator(address onBehalfOf) {
         require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
 
-        // Check if caller is safeOperator or the onBehalfOf address itself
-        require(msg.sender == safeOperator || msg.sender == onBehalfOf || ISafe(onBehalfOf).isOwner(msg.sender), "Caller is not authorized");
+        // Check if caller is operator (from registry) or the onBehalfOf address itself
+        require(msg.sender == registry.safeOperator() || msg.sender == onBehalfOf || ISafe(onBehalfOf).isOwner(msg.sender), "Caller is not authorized");
         _;
     }
 
@@ -101,7 +101,6 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
             protocolHandlers[protocols[i]] = handlers[i];
         }
 
-        safeOperator = msg.sender;
         pauser = _pauser;
     }
 
@@ -117,11 +116,6 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         address oldBeneficiary = feeBeneficiary;
         feeBeneficiary = _feeBeneficiary;
         emit FeeBeneficiarySet(oldBeneficiary, _feeBeneficiary);
-    }
-
-    function setOperator(address _safeOperator) public onlyOwner {
-        require(_safeOperator != address(0), "_safeOperator cannot be zero address");
-        safeOperator = _safeOperator;
     }
 
     function createLeveragedPosition(
@@ -240,6 +234,8 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         } else if (operationType == OperationType.Close) {
             (, CloseCallbackData memory decoded) = abi.decode(data, (OperationType, CloseCallbackData));
             _handleCloseCallback(decoded, totalFee);
+        } else {
+            revert InvalidOperationType(uint8(operationType));
         }
     }
 
@@ -383,7 +379,11 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         uint256 minAmountOut,
         bytes memory _txParams
     ) internal {
-        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), (type(uint256).max));
+        require(_txParams.length >= 4, "Invalid calldata");
+        
+        // amount + 1 to avoid rounding errors
+        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), amount + 1);
+        
         (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");
 

@@ -252,8 +252,9 @@ describe("Safe wallet should debtSwap", function () {
             safeAddress: safeAddress,
         });
 
-        const safeModule = await loadFixture(deploySafeContractFixture);
+        const { safeModule } = await loadFixture(deploySafeContractFixture);
         safeModuleContract = safeModule;
+
         safeModuleAddress = await safeModuleContract.getAddress();
 
         // Initialize helpers with the context
@@ -366,6 +367,9 @@ describe("Safe wallet should debtSwap", function () {
 
     it("from Fluid to Moonwell", async function () {
         await supplyAndBorrowOnFluid();
+
+        await time.increaseTo((await time.latest()) + 86400); // 1 day
+
         await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.MOONWELL);
     });
 
@@ -514,13 +518,7 @@ describe("Safe wallet should debtSwap", function () {
         expect(feeReceived).to.be.lt(ethers.parseUnits("5", 18)); // Less than 5 DAI
     });
 
-    it("Set operator address and Call executeDebtSwap by operator", async function () {
-        const safeModuleAddress = await safeModuleContract.getAddress();
-        const [_, wallet2] = await ethers.getSigners();
-        const safeModule = await ethers.getContractAt("SafeDebtManager", safeModuleAddress);
-
-        await safeModule.setOperator(wallet2.address);
-
+    it("call executeDebtSwap by operator", async function () {
         await supplyAndBorrow(Protocols.MOONWELL);
         await executeDebtSwap(
             ETH_USDC_POOL,
@@ -530,17 +528,13 @@ describe("Safe wallet should debtSwap", function () {
             Protocols.AAVE_V3,
             cbETH_ADDRESS,
             {
-                operator: wallet2,
+                operator,
             },
         );
     });
 
-    it("Revert when calling executeDebtSwap by non operator(wallet3)", async function () {
-        const safeModuleAddress = await safeModuleContract.getAddress();
-        const [_, wallet2, wallet3] = await ethers.getSigners();
-        const safeModule = await ethers.getContractAt("SafeDebtManager", safeModuleAddress);
-
-        // await safeModule.setoperator(wallet2.address);
+    it("revert when calling executeDebtSwap by non operator(wallet4)", async function () {
+        const [_, , , wallet4] = await ethers.getSigners();
 
         await supplyAndBorrow(Protocols.MOONWELL);
         await expect(
@@ -552,7 +546,7 @@ describe("Safe wallet should debtSwap", function () {
                 Protocols.AAVE_V3,
                 cbETH_ADDRESS,
                 {
-                    operator: wallet3,
+                    operator: wallet4,
                 },
             ),
         ).to.be.revertedWith("Caller is not authorized");

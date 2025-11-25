@@ -19,7 +19,6 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     using GPv2SafeERC20 for IERC20;
     uint8 public protocolFee;
     address public feeBeneficiary;
-    address public safeOperator;
     address public pauser;
     ProtocolRegistry public immutable registry;
     mapping(Protocol => address) public protocolHandlers;
@@ -69,9 +68,9 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
     modifier onlyOwnerOrOperator(address onBehalfOf) {
         require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
-        
-        // Check if caller is safeOperator or the onBehalfOf address itself or an owner of the Safe
-        require(msg.sender == safeOperator || msg.sender == onBehalfOf || ISafe(onBehalfOf).isOwner(msg.sender), "Caller is not authorized");
+
+        // Check if caller is operator (from registry) or the onBehalfOf address itself or an owner of the Safe
+        require(msg.sender == registry.safeOperator() || msg.sender == onBehalfOf || ISafe(onBehalfOf).isOwner(msg.sender), "Caller is not authorized");
         _;
     }
 
@@ -96,7 +95,6 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
             protocolEnabledForSwitchTo[protocols[i]] = true; // Enable switchTo by default
         }
 
-        safeOperator = msg.sender;
         pauser = _pauser;
         registry = ProtocolRegistry(_registry);
     }
@@ -113,11 +111,6 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         address oldBeneficiary = feeBeneficiary;
         feeBeneficiary = _feeBeneficiary;
         emit FeeBeneficiarySet(oldBeneficiary, _feeBeneficiary);
-    }
-
-    function setOperator(address _safeOperator) public onlyOwner {
-        require(_safeOperator != address(0), "_safeOperator cannot be zero address");
-        safeOperator = _safeOperator;
     }
 
     function setProtocolEnabledForSwitchFrom(Protocol _protocol, bool _enabled) external onlyPauser {
@@ -331,6 +324,8 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         uint256 minAmountOut,
         bytes memory _txParams
     ) internal {
+        require(_txParams.length >= 4, "Invalid calldata");
+        
         TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), amount);
         (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");

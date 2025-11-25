@@ -22,23 +22,27 @@ abstract contract BaseProtocolHandler is IProtocolHandler {
 
     /**
      * @dev Modifier to ensure only authorized callers can execute protected functions
+     * @param onBehalfOf The address on whose behalf the operation is being performed
      * @notice Validates that the caller is either:
-     *         1. A Uniswap V3 pool deployed by the official factory (for flashloan callbacks)
-     *         2. The operator contract calling via delegatecall (for exit and other operations)
-     *         The operator address is retrieved from the registry
+     *         1. The operator from the registry (authorized to perform operations on any Safe)
+     *         2. The onBehalfOf address itself (Safe calling to manage its own position)
+     *         3. A Uniswap V3 pool deployed by the official factory (for flashloan callbacks)
      */
-    modifier onlyAuthorizedCaller() {
+    modifier onlyAuthorizedCaller(address onBehalfOf) {
         // Get operator address from the registry
-        address operatorAddress = registry.operator();
+        address operatorAddress = registry.safeOperator();
 
-        // Check if being called via delegatecall from operator
-        // During delegatecall, address(this) will be the operator's address
-        if (address(this) == operatorAddress) {
+        // Check if being called via delegatecall from operator or from the Safe itself
+        // Case 1: Operator calls SafeDebtManager/LeveragedPosition -> delegatecall to handler
+        //         msg.sender will be the operator
+        // Case 2: Safe owner calls SafeDebtManager via Safe -> delegatecall to handler
+        //         msg.sender will be the Safe address (onBehalfOf)
+        if (msg.sender == operatorAddress || msg.sender == onBehalfOf) {
             _;
             return;
         }
 
-        // Otherwise, verify msg.sender is a legitimate Uniswap V3 pool
+        // Otherwise, verify msg.sender is a legitimate Uniswap V3 pool (for flash loan callbacks)
         IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
         PoolAddress.PoolKey memory poolKey = PoolAddress.getPoolKey(pool.token0(), pool.token1(), pool.fee());
         // require statement is defined in verifyCallback()

@@ -2,7 +2,7 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 import {
     getCTokenMappingArrays,
     getMTokenMappingArrays,
-    UNISWAP_V3_FACTORY_ADRESS,
+    UNISWAP_V3_FACTORY_ADDRESS,
     FLUID_VAULT_RESOLVER,
     AAVE_V3_POOL_ADDRESS,
     AAVE_V3_DATA_PROVIDER_ADDRESS,
@@ -36,7 +36,7 @@ import {
 // ProtocolRegistry module
 const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
     const wethAddress = m.getParameter("wethAddress", WETH_ADDRESS);
-    const uniswapV3Factory = m.getParameter("uniswapV3Factory", UNISWAP_V3_FACTORY_ADRESS);
+    const uniswapV3Factory = m.getParameter("uniswapV3Factory", UNISWAP_V3_FACTORY_ADDRESS);
     const registry = m.contract("ProtocolRegistry", [wethAddress, uniswapV3Factory]);
     return { registry };
 });
@@ -65,23 +65,23 @@ export default buildModule("SharedInfrastructure", (m) => {
     const aaveV3Handler = m.contract("AaveV3Handler", [
         AAVE_V3_POOL_ADDRESS,
         AAVE_V3_DATA_PROVIDER_ADDRESS,
-        UNISWAP_V3_FACTORY_ADRESS,
+        UNISWAP_V3_FACTORY_ADDRESS,
         registry,
     ]);
 
-    const compoundHandler = m.contract("CompoundHandler", [registry, UNISWAP_V3_FACTORY_ADRESS], {
+    const compoundHandler = m.contract("CompoundHandler", [registry, UNISWAP_V3_FACTORY_ADDRESS], {
         after: [aaveV3Handler],
     });
 
-    const morphoHandler = m.contract("MorphoHandler", [MORPHO_ADDRESS, UNISWAP_V3_FACTORY_ADRESS, registry], {
+    const morphoHandler = m.contract("MorphoHandler", [MORPHO_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry], {
         after: [compoundHandler],
     });
 
-    const fluidSafeHandler = m.contract("FluidSafeHandler", [UNISWAP_V3_FACTORY_ADRESS, registry], {
+    const fluidSafeHandler = m.contract("FluidSafeHandler", [UNISWAP_V3_FACTORY_ADDRESS, registry], {
         after: [morphoHandler],
     });
 
-    const moonwellHandler = m.contract("MoonwellHandler", [COMPTROLLER_ADDRESS, UNISWAP_V3_FACTORY_ADRESS, registry], {
+    const moonwellHandler = m.contract("MoonwellHandler", [COMPTROLLER_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry], {
         after: [fluidSafeHandler],
     });
 

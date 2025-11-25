@@ -1,7 +1,7 @@
 import hre from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
-import { UNISWAP_V3_FACTORY_ADRESS, Protocol } from "../contractAddresses";
+import { UNISWAP_V3_FACTORY_ADDRESS, Protocol } from "../contractAddresses";
 
 async function main() {
     const network = hre.network.name;

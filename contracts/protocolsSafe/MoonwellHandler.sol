@@ -47,7 +47,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         CollateralAsset[] memory collateralAssets,
         bytes calldata /* fromExtraData */,
         bytes calldata /* toExtraData */
-    ) external override onlyAuthorizedCaller nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
 
@@ -86,7 +86,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata /* extraData */
-    ) external override onlyAuthorizedCaller nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
         _validateCollateralAssets(collateralAssets);
    
@@ -146,7 +146,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata /* extraData */
-    ) external override onlyAuthorizedCaller nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
         _validateCollateralAssets(collateralAssets);
 
@@ -215,7 +215,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         require(successTransfer, "Transfer transaction failed");
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external onlyAuthorizedCaller nonReentrant {
+    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
         
         address mContract = getMContract(asset);
@@ -253,7 +253,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         require(successEnterMarkets, "Enter markets transaction failed");
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external onlyAuthorizedCaller nonReentrant {
+    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
         
         address mContract = getMContract(asset);
@@ -278,7 +278,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         require(successTransfer, "Transfer transaction failed");
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) public override onlyAuthorizedCaller nonReentrant {
+    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) public override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         address mContract = getMContract(asset);
@@ -287,12 +287,16 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         // Get actual debt to avoid repaying more than owed (which causes underflow)
         uint256 actualDebt = IMToken(mContract).borrowBalanceCurrent(onBehalfOf);
         uint256 repayAmount = amount > actualDebt ? actualDebt : amount;
+        if (repayAmount == 0) {
+            return;
+        }
 
         IERC20(asset).approve(address(mContract), repayAmount);
         IMToken(mContract).repayBorrowBehalf(onBehalfOf, repayAmount);
+
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller nonReentrant {
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         address mTokenAddress = getMContract(asset);
