@@ -9,16 +9,16 @@ import SharedInfrastructureModule from "./SharedInfrastructure";
  * ensuring consistency and avoiding hardcoded addresses.
  *
  * Environment Variables Required:
- * - SAFE_OPERATOR_ADDRESS: Address that can operate the contract
  * - PAUSER_ADDRESS: Address that can pause/unpause the contract
  * - ADMIN_ADDRESS: Address to transfer ownership to after deployment
+ *
+ * Note: Operator address is fetched from ProtocolRegistry (no need to set separately)
  *
  * Usage:
  * npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base --verify
  */
 export default buildModule("LeveragedPositionDeploy", (m) => {
-    // Load operator and pauser addresses from environment variables
-    const operatorAddress = m.getParameter("operatorAddress", process.env.SAFE_OPERATOR_ADDRESS);
+    // Load pauser address from environment variables
     const pauserAddress = m.getParameter("pauserAddress", process.env.PAUSER_ADDRESS);
 
     // Use the SharedInfrastructure module to get deployed handlers and registry
@@ -28,15 +28,12 @@ export default buildModule("LeveragedPositionDeploy", (m) => {
     const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
     const handlers = [aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler];
 
+    // Deploy LeveragedPosition
+    // Note: Operator is retrieved from registry.safeOperator(), not stored locally
     const leveragedPosition = m.contract("LeveragedPosition", [registry, protocols, handlers, pauserAddress]);
 
-    // Set operator
-    const setOperator = m.call(leveragedPosition, "setOperator", [operatorAddress]);
-
-    // Transfer ownership to team owner wallet (after all setup is complete)
-    m.call(leveragedPosition, "transferOwnership", [process.env.ADMIN_ADDRESS!], {
-        after: [setOperator],
-    });
+    // Transfer ownership to admin wallet
+    m.call(leveragedPosition, "transferOwnership", [process.env.ADMIN_ADDRESS!]);
 
     return { leveragedPosition };
 });

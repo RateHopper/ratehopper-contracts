@@ -10,16 +10,16 @@ import SharedInfrastructureModule from "./SharedInfrastructure";
  *
  * Environment Variables Required:
  * - PAUSER_ADDRESS: Address that can pause/unpause the contract
- * - SAFE_OPERATOR_ADDRESS: Address that can operate the contract
  * - ADMIN_ADDRESS: Address to transfer ownership to after deployment
+ *
+ * Note: Operator address is fetched from ProtocolRegistry (no need to set separately)
  *
  * Usage:
  * npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base --verify
  */
 export default buildModule("SafeDebtManagerDeploy", (m) => {
-    // Load addresses from environment variables
+    // Load pauser address from environment variables
     const pauserAddress = m.getParameter("pauserAddress", process.env.PAUSER_ADDRESS);
-    const operatorAddress = m.getParameter("operatorAddress", process.env.SAFE_OPERATOR_ADDRESS);
 
     // Use the SharedInfrastructure module to get deployed handlers and registry
     const { registry, aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler } =
@@ -28,15 +28,12 @@ export default buildModule("SafeDebtManagerDeploy", (m) => {
     const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
     const handlers = [aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler];
 
+    // Deploy SafeDebtManager
+    // Note: Operator is retrieved from registry.safeOperator(), not stored locally
     const safeDebtManager = m.contract("SafeDebtManager", [registry, protocols, handlers, pauserAddress]);
 
-    // Set operator
-    const setOperator = m.call(safeDebtManager, "setOperator", [operatorAddress]);
-
-    // Transfer ownership to team owner wallet (after all setup is complete)
-    m.call(safeDebtManager, "transferOwnership", [process.env.ADMIN_ADDRESS!], {
-        after: [setOperator],
-    });
+    // Transfer ownership to admin wallet
+    m.call(safeDebtManager, "transferOwnership", [process.env.ADMIN_ADDRESS!]);
 
     return { safeDebtManager };
 });
