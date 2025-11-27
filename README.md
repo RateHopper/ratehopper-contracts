@@ -2,10 +2,6 @@
 
 RateHopper Contracts is a smart contract system that enables users to automatically switch their borrowing positions between different DeFi lending protocols to take advantage of the best borrowing rates. This helps users optimize their borrowing costs by seamlessly moving their debt between protocols when better rates are available.
 
-## Deployed Contract
-
-**Base Network**: [0xbe986c4e4c716f37c424e9ff8c7e544ba9ce119e](https://basescan.org/address/0xbe986c4e4c716f37c424e9ff8c7e544ba9ce119e)
-
 ## Key Features
 
 - **Multi-Protocol Support**: Currently supports borrowing from:
@@ -32,9 +28,16 @@ RateHopper Contracts is a smart contract system that enables users to automatica
 
 The system consists of several key components:
 
-1. **DebtSwap.sol**: The main contract that orchestrates the debt switching process using flash loans.
+1. **Governance & Access Control**:
 
-2. **Protocol Handlers**: Individual handlers for each supported lending protocol:
+    - `TimelockController`: OpenZeppelin's timelock implementation with 2-day delay for critical operations
+    - `ProtocolRegistry.sol`: Central registry with hybrid access control:
+        - `DEFAULT_ADMIN_ROLE`: For routine operations (whitelist, token mappings) - immediate execution
+        - `CRITICAL_ROLE`: For critical operations (setParaswapV6, setOperator) - requires timelock
+
+2. **DebtSwap.sol**: The main contract that orchestrates the debt switching process using flash loans.
+
+3. **Protocol Handlers**: Individual handlers for each supported lending protocol:
 
     - In `contracts/protocols/` directory:
 
@@ -46,269 +49,55 @@ The system consists of several key components:
         - `MoonwellHandler.sol`: Handles interactions with Moonwell protocol
         - `FluidSafeHandler.sol`: Handles interactions with Fluid protocol through Safe
 
-3. **Safe Modules**: Modules for Gnosis Safe integration:
+4. **Safe Modules**: Modules for Gnosis Safe integration:
 
     - `SafeDebtManager.sol`: Enables debt swaps through Gnosis Safe
+    - Both operator-initiated and Safe owner-initiated transactions supported
 
-4. **LeveragedPosition.sol**: Facilitates creation of leveraged positions across protocols.
-
-5. **ProtocolRegistry.sol**: Stores mappings between tokens and their corresponding protocol-specific contracts, allowing protocol handlers to access these mappings even when called via delegatecall.
+5. **LeveragedPosition.sol**: Facilitates creation of leveraged positions across protocols.
 
 6. **Morpho Libraries**: Supporting libraries for the Morpho protocol:
 
     - `MathLib.sol`: Provides fixed-point arithmetic operations for the Morpho protocol
     - `SharesMathLib.sol`: Handles share-to-asset conversion with virtual shares to protect against share price manipulations
 
-## Sample Usage
+## Integration Guide
 
-Below are examples of how to integrate with the RateHopper contracts for different protocols.
+### Protocol-Specific Requirements
 
-### Common Integration Pattern
+**Aave V3:**
 
-```javascript
-// 1. Initialize protocol helpers
-const aaveV3Helper = new AaveV3Helper(signer);
-const compoundHelper = new CompoundHelper(signer);
-const morphoHelper = new MorphoHelper(signer);
-const moonwellHelper = new MoonwellHelper(signer);
+- Approve aToken when switching from Aave
+- Approve debt delegation when switching to Aave
+- Extra data: `"0x"`
 
-// 2. Set up a borrowing position in the source protocol
-// Example: Supply collateral and borrow from Aave V3
-await aaveV3Helper.supply(collateralTokenAddress);
-await aaveV3Helper.borrow(debtTokenAddress);
+**Compound V3:**
 
-// 3. Execute the debt swap
-await debtSwapContract.executeDebtSwap(
-    flashloanPool, // Uniswap V3 pool address for flash loan
-    fromProtocol, // Source protocol enum
-    toProtocol, // Destination protocol enum
-    fromDebtAsset, // Debt asset address on source protocol
-    toDebtAsset, // Debt asset address on destination protocol
-    amount, // Amount to swap (MaxUint256 for full debt)
-    collateralAssets, // Array of collateral assets
-    fromExtraData, // Protocol-specific data for source
-    toExtraData, // Protocol-specific data for destination
-    paraswapParams, // Parameters for token swaps if needed
-);
-```
+- Call `allow()` to authorize DebtSwap contract
+- Extra data: `"0x"`
 
-### Protocol-Specific Integration Notes
+**Morpho:**
 
-#### Aave V3
+- Call `setAuthorization(debtSwapContract, true)`
+- Extra data: Encode `(MarketParams, borrowShares)` - **REQUIRED**
 
-```javascript
-// 1.1 Get and approve aToken for the collateral When switching from Aave
-const aTokenAddress = await aaveV3Helper.getATokenAddress(collateralTokenAddress);
-await approve(aTokenAddress, debtSwapContractAddress, signer);
+**Moonwell:**
 
-// 1.2 Approve delegation for variable debt tokens when switching to Aave
-await aaveV3Helper.approveDelegation(debtTokenAddress, debtSwapContractAddress);
+- No pre-approval required
+- Extra data: `"0x"`
 
-// 2. No extra data needed for Aave V3
-const aaveExtraData = "0x";
-```
+**Fluid:**
 
-#### Compound V3
+- No pre-approval required
+- Extra data: Encode `(vaultAddress, nftId, isFullRepay)` - **REQUIRED**
 
-```javascript
-// When using Compound V3
-// 1. Allow the DebtSwap contract to manage positions
-await compoundHelper.allow(tokenAddress, debtSwapContractAddress);
+### Key Implementation Notes
 
-// 2. No extra data needed for Compound
-const compoundExtraData = "0x";
-```
-
-#### Morpho
-
-```javascript
-// When using Morpho
-// 1. Set authorization for the DebtSwap contract
-const morphoContract = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, signer);
-await morphoContract.setAuthorization(debtSwapContractAddress, true);
-
-// 2. Get borrow shares for the market
-const borrowShares = await morphoHelper.getBorrowShares(marketId);
-
-// 3. Encode market parameters and borrow shares as extra data (REQUIRED)
-const morphoExtraData = morphoHelper.encodeExtraData(marketId, borrowShares);
-// This encodes: abi.encode(MarketParams, uint256)
-// The MarketParams structure contains loan token, collateral token, oracle, etc.
-// The borrowShares is required for repaying debt when Morpho is the source protocol
-// Note: The contract now uses SharesMathLib for accurate conversion between shares and assets
-```
-
-#### Moonwell
-
-```javascript
-// When using Moonwell, No pre-approval is required
-// 1. No extra data needed for Moonwell
-const moonwellExtraData = "0x";
-```
-
-#### Fluid
-
-```javascript
-// When using Fluid, No pre-approval is require
-// 1. Get the vault address for the token
-const vaultAddress = fluidVaultMap.get(tokenAddress);
-
-// 2. Get NFT ID for the position
-const nftId = await fluidHelper.getNftId(vaultAddress, userAddress);
-
-// 3. Encode market parameters and borrow shares as extra data (REQUIRED)
-const fluidExtraData = fluidHelper.encodeExtraData(vaultAddress, nftId);
-```
-
-### Multiple Collaterals Example
-
-```javascript
-// When using multiple collateral assets
-const collateralArray = [
-    { asset: collateralToken1Address, amount: collateralAmount1 },
-    { asset: collateralToken2Address, amount: collateralAmount2 },
-];
-
-// Pass the collateral array to executeDebtSwap
-await debtSwapContract.executeDebtSwap(
-    // ... other parameters
-    collateralArray,
-    // ... remaining parameters
-);
-```
-
-### Cross-Protocol Debt Swap Example
-
-```javascript
-// Example: Switch debt from Aave V3 to Compound
-// 1. Set up position in Aave
-await aaveV3Helper.supply(collateralTokenAddress);
-await aaveV3Helper.borrow(debtTokenAddress);
-
-// 2. Prepare for the swap
-// Approve aToken transfer
-const aTokenAddress = await aaveV3Helper.getATokenAddress(collateralTokenAddress);
-await approve(aTokenAddress, debtSwapContractAddress, signer);
-
-// Allow Compound management
-await compoundHelper.allow(toDebtTokenAddress, debtSwapContractAddress);
-
-// Prepare extra data
-const fromExtraData = "0x"; // No extra data for Aave
-const toExtraData = "0x"; // No extra data for Compound
-
-// 3. Execute the swap
-await debtSwapContract.executeDebtSwap(
-    flashloanPool,
-    Protocols.AAVE_V3,
-    Protocols.COMPOUND,
-    fromDebtTokenAddress,
-    toDebtTokenAddress,
-    MaxUint256, // Swap full debt
-    [{ asset: collateralTokenAddress, amount: collateralAmount }],
-    fromExtraData,
-    toExtraData,
-    paraswapParams,
-);
-```
-
-### Important Implementation Notes
-
-1. **Flash Loan Process**: The contract uses Uniswap V3 flash loans to temporarily borrow the debt asset, repay the source protocol, and then borrow from the destination protocol.
-
-2. **Protocol Fee**: The contract charges an optional protocol fee (configurable by the owner) which is taken from the destination debt amount.
-
-3. **Slippage Protection**: When swapping between different assets, you must include a `srcAmount` field in the `ParaswapParams` struct with appropriate slippage adjustment to ensure the transaction doesn't fail due to price movements. See the 'Understanding Amount Parameters' section below for details.
-
-4. **Collateral Handling**: The contract will automatically withdraw collateral from the source protocol and supply it to the destination protocol during the debt swap.
-
-5. **Error Handling**: The contract includes checks to ensure that operations like repaying debt and borrowing succeed, reverting the transaction if any step fails.
-
-### Understanding Amount Parameters
-
-```javascript
-await debtSwapContract.executeDebtSwap(
-    // ... other parameters
-    amount, // Amount to swap from source protocol
-    // ... remaining parameters
-);
-```
-
-#### Amount Parameter
-
-The `amount` parameter specifies how much debt to repay in the source protocol:
-
-- If set to a specific value (e.g., `ethers.parseUnits("100", 6)`), the contract will repay exactly that amount of debt
-- If set to `MaxUint256` (or `ethers.constants.MaxUint256`), the contract will repay the entire debt position
-
-```javascript
-// Example: Repay specific amount
-const amountToRepay = ethers.parseUnits("100", 6); // Repay 100 USDC
-
-// Example: Repay entire debt
-const amountToRepay = ethers.constants.MaxUint256;
-```
-
-#### Paraswap Parameters
-
-The `paraswapParams` object is used when swapping between different assets and contains:
-
-- `srcAmount`: The amount to swap with slippage adjustment (set to 0 if not swapping assets)
-- `swapData`: The encoded swap data from the Paraswap API
-
-```javascript
-// Example: Creating Paraswap Parameters for token swap
-const debtAmount = ethers.parseUnits("100", 6); // 100 USDC
-const slippage = 0.01; // 1% slippage tolerance
-
-// Calculate amount with slippage adjustment
-const slippageAdjustedAmount = debtAmount * (1 + slippage);
-
-// Get the swap data from Paraswap API
-const [srcAmount, paraswapData] = await getParaswapData(
-    fromTokenAddress,
-    toTokenAddress,
-    debtSwapContractAddress,
-    debtAmount,
-    slippageAdjustedAmount,
-);
-
-// Create the paraswap parameters object
-const paraswapParams = {
-    srcAmount: srcAmount,
-    swapData: paraswapData,
-};
-```
-
-#### Sample Usage with Paraswap
-
-```javascript
-// Get the expected swap amount from Paraswap
-const [srcAmount, paraswapData] = await getParaswapData(
-    fromTokenAddress,
-    toTokenAddress,
-    debtSwapContractAddress,
-    debtAmount,
-    slippageAdjustedAmount,
-);
-
-// Execute the debt swap with slippage protection
-await debtSwapContract.executeDebtSwap(
-    flashloanPool,
-    fromProtocol,
-    toProtocol,
-    fromDebtAsset,
-    toDebtAsset,
-    amount,
-    collateralAssets,
-    fromExtraData,
-    toExtraData,
-    {
-        srcAmount,
-        swapData,
-    },
-);
-```
+1. **Flash Loans**: Uses Uniswap V3 flash loans for atomic debt transfers
+2. **Protocol Fee**: Configurable fee (max 1%) taken from destination debt
+3. **Slippage**: Include `srcAmount` with slippage adjustment in `ParaswapParams` for token swaps
+4. **Collateral**: Automatically moved from source to destination protocol
+5. **Amount**: Use `MaxUint256` for full debt repayment, or specify exact amount
 
 ## Key Functions
 
@@ -370,6 +159,83 @@ struct ParaswapParams {
 }
 ```
 
+## Deployment
+
+### Environment Variables
+
+Create a `.env` file with the following required variables (use `.env.sample` as a template):
+
+```env
+ADMIN_ADDRESS=0x...           # Initial admin and timelock proposer/executor
+SAFE_OPERATOR_ADDRESS=0x...   # Operator address for Safe interactions
+PAUSER_ADDRESS=0x...          # Address that can pause contracts
+DEPLOYER_PRIVATE_KEY=...      # Private key for deployment
+EXPLORER_KEY=...              # Block explorer API key for verification
+```
+
+### Deployment Process
+
+The contracts use Hardhat Ignition for declarative deployments:
+
+#### 1. Deploy Full Infrastructure (Recommended)
+
+Deploy everything in one command:
+
+```bash
+npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base --verify
+```
+
+This deploys:
+
+- TimelockController (2-day delay)
+- ProtocolRegistry (with timelock configured)
+- All protocol handlers (Aave, Compound, Morpho, Fluid, Moonwell)
+- Token mappings and whitelists
+
+#### 2. Deploy Additional Modules
+
+After infrastructure is deployed, deploy the Safe modules:
+
+```bash
+# Deploy SafeDebtManager
+npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base --verify
+
+# Deploy LeveragedPosition
+npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base --verify
+```
+
+### Verification Scripts
+
+Verify individual contracts on block explorers:
+
+```bash
+# Verify TimelockController
+TIMELOCK_ADDRESS=0x... npx hardhat run scripts/verify-timelock.ts --network base
+
+# Verify ProtocolRegistry
+npx hardhat run scripts/verify-protocolRegistry.ts --network base
+
+# Verify SafeDebtManager
+npx hardhat run scripts/verify-safe-debt-manager.ts --network base
+
+# Verify LeveragedPosition
+npx hardhat run scripts/verify-leveraged-position.ts --network base
+```
+
+### Timelock Operations
+
+For critical operations (updating Paraswap or operator):
+
+```bash
+# Schedule operation (requires proposer role)
+TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
+npx hardhat run scripts/timelock-update-paraswap.ts --network base
+
+# Wait 2 days, then execute
+EXECUTE=true TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
+npx hardhat run scripts/timelock-update-paraswap.ts --network base
+```
+
 ## Setup and Development
 
 1. Install dependencies:
@@ -378,19 +244,13 @@ struct ParaswapParams {
 npm install
 ```
 
-2. Set up environment variables:
-
-Create a `.env` file in the project root with the following variables:
-
-You can use `.env.sample` as a template.
-
-3. Compile contracts:
+2. Compile contracts:
 
 ```bash
 npm run compile
 ```
 
-4. Run tests:
+3. Run tests:
 
 ```bash
 npm run test
@@ -400,6 +260,7 @@ The project uses:
 
 - Solidity version 0.8.28
 - Hardhat for development and testing
+- Hardhat Ignition for deployments
 - OpenZeppelin contracts for standard implementations
 - Uniswap V3 for flash loans
 - Paraswap for token swaps
@@ -424,12 +285,36 @@ npm run test
 
 The contracts include several security features:
 
-- Non-reentrant function protection
-- Access control via Ownable pattern
-- Safe ERC20 operations using GPv2SafeERC20
-- Flash loan validation
-- Emergency withdrawal functionality
-- Protocol fee limits (max 1%)
+### Access Control & Governance
+
+- **Timelock Controller**: 2-day delay for critical operations (Paraswap and operator updates)
+- **Hybrid Access Control**:
+    - `DEFAULT_ADMIN_ROLE`: For routine operations (immediate execution)
+    - `CRITICAL_ROLE`: For critical operations (requires timelock)
+- **Operator Authorization**: Centralized operator management through ProtocolRegistry
+    - Both `SafeDebtManager` and `LeveragedPosition` read operator from registry
+    - Supports both operator-initiated and Safe owner-initiated transactions
+
+### Smart Contract Security
+
+- **Reentrancy Protection**: All state-changing functions protected via OpenZeppelin's `ReentrancyGuard`
+- **Ownership Pattern**: Uses OpenZeppelin's `Ownable` for administrative functions
+- **Safe ERC20 Operations**: Uses `GPv2SafeERC20` for secure token transfers
+- **Flash Loan Validation**: Validates Uniswap V3 pool callbacks via `CallbackValidation`
+
+### Safe Integration Security
+
+- **Authorization Check**: Only authorized callers (operator or Safe itself) can execute operations
+- **Safe Multi-sig Support**: Safe owners must use multi-sig process to manage positions
+- **No Individual Owner Calls**: Individual Safe owners cannot call directly (prevents malicious contract exploits)
+
+### Additional Protections
+
+- **Emergency Withdrawal**: Owner can withdraw stuck tokens in emergency situations
+- **Protocol Fee Limits**: Maximum fee capped at 1% (100 basis points)
+- **Pausable Contracts**: Designated pauser can pause operations in emergency situations
+- **Input Validation**: Comprehensive checks on all function parameters
+- **Whitelist System**: Only whitelisted tokens can be used in the protocol
 
 ## License
 
