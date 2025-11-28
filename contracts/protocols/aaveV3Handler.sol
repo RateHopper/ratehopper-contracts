@@ -108,7 +108,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
 
             TransferHelper.safeApprove(collateralAssets[i].asset, address(aaveV3Pool), currentBalance);
             aaveV3Pool.supply(collateralAssets[i].asset, currentBalance, onBehalfOf, 0);
-            IERC20(collateralAssets[i].asset).approve(address(aaveV3Pool), 0);
+            TransferHelper.safeApprove(collateralAssets[i].asset, address(aaveV3Pool), 0);
         }
         
         aaveV3Pool.borrow(toAsset, amount, 2, 0, onBehalfOf);

@@ -11,6 +11,7 @@ import {ProtocolRegistry} from "../ProtocolRegistry.sol";
 import "../protocols/BaseProtocolHandler.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../interfaces/IWETH9.sol";
+import {TransferHelper} from "../dependencies/TransferHelper.sol";
 
 contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
     using GPv2SafeERC20 for IERC20;
@@ -56,9 +57,10 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
 
         if (fromContract == address(0)) revert TokenNotRegistered();
         if (toContract == address(0)) revert TokenNotRegistered();
-        IERC20(fromAsset).approve(address(fromContract), amount);
 
+        TransferHelper.safeApprove(fromAsset, address(fromContract), amount);
         IMToken(fromContract).repayBorrowBehalf(onBehalfOf, amount);
+        TransferHelper.safeApprove(fromAsset, address(fromContract), 0);
 
         bytes memory borrowData = abi.encodeCall(IMToken.borrow, (amountTotal));
         bool successBorrow = ISafe(onBehalfOf).execTransactionFromModule(
@@ -94,7 +96,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
 
         if (fromContract == address(0)) revert TokenNotRegistered();
 
-        IERC20(fromAsset).approve(address(fromContract), amount);
+        TransferHelper.safeApprove(fromAsset, address(fromContract), amount);
         IMToken(fromContract).repayBorrowBehalf(onBehalfOf, amount);
 
         for (uint256 i = 0; i < collateralAssets.length; i++) {
@@ -291,9 +293,9 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
             return;
         }
 
-        IERC20(asset).approve(address(mContract), repayAmount);
+        TransferHelper.safeApprove(asset, address(mContract), repayAmount);
         IMToken(mContract).repayBorrowBehalf(onBehalfOf, repayAmount);
-
+        TransferHelper.safeApprove(asset, address(mContract), 0);
     }
 
     function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
