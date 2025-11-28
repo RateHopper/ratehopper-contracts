@@ -125,7 +125,17 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
 
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(extraData, (MarketParams, uint256));
 
-        uint256 approvalAmount = borrowShares > 0 ? type(uint256).max : amount;
+        uint256 approvalAmount;
+        if (borrowShares > 0) {
+            // Calculate exact amount needed from shares with 20% buffer
+            // https://docs.morpho.org/build/borrow/concepts/market-mechanics#full-repayment-shares-first
+            Id marketId = marketParams.id();
+            Market memory m = morpho.market(marketId);
+            approvalAmount = borrowShares.toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares) * 120 / 100;
+        } else {
+            approvalAmount = amount;
+        }
+
         TransferHelper.safeApprove(asset, address(morpho), approvalAmount);
 
         // If borrowShares > 0, repay by shares (for full repayment), otherwise repay by amount

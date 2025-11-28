@@ -272,13 +272,15 @@ describe("Create leveraged position", function () {
         console.log("Original debt amount:", ethers.formatUnits(debtAmountBefore, debtDecimals));
         console.log("Debt amount with 1% buffer:", ethers.formatUnits(debtAmountToPass, debtDecimals));
 
+        const debtAmountWithInterestBuffer = (debtAmountBefore * 102n) / 100n;
+
         await myContract.closeLeveragedPosition(
             flashloanPool,
             protocol,
             collateralAddress,
             collateralAmountBefore,
             debtAsset,
-            debtAmountBefore,
+            debtAmountWithInterestBuffer,
             impersonatedSigner.address,
             extraData,
             paraswapData,
