@@ -268,9 +268,9 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
     function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
-        (address vaultAddress, , ) = abi.decode(extraData, (address, uint256, bool));
+        (address vaultAddress, uint256 nftId, ) = abi.decode(extraData, (address, uint256, bool));
 
-        _supplyCollateral(vaultAddress, 0, asset, amount, onBehalfOf);
+        _supplyCollateral(vaultAddress, nftId, asset, amount, onBehalfOf);
     }
 
     function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyAuthorizedCaller(onBehalfOf) nonReentrant {
