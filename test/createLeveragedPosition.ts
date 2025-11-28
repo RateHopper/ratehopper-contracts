@@ -174,7 +174,7 @@ describe("Create leveraged position", function () {
         expect(Number(debtRemainingBalance)).to.be.equal(0);
     }
 
-    async function closeLeveragedPosition(
+    async function deleveragePosition(
         flashloanPool: string,
         protocol: Protocols,
         collateralAddress = cbETH_ADDRESS,
@@ -257,8 +257,8 @@ describe("Create leveraged position", function () {
         const collateralToken = new ethers.Contract(collateralAddress, ERC20_ABI, impersonatedSigner);
         const userCollateralBalanceBefore = await collateralToken.balanceOf(impersonatedSigner.address);
 
-        // Log all parameters before calling closeLeveragedPosition
-        console.log("=== closeLeveragedPosition Parameters ===");
+        // Log all parameters before calling deleveragePosition
+        console.log("=== deleveragePosition Parameters ===");
         console.log("flashloanPool:", flashloanPool);
         console.log("protocol:", protocol);
         console.log("collateralAddress:", collateralAddress);
@@ -274,7 +274,7 @@ describe("Create leveraged position", function () {
 
         const debtAmountWithInterestBuffer = (debtAmountBefore * 102n) / 100n;
 
-        await myContract.closeLeveragedPosition(
+        await myContract.deleveragePosition(
             flashloanPool,
             protocol,
             collateralAddress,
@@ -358,7 +358,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.AAVE_V3);
+            await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3);
         });
 
         it("create and close position with WETH collateral", async function () {
@@ -366,7 +366,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
+            await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
         });
 
         it("partial close position with cbETH collateral", async function () {
@@ -375,7 +375,7 @@ describe("Create leveraged position", function () {
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             // Partially close 50% of the position
-            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.AAVE_V3, cbETH_ADDRESS, USDC_ADDRESS, undefined, 50);
+            await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3, cbETH_ADDRESS, USDC_ADDRESS, undefined, 50);
         });
 
         it("with cbETH collateral and USDbC debt", async function () {
@@ -415,7 +415,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.COMPOUND);
+            await deleveragePosition(ETH_USDC_POOL, Protocols.COMPOUND);
         });
 
         // USDbC is no longer available in Compound
@@ -440,7 +440,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
+            await deleveragePosition(ETH_USDC_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
         });
     });
 
@@ -458,7 +458,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.MORPHO, cbETH_ADDRESS, USDC_ADDRESS, morphoMarket1Id);
+            await deleveragePosition(ETH_USDC_POOL, Protocols.MORPHO, cbETH_ADDRESS, USDC_ADDRESS, morphoMarket1Id);
         });
 
         it("with cbETH collateral and protocol fee", async function () {
@@ -578,7 +578,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await closeLeveragedPosition(ETH_USDC_POOL, Protocols.MORPHO, WETH_ADDRESS, USDC_ADDRESS, morphoMarket7Id);
+            await deleveragePosition(ETH_USDC_POOL, Protocols.MORPHO, WETH_ADDRESS, USDC_ADDRESS, morphoMarket7Id);
         });
     });
 

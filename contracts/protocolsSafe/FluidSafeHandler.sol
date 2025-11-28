@@ -309,14 +309,15 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
     function _withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) internal {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
-        (address vaultAddress, uint256 nftId, ) = abi.decode(extraData, (address, uint256, bool));
+        (address vaultAddress, uint256 nftId, bool isFullWithdraw) = abi.decode(extraData, (address, uint256, bool));
 
-        // Withdraw all collateral from the position
+        // Determine withdraw amount: full withdraw uses type(int).min, partial uses negative amount
+        int256 withdrawAmount = isFullWithdraw ? type(int).min : -int256(amount);
+
         bool successWithdraw = ISafe(onBehalfOf).execTransactionFromModule(
             vaultAddress,
             0,
-            // Support only full withdraw on Fluid to avoid error
-            abi.encodeCall(IFluidVault.operate, (nftId, type(int).min, 0, address(this))),
+            abi.encodeCall(IFluidVault.operate, (nftId, withdrawAmount, 0, address(this))),
             ISafe.Operation.Call
         );
         require(successWithdraw, "Fluid withdraw failed");

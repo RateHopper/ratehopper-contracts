@@ -166,7 +166,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         pool.flash(address(this), amount0, amount1, data);
     }
 
-    function closeLeveragedPosition(
+    function deleveragePosition(
         address _flashloanPool,
         Protocol _protocol,
         address _collateralAsset,
