@@ -518,8 +518,8 @@ describe("Create leveraged position", function () {
                 Protocols.MORPHO,
                 USDC_ADDRESS,
                 WETH_ADDRESS,
-                1,
-                2,
+                10, // Increased from 1 to 10 USDC to avoid Paraswap edge case with small amounts
+                20, // Increased from 2 to 20 USDC
                 morphoMarket6Id,
             );
         });
@@ -547,8 +547,8 @@ describe("Create leveraged position", function () {
                 Protocols.MORPHO,
                 USDC_ADDRESS,
                 WETH_ADDRESS,
-                1,
-                2,
+                10,
+                20,
                 morphoMarket6Id,
             );
 

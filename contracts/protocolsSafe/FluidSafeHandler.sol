@@ -110,7 +110,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         );
         require(successRepay, "Fluid repay failed");
 
-        _withdraw(collateralAssets[0].asset, 0, onBehalfOf, extraData);
+        _withdraw(collateralAssets[0].asset, collateralAssets[0].amount, onBehalfOf, extraData);
     }
 
     function switchTo(

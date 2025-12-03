@@ -562,6 +562,10 @@ describe("Safe wallet should debtSwap", function () {
                 USDC_ADDRESS,
                 Protocols.MOONWELL,
                 Protocols.AAVE_V3,
+                cbETH_ADDRESS,
+                {
+                    operator, // Call directly to properly catch the revert reason
+                },
             ),
         ).to.be.revertedWith("Invalid flashloan pool address");
     });
@@ -689,7 +693,7 @@ describe("Safe wallet should debtSwap", function () {
                 const nftId = await fromHelper.getNftId(vaultAddress, safeAddress);
                 fromExtraData = ethers.AbiCoder.defaultAbiCoder().encode(
                     ["address", "uint256", "bool"],
-                    [vaultAddress, nftId, false],
+                    [vaultAddress, nftId, true],
                 );
                 break;
         }
@@ -784,13 +788,31 @@ describe("Safe wallet should debtSwap", function () {
             operation: OperationType.Call,
         };
 
-        const safeTransaction = await safeWallet.createTransaction({
-            transactions: [executeDebtSwapTxData],
-        });
+        // If operator is provided, call directly (for testing authorization)
+        // Otherwise, call via Safe transaction
+        if (options.operator) {
+            await moduleContract.executeDebtSwap(
+                flashloanPool,
+                fromProtocol,
+                toProtocol,
+                fromTokenAddress,
+                toTokenAddress,
+                MaxUint256,
+                [{ asset: collateralTokenAddress, amount: collateralAmount }],
+                safeAddress,
+                [fromExtraData, toExtraData],
+                paraswapData,
+                { gasLimit: "2000000" },
+            );
+        } else {
+            const safeTransaction = await safeWallet.createTransaction({
+                transactions: [executeDebtSwapTxData],
+            });
 
-        await safeWallet.executeTransaction(safeTransaction, {
-            gasLimit: "2000000",
-        });
+            await safeWallet.executeTransaction(safeTransaction, {
+                gasLimit: "2000000",
+            });
+        }
 
         const srcDebtAfter = await fromHelper.getDebtAmount(fromDebtAmountParameter, safeAddress);
         const dstDebtAfter = await toHelper.getDebtAmount(toDebtAmountParameter, safeAddress);
@@ -827,9 +849,19 @@ describe("Safe wallet should debtSwap", function () {
             await disableTx.wait();
             console.log("Disabled switchFrom for Fluid");
 
-            // Try to execute debt swap - should fail
+            // Try to execute debt swap - should fail (call with operator to catch revert reason)
             await expect(
-                executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.AAVE_V3),
+                executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    Protocols.FLUID,
+                    Protocols.AAVE_V3,
+                    cbETH_ADDRESS,
+                    {
+                        operator,
+                    },
+                ),
             ).to.be.revertedWith("SwitchFrom is disabled for from protocol");
         });
 
@@ -846,9 +878,19 @@ describe("Safe wallet should debtSwap", function () {
             await disableTx.wait();
             console.log("Disabled switchTo for Aave");
 
-            // Try to execute debt swap - should fail
+            // Try to execute debt swap - should fail (call with operator to catch revert reason)
             await expect(
-                executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.AAVE_V3),
+                executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    Protocols.FLUID,
+                    Protocols.AAVE_V3,
+                    cbETH_ADDRESS,
+                    {
+                        operator,
+                    },
+                ),
             ).to.be.revertedWith("SwitchTo is disabled for to protocol");
         });
 
@@ -990,7 +1032,7 @@ describe("Safe wallet should debtSwap", function () {
             const disableTx = await contractByPauser.setProtocolEnabledForSwitchFrom(Protocols.FLUID, false);
             await disableTx.wait();
 
-            // Try switchIn - should fail because switchFrom is disabled
+            // Try switchIn - should fail because switchFrom is disabled (call with operator to catch revert reason)
             await expect(
                 executeDebtSwap(
                     ETH_USDC_POOL,
@@ -1002,6 +1044,7 @@ describe("Safe wallet should debtSwap", function () {
                     {
                         fromFluidVaultAddress: FLUID_cbETH_USDC_VAULT,
                         tofluidVaultAddress: FLUID_cbETH_EURC_VAULT,
+                        operator,
                     },
                 ),
             ).to.be.revertedWith("SwitchFrom is disabled for from protocol");
@@ -1013,7 +1056,7 @@ describe("Safe wallet should debtSwap", function () {
             const disableToTx = await contractByPauser.setProtocolEnabledForSwitchTo(Protocols.FLUID, false);
             await disableToTx.wait();
 
-            // Try switchIn again - should fail because switchTo is disabled
+            // Try switchIn again - should fail because switchTo is disabled (call with operator to catch revert reason)
             await expect(
                 executeDebtSwap(
                     ETH_USDC_POOL,
@@ -1025,6 +1068,7 @@ describe("Safe wallet should debtSwap", function () {
                     {
                         fromFluidVaultAddress: FLUID_cbETH_USDC_VAULT,
                         tofluidVaultAddress: FLUID_cbETH_EURC_VAULT,
+                        operator,
                     },
                 ),
             ).to.be.revertedWith("SwitchTo is disabled for to protocol");

@@ -13,11 +13,10 @@ describe("SafeDebtManager Pausable", function () {
     let pauser: any;
 
     beforeEach(async function () {
-        safeModuleContract = await loadFixture(deploySafeContractFixture);
+        const { safeModule } = await loadFixture(deploySafeContractFixture);
+        safeModuleContract = safeModule;
 
         [owner, user, operator, pauser] = await ethers.getSigners();
-
-        await safeModuleContract.setoperator(operator.address);
     });
 
     describe("Pause functionality", function () {
