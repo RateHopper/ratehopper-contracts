@@ -180,7 +180,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         require(_collateralAsset != address(0), "Invalid collateral asset address");
         require(_debtAsset != address(0), "Invalid debt asset address");
         require(_collateralAmount > 0, "Invalid collateral amount");
-        require(_debtAmount > 0, "Invalid debt amount");
+        require(_debtAmount >= 10000, "Debt amount below minimum threshold");
 
         address handler = protocolHandlers[_protocol];
         require(handler != address(0), "Invalid protocol handler");

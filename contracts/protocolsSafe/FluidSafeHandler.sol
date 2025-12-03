@@ -57,7 +57,9 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         }
 
         // Add tiny amount buffer to avoid repay amount slightly increasing and causing revert
-        return (debtAmount * 10001) / 10000;
+        uint256 bufferAmount = (debtAmount * 10005) / 10000;  // 0.05% buffer
+        uint256 fixedBuffer = 1000;  // Fixed 1000 wei buffer
+        return bufferAmount + fixedBuffer;
     }
 
     function switchIn(
@@ -139,6 +141,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         uint256 positionNftId;
         if (nftId == 0) {
             (positionNftId, , ) = abi.decode(returnData, (uint256, int256, int256));
+            require(positionNftId > 0, "Invalid NFT ID returned");
         } else {
             positionNftId = nftId;
         }
@@ -159,15 +162,17 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
 
         // Determine repay amount based on isFullRepay flag from extraData
         int256 repayAmount;
-        uint256 transferAmount;
+        uint256 approvalAmount;
 
         if (isFullRepay) {
             // Use actual balance for transfer when full repayment is requested
-            transferAmount = IERC20(asset).balanceOf(address(this));
+            amount = IERC20(asset).balanceOf(address(this));
             // For Fluid full repayment, use type(int).min
             repayAmount = type(int).min;
+
+            // For full repayment, approve a bit more to account for accrued interest
+            approvalAmount = (amount * 10005) / 10000;  // 0.05% buffer
         } else {
-            transferAmount = amount;
             repayAmount = -int256(amount);
 
             // To avoid FluidVaultError(ErrorTypes.Vault__InvalidOperateAmount) error, skip repayment if amount is very small
@@ -175,14 +180,15 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
             if (repayAmount > -10000) {
                 return;
             }
+            approvalAmount = amount;
         }
 
-        IERC20(asset).transfer(onBehalfOf, transferAmount);
+        IERC20(asset).transfer(onBehalfOf, amount);
 
         bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
             asset,
             0,
-            abi.encodeCall(IERC20.approve, (address(vaultAddress), transferAmount)),
+            abi.encodeCall(IERC20.approve, (address(vaultAddress), approvalAmount)),
             ISafe.Operation.Call
         );
         require(successApprove, "Approval failed");

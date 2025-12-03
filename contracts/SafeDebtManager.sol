@@ -139,7 +139,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     ) public onlyOwnerOrOperator(_onBehalfOf) whenNotPaused {
         require(_fromDebtAsset != address(0), "Invalid from asset address");
         require(_toDebtAsset != address(0), "Invalid to asset address");
-        require(_amount > 0, "_amount cannot be zero");
+        require(_amount >= 10000, "Debt amount below minimum threshold");
 
         // Validate protocol handlers and check if protocols are enabled
         address fromHandler = protocolHandlers[_fromProtocol];
@@ -206,7 +206,9 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         int8 decimalDifference = int8(fromAssetDecimals) - int8(toAssetDecimals);
         uint flashloanFee;
         if (decimalDifference > 0) {
-            flashloanFee = flashloanFeeOriginal / (10 ** uint8(decimalDifference));
+            // Round up: (a + b - 1) / b
+            uint divisor = 10 ** uint8(decimalDifference);
+            flashloanFee = (flashloanFeeOriginal + divisor - 1) / divisor;
         } else if (decimalDifference < 0) {
             flashloanFee = flashloanFeeOriginal * (10 ** uint8(-decimalDifference));
         } else {
@@ -361,7 +363,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         bool _withdrawCollateral
     ) external onlyOwnerOrOperator(_onBehalfOf) whenNotPaused {
         require(_debtAsset != address(0), "Invalid debt asset address");
-        require(_debtAmount > 0, "Debt amount cannot be zero");
+        require(_debtAmount >= 10000, "Debt amount below minimum threshold");
         if (_withdrawCollateral) {
             require(_collateralAssets.length > 0, "Must withdraw at least one collateral asset");
         }

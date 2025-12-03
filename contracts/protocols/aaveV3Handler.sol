@@ -101,7 +101,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(address(this));
             require(currentBalance > 0, "No collateral balance available");
             require(
-                currentBalance * 100 < collateralAssets[i].amount * 101,
+                currentBalance * 100 < collateralAssets[i].amount * 105,
                 "Current balance is more than collateral amount + buffer"
             );
         
@@ -117,6 +117,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
     function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         TransferHelper.safeApprove(asset, address(aaveV3Pool), amount);
         aaveV3Pool.supply(asset, amount, onBehalfOf, 0);
+        TransferHelper.safeApprove(asset, address(aaveV3Pool), 0);
     }
 
     function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {

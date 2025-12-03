@@ -98,6 +98,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
 
         TransferHelper.safeApprove(fromAsset, address(fromContract), amount);
         IMToken(fromContract).repayBorrowBehalf(onBehalfOf, amount);
+        TransferHelper.safeApprove(fromAsset, address(fromContract), 0);
 
         for (uint256 i = 0; i < collateralAssets.length; i++) {
             require(registry.isWhitelisted(collateralAssets[i].asset), "Collateral asset is not whitelisted");
