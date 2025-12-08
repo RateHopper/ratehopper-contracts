@@ -11,7 +11,7 @@ const ROUTER_ADDRESS = "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43";
 const factoryAddress = "0x420DD381b31aEf6683db6B902084cB0FFECe40Da";
 
 const provider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
-const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, provider);
 
 async function main() {
   const routerContract = new ethers.Contract(ROUTER_ADDRESS, routerABI, signer);

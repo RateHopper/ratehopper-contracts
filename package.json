@@ -1,8 +1,11 @@
 {
-    "name": "loan-product-use-case-2",
-    "version": "1.0.0",
-    "description": "",
+    "name": "ratehopper-contracts",
+    "version": "1.1.0",
+    "description": "Ratehopper.ai - The Refinancing Layer for Autonomous Debt Markets Redefining Financial Efficiency for Decentralized Lending. Learn more: https://ratehopper.ai",
     "main": "index.js",
+    "engines": {
+        "node": ">=22.21.1"
+    },
     "scripts": {
         "test": "node --max-old-space-size=12288 --expose-gc --optimize-for-size ./node_modules/.bin/hardhat test",
         "test:memory": "node --max-old-space-size=4096 ./node_modules/.bin/hardhat test",
@@ -26,8 +29,8 @@
         "verify:leveraged-position": "npx hardhat run scripts/verify-leveraged-position.ts --network base",
         "wipe": "npx hardhat ignition wipe chain-8453"
     },
-    "author": "",
-    "license": "ISC",
+    "author": "Ratehopper AI",
+    "license": "BUSL-1.1",
     "dependencies": {
         "@aave/core-v3": "^1.19.3",
         "@gnosis-guild/eth-sdk": "^0.4.0",
@@ -86,5 +89,5 @@
         "typechain": "^8.3.0",
         "typescript": ">=4.5.0"
     },
-    "packageManager": "yarn@4.9.2"
+    "packageManager": "yarn@4.12.0"
 }

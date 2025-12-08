@@ -8,7 +8,7 @@ dotenv.config();
 
 async function main() {
     const provider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
-    const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+    const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, provider);
     const senderAddress = signer.address;
 
     const providerOptionsEtherV6 = {

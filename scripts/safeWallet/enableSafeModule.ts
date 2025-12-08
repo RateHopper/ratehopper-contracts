@@ -6,7 +6,7 @@ async function main() {
     const ourContractAddress = "0x85C434815d00352BBab9a90b884D1c299aEf9969";
     const safeWallet = await Safe.init({
         provider: "https://base.llamarpc.com",
-        signer: process.env.MY_SAFE_OWNER_KEY!,
+        signer: process.env.TESTING_SAFE_OWNER_KEY!,
         safeAddress: "0x169EeC0c73a76a520e4cFd8Bb982c5237C3f4977",
     });
 

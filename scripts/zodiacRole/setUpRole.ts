@@ -96,8 +96,8 @@ async function applyPermissionsToRole(targets: any[]) {
     console.log("\n⚙️  Step 2: Applying Permissions to Role\n");
 
     // Use Safe owner key if provided, otherwise fall back to default signer
-    const signer = process.env.MY_SAFE_OWNER_KEY
-        ? new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY, ethers.provider)
+    const signer = process.env.TESTING_SAFE_OWNER_KEY
+        ? new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY, ethers.provider)
         : (await ethers.getSigners())[0];
 
     // Check if signer is the owner of the Roles Modifier
@@ -176,8 +176,8 @@ async function assignRoleToOperator() {
     console.log("\n👤 Step 3: Assigning Role to Operator\n");
 
     // Use Safe owner key if provided, otherwise fall back to default signer
-    const signer = process.env.MY_SAFE_OWNER_KEY
-        ? new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY, ethers.provider)
+    const signer = process.env.TESTING_SAFE_OWNER_KEY
+        ? new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY, ethers.provider)
         : (await ethers.getSigners())[0];
 
     const rolesContract = new ethers.Contract(CONFIG.rolesModAddress, rolesAbi, signer);
@@ -217,8 +217,8 @@ async function verifyConfiguration() {
     console.log("\n🔍 Step 4: Verifying Configuration\n");
 
     // Use Safe owner key if provided, otherwise fall back to default signer
-    const signer = process.env.MY_SAFE_OWNER_KEY
-        ? new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY, ethers.provider)
+    const signer = process.env.TESTING_SAFE_OWNER_KEY
+        ? new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY, ethers.provider)
         : (await ethers.getSigners())[0];
 
     const rolesContract = new ethers.Contract(CONFIG.rolesModAddress, rolesAbi, signer);

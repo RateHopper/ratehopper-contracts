@@ -54,11 +54,11 @@ async function main() {
     console.log();
 
     // Get operator signer from environment
-    if (!process.env.SAFE_OPERATOR_KEY) {
+    if (!process.env.TESTING_SAFE_OPERATOR_KEY) {
         throw new Error("❌ SAFE_OPERATOR_KEY not set in .env file");
     }
 
-    const operatorSigner = new ethers.Wallet(process.env.SAFE_OPERATOR_KEY, ethers.provider);
+    const operatorSigner = new ethers.Wallet(process.env.TESTING_SAFE_OPERATOR_KEY, ethers.provider);
 
     console.log("Configuration:");
     console.log("- Operator Address:", operatorSigner.address);
@@ -207,11 +207,11 @@ async function executeBatchExample() {
     console.log("=".repeat(70));
     console.log();
 
-    if (!process.env.SAFE_OPERATOR_KEY) {
+    if (!process.env.TESTING_SAFE_OPERATOR_KEY) {
         throw new Error("❌ SAFE_OPERATOR_KEY not set in .env file");
     }
 
-    const operatorSigner = new ethers.Wallet(process.env.SAFE_OPERATOR_KEY, ethers.provider);
+    const operatorSigner = new ethers.Wallet(process.env.TESTING_SAFE_OPERATOR_KEY, ethers.provider);
 
     const rolesContract = new ethers.Contract(CONFIG.rolesModAddress, rolesAbi, operatorSigner);
 

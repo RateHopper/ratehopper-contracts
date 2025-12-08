@@ -11,11 +11,11 @@ const AAVE_V3_POOL_ADDRESS = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5";
 async function main() {
     const safeWallet = await Safe.init({
         provider: "https://base.llamarpc.com",
-        signer: process.env.MY_SAFE_OWNER_KEY!,
+        signer: process.env.TESTING_SAFE_OWNER_KEY!,
         safeAddress: "0x169EeC0c73a76a520e4cFd8Bb982c5237C3f4977",
     });
 
-    const signer = new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY!);
+    const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!);
 
     const cbETHContract = new ethers.Contract(cbETH_ADDRESS, ERC20_ABI, signer);
 

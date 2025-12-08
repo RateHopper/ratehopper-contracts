@@ -234,7 +234,7 @@ describe("Safe wallet should debtSwap", function () {
     // Increase timeout for memory-intensive operations
     this.timeout(300000); // 5 minutes
 
-    const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, ethers.provider);
+    const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
     let operator: HardhatEthersSigner;
     let safeWallet;
     let safeModuleContract;
@@ -248,7 +248,7 @@ describe("Safe wallet should debtSwap", function () {
 
         safeWallet = await Safe.init({
             provider: eip1193Provider,
-            signer: process.env.PRIVATE_KEY,
+            signer: process.env.TESTING_SAFE_OWNER_KEY,
             safeAddress: safeAddress,
         });
 
