@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const provider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
-const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, provider);
 
 const uniswapV3PoolAddress = "0x06959273E9A65433De71F5A452D529544E07dDD0";
 

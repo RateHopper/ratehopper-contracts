@@ -14,11 +14,11 @@ const aTokenAddress = "0xcf3D55c10DB69f28fD1A75Bd73f3D8A2d9c595ad";
 async function main() {
     const safeWallet = await Safe.init({
         provider: "https://base.llamarpc.com",
-        signer: process.env.MY_SAFE_OWNER_KEY!,
+        signer: process.env.TESTING_SAFE_OWNER_KEY!,
         safeAddress,
     });
 
-    const signer = new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY!);
+    const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!);
 
     const token = new ethers.Contract(aTokenAddress, ERC20_ABI, signer);
 

@@ -5,7 +5,7 @@ dotenv.config();
 async function main() {
     const ourContractAddress = "0x3dB540120B824c0a0dfDb4CD7aDdcDa016ee63E6";
     const provider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
-    const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+    const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, provider);
 
     const safeModuleAbi = ["function setoperator(address _operator)"];
     const safeModuleContract = new ethers.Contract(ourContractAddress, safeModuleAbi, signer);

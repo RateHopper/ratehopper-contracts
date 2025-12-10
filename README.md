@@ -159,9 +159,8 @@ struct ParaswapParams {
 }
 ```
 
-## Deployment
 
-### Environment Variables
+## Environment Variables
 
 Create a `.env` file with the following required variables (use `.env.sample` as a template):
 
@@ -172,88 +171,24 @@ PAUSER_ADDRESS=0x...          # Address that can pause contracts
 DEPLOYER_PRIVATE_KEY=...      # Private key for deployment
 EXPLORER_KEY=...              # Block explorer API key for verification
 ```
-
-### Deployment Process
-
-The contracts use Hardhat Ignition for declarative deployments:
-
-#### 1. Deploy Full Infrastructure (Recommended)
-
-Deploy everything in one command:
-
-```bash
-npx hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base --verify
-```
-
-This deploys:
-
-- TimelockController (2-day delay)
-- ProtocolRegistry (with timelock configured)
-- All protocol handlers (Aave, Compound, Morpho, Fluid, Moonwell)
-- Token mappings and whitelists
-
-#### 2. Deploy Additional Modules
-
-After infrastructure is deployed, deploy the Safe modules:
-
-```bash
-# Deploy SafeDebtManager
-npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base --verify
-
-# Deploy LeveragedPosition
-npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base --verify
-```
-
-### Verification Scripts
-
-Verify individual contracts on block explorers:
-
-```bash
-# Verify TimelockController
-TIMELOCK_ADDRESS=0x... npx hardhat run scripts/verify-timelock.ts --network base
-
-# Verify ProtocolRegistry
-npx hardhat run scripts/verify-protocolRegistry.ts --network base
-
-# Verify SafeDebtManager
-npx hardhat run scripts/verify-safe-debt-manager.ts --network base
-
-# Verify LeveragedPosition
-npx hardhat run scripts/verify-leveraged-position.ts --network base
-```
-
-### Timelock Operations
-
-For critical operations (updating Paraswap or operator):
-
-```bash
-# Schedule operation (requires proposer role)
-TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
-npx hardhat run scripts/timelock-update-paraswap.ts --network base
-
-# Wait 2 days, then execute
-EXECUTE=true TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
-npx hardhat run scripts/timelock-update-paraswap.ts --network base
-```
-
 ## Setup and Development
 
 1. Install dependencies:
 
 ```bash
-npm install
+yarn install
 ```
 
 2. Compile contracts:
 
 ```bash
-npm run compile
+yarn compile
 ```
 
 3. Run tests:
 
 ```bash
-npm run test
+yarn test
 ```
 
 The project uses:
@@ -278,8 +213,74 @@ Comprehensive tests are available in the `/test` directory covering:
 Run tests with:
 
 ```bash
-npm run test
+yarn test
 ```
+
+## Deployment
+
+The contracts use Hardhat Ignition for declarative deployments. Make sure you complete the sections Environment Variables and Setup and Development and make sure all tests pass before deploying.
+
+### 1. Deploy Full Infrastructure (Recommended)
+
+Deploy everything in one command:
+
+```bash
+yarn hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base --verify
+```
+
+This deploys:
+
+- TimelockController (2-day delay)
+- ProtocolRegistry (with timelock configured)
+- All protocol handlers (Aave, Compound, Morpho, Fluid, Moonwell)
+- Token mappings and whitelists
+
+### 2. Deploy Additional Modules
+
+After infrastructure is deployed, deploy the Safe modules:
+
+```bash
+# Deploy SafeDebtManager
+yarn hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base --verify
+
+# Deploy LeveragedPosition
+yarn hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base --verify
+```
+
+### Verification Scripts
+
+Verify individual contracts on block explorers:
+
+```bash
+# Verify TimelockController
+TIMELOCK_ADDRESS=0x... yarn hardhat run scripts/verify-timelock.ts --network base
+
+# Verify ProtocolRegistry
+yarn hardhat run scripts/verify-protocolRegistry.ts --network base
+
+# Verify SafeDebtManager
+yarn hardhat run scripts/verify-safe-debt-manager.ts --network base
+
+# Verify LeveragedPosition
+yarn hardhat run scripts/verify-leveraged-position.ts --network base
+```
+
+### Timelock Operations
+
+For critical operations (updating Paraswap address):
+
+```bash
+# Schedule operation (requires proposer role)
+TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
+yarn hardhat run scripts/timelock-update-paraswap.ts --network base
+
+# Wait 2 days, then execute
+EXECUTE=true TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
+yarn hardhat run scripts/timelock-update-paraswap.ts --network base
+```
+
+> **Note**: Updating the operator address (`setOperator`) also requires the timelock. Create a similar script based on `timelock-update-paraswap.ts` if needed.
+
 
 ## Security Features
 
@@ -318,4 +319,8 @@ The contracts include several security features:
 
 ## License
 
-MIT
+Business Source License 1.1 (BUSL-1.1)
+
+Licensed under the Business Source License 1.1. After December 8, 2028 (4 years from initial release), the license converts to GPL-2.0-or-later.
+
+See [LICENSE](./LICENSE) for details.

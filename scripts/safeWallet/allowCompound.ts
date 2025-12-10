@@ -12,11 +12,11 @@ const safeModuleAddress = "0xA75b7691FF816122804e0Ed09a24590243CF7617";
 async function main() {
     const safeWallet = await Safe.init({
         provider: "https://base.llamarpc.com",
-        signer: process.env.MY_SAFE_OWNER_KEY!,
+        signer: process.env.TESTING_SAFE_OWNER_KEY!,
         safeAddress,
     });
 
-    const signer = new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY!);
+    const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!);
 
     const comet = new ethers.Contract(USDbC_COMET_ADDRESS, cometAbi, signer);
 

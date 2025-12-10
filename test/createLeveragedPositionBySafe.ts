@@ -40,7 +40,7 @@ describe("Create leveraged position by Safe", function () {
 
     let safeWallet;
     let operator: HardhatEthersSigner;
-    const safeOwnerWallet = new ethers.Wallet(process.env.PRIVATE_KEY!, ethers.provider);
+    const safeOwnerWallet = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
 
     this.beforeEach(async () => {
         impersonatedSigner = await ethers.getImpersonatedSigner(TEST_ADDRESS);
@@ -64,7 +64,7 @@ describe("Create leveraged position by Safe", function () {
 
         safeWallet = await Safe.init({
             provider: eip1193Provider,
-            signer: process.env.PRIVATE_KEY,
+            signer: process.env.TESTING_SAFE_OWNER_KEY,
             safeAddress: safeAddress,
         });
     });

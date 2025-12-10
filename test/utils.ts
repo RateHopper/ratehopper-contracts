@@ -120,7 +120,7 @@ export async function getParaswapData(
 }
 
 export async function fundETH(receiverAddress: string) {
-    const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!, ethers.provider); // Replace with a funded Hardhat account
+    const wallet = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider); // Replace with a funded Hardhat account
 
     const tx = await wallet.sendTransaction({
         to: receiverAddress,

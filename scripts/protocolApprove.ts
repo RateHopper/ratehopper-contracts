@@ -10,7 +10,7 @@ import aaveProtocolDataProviderAbi from "../externalAbi/aaveV3/aaveProtocolDataP
 import aaveV3PoolJson from "../externalAbi/aaveV3/aaveV3Pool.json";
 const debtSwapContractAddress = "0x7c60013D3ad4C4696F80f56FF42f806c6fB11e69";
 const provider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
-const signer = new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY!, provider);
+const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, provider);
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import morphoAbi from "../externalAbi/morpho/morpho.json";
 

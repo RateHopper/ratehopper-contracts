@@ -13,11 +13,11 @@ const safeAddress = "0x169EeC0c73a76a520e4cFd8Bb982c5237C3f4977";
 async function main() {
     const safeWallet = await Safe.init({
         provider: "https://base.llamarpc.com",
-        signer: process.env.MY_SAFE_OWNER_KEY!,
+        signer: process.env.TESTING_SAFE_OWNER_KEY!,
         safeAddress,
     });
 
-    const signer = new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY!);
+    const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!);
 
     const aavePool = new ethers.Contract(AAVE_V3_POOL_ADDRESS, aaveV3PoolJson, signer);
 

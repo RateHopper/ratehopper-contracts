@@ -40,7 +40,7 @@ async function main() {
     console.log("Deployer balance:", ethers.formatEther(await ethers.provider.getBalance(deployer.address)), "ETH\n");
 
     // Get parameters from environment
-    const safeAddress = process.env.SAFE_WALLET_ADDRESS;
+    const safeAddress = process.env.TESTING_SAFE_WALLET_ADDRESS;
     const ownerAddress = "0x9E073c36F63BF1c611026fdA1fF6007A81932231";
 
     if (!safeAddress || safeAddress === "YOUR_SAFE_ADDRESS_HERE") {
@@ -132,14 +132,14 @@ async function main() {
     console.log();
     console.log("📌 Enabling module on Safe...");
 
-    if (!process.env.MY_SAFE_OWNER_KEY) {
+    if (!process.env.TESTING_SAFE_OWNER_KEY) {
         throw new Error("❌ MY_SAFE_OWNER_KEY not set in .env file");
     }
 
     try {
         const safeWallet = await Safe.init({
             provider: "https://base.llamarpc.com",
-            signer: process.env.MY_SAFE_OWNER_KEY,
+            signer: process.env.TESTING_SAFE_OWNER_KEY,
             safeAddress: safeAddress,
         });
 
