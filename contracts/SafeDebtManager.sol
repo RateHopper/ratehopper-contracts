@@ -2,9 +2,10 @@
 pragma solidity ^0.8.28;
 
 import "./dependencies/uniswapV3/CallbackValidation.sol";
-import {IERC20} from "./dependencies/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {PoolAddress} from "./dependencies/uniswapV3/PoolAddress.sol";
-import {GPv2SafeERC20} from "./dependencies/GPv2SafeERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "./Types.sol";
 import "./interfaces/safe/ISafe.sol";
@@ -13,10 +14,9 @@ import "./ProtocolRegistry.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
-import "./dependencies/TransferHelper.sol";
 
 contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
-    using GPv2SafeERC20 for IERC20;
+    using SafeERC20 for IERC20;
     uint8 public protocolFee;
     address public feeBeneficiary;
     address public pauser;
@@ -136,7 +136,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         address _onBehalfOf,
         bytes[2] calldata _extraData,
         ParaswapParams calldata _paraswapParams
-    ) public onlyOwnerOrOperator(_onBehalfOf) whenNotPaused {
+    ) public nonReentrant onlyOwnerOrOperator(_onBehalfOf) whenNotPaused {
         require(_fromDebtAsset != address(0), "Invalid from asset address");
         require(_toDebtAsset != address(0), "Invalid to asset address");
         require(_amount >= 10000, "Debt amount below minimum threshold");
@@ -201,16 +201,16 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         uint flashloanFeeOriginal = fee0 + fee1;
 
         // need this flashloanFee conversion to calculate amountTotal correctly when fromAsset and toAsset have different decimals
-        uint8 fromAssetDecimals = IERC20(decoded.fromAsset).decimals();
-        uint8 toAssetDecimals = IERC20(decoded.toAsset).decimals();
-        int8 decimalDifference = int8(fromAssetDecimals) - int8(toAssetDecimals);
+        uint8 fromAssetDecimals = IERC20Metadata(decoded.fromAsset).decimals();
+        uint8 toAssetDecimals = IERC20Metadata(decoded.toAsset).decimals();
+        int256 decimalDifference = int256(uint256(fromAssetDecimals)) - int256(uint256(toAssetDecimals));
         uint flashloanFee;
         if (decimalDifference > 0) {
             // Round up: (a + b - 1) / b
-            uint divisor = 10 ** uint8(decimalDifference);
+            uint divisor = 10 ** uint256(decimalDifference);
             flashloanFee = (flashloanFeeOriginal + divisor - 1) / divisor;
         } else if (decimalDifference < 0) {
-            flashloanFee = flashloanFeeOriginal * (10 ** uint8(-decimalDifference));
+            flashloanFee = flashloanFeeOriginal * (10 ** uint256(-decimalDifference));
         } else {
             flashloanFee = flashloanFeeOriginal;
         }
@@ -223,9 +223,9 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
             // Convert amount to toAsset decimals first
             uint256 amountInToAssetDecimals = decoded.amount;
             if (decimalDifference > 0) {
-                amountInToAssetDecimals = decoded.amount / (10 ** uint8(decimalDifference));
+                amountInToAssetDecimals = decoded.amount / (10 ** uint256(decimalDifference));
             } else if (decimalDifference < 0) {
-                amountInToAssetDecimals = decoded.amount * (10 ** uint8(-decimalDifference));
+                amountInToAssetDecimals = decoded.amount * (10 ** uint256(-decimalDifference));
             }
             protocolFeeAmount = (amountInToAssetDecimals * protocolFee) / 10000;
         }
@@ -328,7 +328,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     ) internal {
         require(_txParams.length >= 4, "Invalid calldata");
         
-        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), amount);
+        IERC20(srcAsset).forceApprove(registry.paraswapV6(), amount);
         (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");
 
@@ -338,7 +338,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         }
 
         //remove approval
-        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), 0);
+        IERC20(srcAsset).forceApprove(registry.paraswapV6(), 0);
     }
 
 
@@ -361,7 +361,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         address _onBehalfOf,
         bytes calldata _extraData,
         bool _withdrawCollateral
-    ) external onlyOwnerOrOperator(_onBehalfOf) whenNotPaused {
+    ) external nonReentrant onlyOwnerOrOperator(_onBehalfOf) whenNotPaused {
         require(_debtAsset != address(0), "Invalid debt asset address");
         require(_debtAmount >= 10000, "Debt amount below minimum threshold");
         if (_withdrawCollateral) {

@@ -1,4 +1,5 @@
 import { ethers } from "hardhat";
+import { Eip1193Provider, RequestArguments } from "@safe-global/protocol-kit";
 import { Protocols, WETH_ADDRESS } from "./constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MaxUint256 } from "ethers";
@@ -132,3 +133,30 @@ export async function fundETH(receiverAddress: string) {
     const balance = await ethers.provider.getBalance(receiverAddress);
     console.log(`Balance:`, ethers.formatEther(balance), "ETH");
 }
+
+/**
+ * Fund an address with ETH for gas fees using the first Hardhat signer (deployer)
+ * This is useful for funding impersonated accounts in tests
+ * @param receiverAddress The address to fund with ETH
+ * @param amount The amount of ETH to send (default: "1.0")
+ */
+export async function fundSignerWithETH(receiverAddress: string, amount: string = "1.0") {
+    const [deployer] = await ethers.getSigners();
+    const tx = await deployer.sendTransaction({
+        to: receiverAddress,
+        value: ethers.parseEther(amount),
+    });
+    await tx.wait();
+    console.log(`Funded ${receiverAddress} with ${amount} ETH for gas fees`);
+}
+
+/**
+ * EIP-1193 Provider wrapper for Safe SDK
+ * This is used to wrap Hardhat's provider for use with Safe SDK
+ */
+export const eip1193Provider: Eip1193Provider = {
+    request: async (args: RequestArguments) => {
+        const { method, params } = args;
+        return ethers.provider.send(method, Array.isArray(params) ? params : []);
+    },
+};

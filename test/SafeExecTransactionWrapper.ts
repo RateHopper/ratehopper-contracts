@@ -1,7 +1,7 @@
 import { ethers } from "hardhat";
 import dotenv from "dotenv";
 dotenv.config();
-import Safe, { Eip1193Provider, RequestArguments } from "@safe-global/protocol-kit";
+import Safe from "@safe-global/protocol-kit";
 import {
     cbETH_ADDRESS,
     DEFAULT_SUPPLY_AMOUNT,
@@ -12,22 +12,14 @@ import {
 } from "./constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { fundETH, getDecimals, getParaswapData } from "./utils";
+import { eip1193Provider, fundETH, fundSignerWithETH, getDecimals, getParaswapData } from "./utils";
 import { FLUID_cbETH_USDC_VAULT, FluidHelper, fluidVaultMap } from "./protocols/fluid";
 import FluidVaultAbi from "../externalAbi/fluid/fluidVaultT1.json";
 import { expect } from "chai";
 import { getGasOptions, deployLeveragedPositionContractFixture } from "./deployUtils";
 import { MaxUint256 } from "ethers";
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
-
-export const eip1193Provider: Eip1193Provider = {
-    request: async (args: RequestArguments) => {
-        const { method, params } = args;
-        return ethers.provider.send(method, Array.isArray(params) ? params : []);
-    },
-};
-
-export const safeAddress = "0x2f9054Eb6209bb5B94399115117044E4f150B2De";
+import { safeAddress } from "./debtSwapBySafe";
 
 describe("SafeExecTransactionWrapper", function () {
     // Increase timeout for memory-intensive operations
@@ -39,6 +31,9 @@ describe("SafeExecTransactionWrapper", function () {
     let wrapperAddress: string;
 
     this.beforeEach(async () => {
+        // Fund the signer wallet (TESTING_SAFE_OWNER_KEY) with ETH for gas fees
+        await fundSignerWithETH(signer.address);
+
         safeWallet = await Safe.init({
             provider: eip1193Provider,
             signer: process.env.TESTING_SAFE_OWNER_KEY,

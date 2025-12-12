@@ -6,7 +6,7 @@ import { cbETH_ADDRESS, DEFAULT_SUPPLY_AMOUNT, Protocols, USDC_ADDRESS, WETH_ADD
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { fundETH } from "./utils";
+import { eip1193Provider, fundETH, fundSignerWithETH } from "./utils";
 import { FLUID_cbETH_USDC_VAULT, FLUID_WETH_USDC_VAULT, FluidHelper } from "./protocols/fluid";
 import { CompoundHelper, USDC_COMET_ADDRESS } from "./protocols/compound";
 import { morphoMarket1Id, MorphoHelper } from "./protocols/morpho";
@@ -14,7 +14,7 @@ import { AaveV3Helper } from "./protocols/aaveV3";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect } from "chai";
 import { deploySafeContractFixture } from "./deployUtils";
-import { eip1193Provider, safeAddress, createSafeTestHelpers } from "./debtSwapBySafe";
+import { safeAddress, createSafeTestHelpers } from "./debtSwapBySafe";
 
 describe("Safe wallet exit function tests", function () {
     // Increase timeout for memory-intensive operations
@@ -31,6 +31,9 @@ describe("Safe wallet exit function tests", function () {
         // Get the operator (third signer)
         const signers = await ethers.getSigners();
         operator = signers[2];
+
+        // Fund the signer wallet (TESTING_SAFE_OWNER_KEY) with ETH for gas fees
+        await fundSignerWithETH(signer.address);
 
         safeWallet = await Safe.init({
             provider: eip1193Provider,
@@ -113,12 +116,7 @@ describe("Safe wallet exit function tests", function () {
 
         // Step 0: Fund the operator with ETH for gas (only if not calling via Safe)
         if (!callViaSafe) {
-            const fundTx = await signer.sendTransaction({
-                to: operator.address,
-                value: ethers.parseEther("0.01"),
-            });
-            await fundTx.wait();
-            console.log("Operator funded with ETH");
+            await fundSignerWithETH(operator.address, "0.01");
         }
 
         // Step 1: Create a position (supply collateral and borrow)

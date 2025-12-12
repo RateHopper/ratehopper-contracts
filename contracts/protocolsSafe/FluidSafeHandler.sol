@@ -3,9 +3,9 @@ pragma solidity ^0.8.28;
 
 import "../interfaces/safe/ISafe.sol";
 import "../Types.sol";
-import {GPv2SafeERC20} from "../dependencies/GPv2SafeERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IPoolV3} from "../interfaces/aaveV3/IPoolV3.sol";
-import {IERC20} from "../dependencies/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {DataTypes} from "../interfaces/aaveV3/DataTypes.sol";
 import "../interfaces/fluid/IFluidVault.sol";
 import "../interfaces/fluid/IFluidVaultResolver.sol";
@@ -17,7 +17,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../interfaces/IWETH9.sol";
 
 contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
-    using GPv2SafeERC20 for IERC20;
+    using SafeERC20 for IERC20;
 
     // Note: The registry contract holds configuration data including the Fluid vault resolver address and WETH address
     // This design allows the resolver to be updated without redeploying handlers
@@ -27,7 +27,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
     }
 
     function getDebtAmount(
-        address asset,
+        address /* asset */,
         address onBehalfOf,
         bytes calldata fromExtraData
     ) public view returns (uint256) {

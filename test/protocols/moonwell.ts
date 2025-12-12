@@ -99,6 +99,7 @@ export class MoonwellHelper {
     async getSupplyAndBorrowTxdata(
         debtTokenAddress,
         collateralAddress = cbETH_ADDRESS,
+        customBorrowAmount?: bigint,
     ): Promise<MetaTransactionData[]> {
         const collateralMTokenAddress = mContractAddressMap.get(collateralAddress)!;
         const collateralMToken = new ethers.Contract(collateralMTokenAddress, MErc20DelegatorAbi, defaultProvider);

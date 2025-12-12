@@ -5,7 +5,7 @@ import "dotenv/config";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { LeveragedPosition } from "../typechain-types";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { getDecimals, getParaswapData, protocolHelperMap } from "./utils";
+import { eip1193Provider, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
 import Safe from "@safe-global/protocol-kit";
 import {
     USDC_ADDRESS,
@@ -23,7 +23,7 @@ import {
 import { MaxUint256 } from "ethers";
 import { deployLeveragedPositionContractFixture } from "./deployUtils";
 import { mContractAddressMap, MoonwellHelper, COMPTROLLER_ADDRESS } from "./protocols/moonwell";
-import { eip1193Provider, safeAddress } from "./debtSwapBySafe";
+import { safeAddress } from "./debtSwapBySafe";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import { fluidVaultMap, FluidHelper } from "./protocols/fluid";
 
@@ -50,12 +50,10 @@ describe("Create leveraged position by Safe", function () {
         operator = signers[2];
 
         // Fund impersonatedSigner with ETH for gas fees
-        const fundImpersonatedTx = await signers[0].sendTransaction({
-            to: impersonatedSigner.address,
-            value: ethers.parseEther("1"), // Send 1 ETH for gas fees
-        });
-        await fundImpersonatedTx.wait();
-        console.log("Funded impersonatedSigner with 1 ETH for gas fees");
+        await fundSignerWithETH(impersonatedSigner.address);
+
+        // Fund the Safe owner wallet (TESTING_SAFE_OWNER_KEY) with ETH for gas fees
+        await fundSignerWithETH(safeOwnerWallet.address);
 
         const leveragedPosition = await loadFixture(deployLeveragedPositionContractFixture);
         deployedContractAddress = await leveragedPosition.getAddress();
@@ -201,13 +199,7 @@ describe("Create leveraged position by Safe", function () {
     ) {
         // Fund operator wallet with ETH if calling via operator
         if (callViaOperator) {
-            const signers = await ethers.getSigners();
-            const fundTx = await signers[0].sendTransaction({
-                to: operator.address,
-                value: ethers.parseEther("0.2"),
-            });
-            await fundTx.wait();
-            console.log("Funded operator wallet with 0.2 ETH for gas fees");
+            await fundSignerWithETH(operator.address, "0.2");
         }
 
         const Helper = protocolHelperMap.get(protocol)!;
@@ -382,13 +374,7 @@ describe("Create leveraged position by Safe", function () {
     describe("Operator functionality", function () {
         it("operator can close leveraged position on Fluid", async function () {
             // Fund impersonatedSigner for creating the position
-            const signers = await ethers.getSigners();
-            const fundImpersonatedTx = await signers[0].sendTransaction({
-                to: impersonatedSigner.address,
-                value: ethers.parseEther("0.5"), // Send 0.5 ETH for gas fees
-            });
-            await fundImpersonatedTx.wait();
-            console.log("Funded impersonatedSigner with 0.5 ETH for gas fees");
+            await fundSignerWithETH(impersonatedSigner.address, "0.5");
 
             // Create position first using Safe
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.FLUID);
@@ -683,12 +669,7 @@ describe("Create leveraged position by Safe", function () {
 
         if (callViaOperator) {
             // Fund operator wallet
-            const signers = await ethers.getSigners();
-            const fundTx = await signers[0].sendTransaction({
-                to: operator.address,
-                value: ethers.parseEther("0.2"),
-            });
-            await fundTx.wait();
+            await fundSignerWithETH(operator.address, "0.2");
 
             const contractByOperator = await ethers.getContractAt(
                 "LeveragedPosition",

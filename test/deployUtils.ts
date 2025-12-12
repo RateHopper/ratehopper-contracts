@@ -22,15 +22,6 @@ import { MORPHO_ADDRESS } from "./protocols/morpho";
 import { COMPTROLLER_ADDRESS } from "./protocols/moonwell";
 import { deployProtocolRegistry } from "./deployProtocolRegistry";
 
-async function deployMaliciousContract() {
-    const [_, maliciousAddress] = await ethers.getSigners();
-    const MaliciousContract = await hre.ethers.getContractFactory("MaliciousContract");
-    const maliciousContract = await MaliciousContract.deploy(maliciousAddress.address);
-    await maliciousContract.waitForDeployment();
-    console.log("MaliciousContract deployed to:", await maliciousContract.getAddress());
-    return maliciousContract;
-}
-
 export async function deployMaliciousUniswapV3Pool(targetHandler: string) {
     const MaliciousUniswapV3Pool = await hre.ethers.getContractFactory("MaliciousUniswapV3Pool");
     const gasOptions = await getGasOptions();
@@ -123,42 +114,6 @@ export async function deployHandlers() {
 // We define a fixture to reuse the same setup in every test.
 // We use loadFixture to run this setup once, snapshot that state,
 // and reset Hardhat Network to that snapshot in every test.
-export async function deployDebtSwapContractWithMaliciousHandlerFixture() {
-    const maliciousContract = await deployMaliciousContract();
-    const { protocolRegistry } = await deployHandlers();
-    const DebtSwap = await hre.ethers.getContractFactory("DebtSwap");
-    const debtSwapMalicious = await DebtSwap.deploy(
-        UNISWAP_V3_FACTORY_ADDRESS,
-        await protocolRegistry.getAddress(),
-        [Protocols.AAVE_V3],
-        [await maliciousContract.getAddress()],
-        await getGasOptions(),
-    );
-    console.log("DebtSwapMalicious deployed to:", await debtSwapMalicious.getAddress());
-
-    return debtSwapMalicious;
-}
-
-// We define a fixture to reuse the same setup in every test.
-// We use loadFixture to run this setup once, snapshot that state,
-// and reset Hardhat Network to that snapshot in every test.
-export async function deployDebtSwapContractFixture() {
-    const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } =
-        await deployHandlers();
-    const DebtSwap = await hre.ethers.getContractFactory("DebtSwap");
-    const debtSwap = await DebtSwap.deploy(
-        UNISWAP_V3_FACTORY_ADDRESS,
-        await protocolRegistry.getAddress(),
-        [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO],
-        [await aaveV3Handler.getAddress(), await compoundHandler.getAddress(), await morphoHandler.getAddress()],
-        await getGasOptions(),
-    );
-    await debtSwap.waitForDeployment();
-    console.log("DebtSwap deployed to:", await debtSwap.getAddress());
-
-    return debtSwap;
-}
-
 export async function deployLeveragedPositionContractFixture() {
     // Contracts are deployed using the first signer/account by default
     const { aaveV3Handler, compoundHandler, moonwellHandler, fluidHandler, morphoHandler, protocolRegistry } =

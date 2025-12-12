@@ -58,7 +58,8 @@ const TimelockControllerModule = buildModule("TimelockController", (m) => {
 const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
     const wethAddress = m.getParameter("wethAddress", WETH_ADDRESS);
     const uniswapV3Factory = m.getParameter("uniswapV3Factory", UNISWAP_V3_FACTORY_ADDRESS);
-    const initialAdmin = m.getParameter("initialAdmin", process.env.ADMIN_ADDRESS);
+    // Use deployer as initial admin so we can call admin functions during deployment
+    const deployer = m.getAccount(0);
     const initialOperator = m.getParameter("initialOperator", process.env.SAFE_OPERATOR_ADDRESS);
     const initialParaswapV6 = m.getParameter("initialParaswapV6", PARASWAP_V6_CONTRACT_ADDRESS);
 
@@ -68,7 +69,7 @@ const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
     const registry = m.contract("ProtocolRegistry", [
         wethAddress,
         uniswapV3Factory,
-        initialAdmin,
+        deployer, // Deploy with deployer as initial admin
         timelock,
         initialOperator,
         initialParaswapV6,
@@ -96,9 +97,21 @@ const ProtocolRegistryModule = buildModule("ProtocolRegistry", (m) => {
  * 4. Configure registry with token mappings and whitelists
  */
 export default buildModule("SharedInfrastructure", (m) => {
+    // Get the final admin address from environment variable
+    const finalAdminAddress = process.env.ADMIN_ADDRESS;
+    if (!finalAdminAddress) {
+        throw new Error("Please set ADMIN_ADDRESS environment variable");
+    }
+
     // Deploy TimelockController and ProtocolRegistry
     const { timelock } = m.useModule(TimelockControllerModule);
     const { registry } = m.useModule(ProtocolRegistryModule);
+
+    // Get deployer account for admin role transfer at the end
+    const deployer = m.getAccount(0);
+
+    // DEFAULT_ADMIN_ROLE is bytes32(0)
+    const DEFAULT_ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
     // Deploy handlers sequentially to avoid nonce conflicts
     // Each handler waits for the previous one to complete
@@ -169,6 +182,19 @@ export default buildModule("SharedInfrastructure", (m) => {
     ];
     const addToWhitelist = m.call(registry, "addToWhitelistBatch", [tokens], {
         after: [setFluidResolver],
+    });
+
+    // Step 3: Transfer admin role to final admin address
+    // First, grant DEFAULT_ADMIN_ROLE to the final admin
+    const grantAdminRole = m.call(registry, "grantRole", [DEFAULT_ADMIN_ROLE, finalAdminAddress], {
+        id: "grantAdminToFinalAdmin",
+        after: [addToWhitelist],
+    });
+
+    // Then, revoke DEFAULT_ADMIN_ROLE from the deployer
+    m.call(registry, "revokeRole", [DEFAULT_ADMIN_ROLE, deployer], {
+        id: "revokeAdminFromDeployer",
+        after: [grantAdminRole],
     });
 
     return {

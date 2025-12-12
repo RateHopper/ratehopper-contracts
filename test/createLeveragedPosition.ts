@@ -7,7 +7,7 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { LeveragedPosition } from "../typechain-types";
 import morphoAbi from "../externalAbi/morpho/morpho.json";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { approve, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
+import { approve, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
 
 import {
     USDC_ADDRESS,
@@ -52,11 +52,7 @@ describe("Create leveraged position", function () {
         impersonatedSigner = await ethers.getImpersonatedSigner(TEST_ADDRESS);
 
         // Fund the impersonated account with ETH for gas fees
-        const [deployer] = await ethers.getSigners();
-        await deployer.sendTransaction({
-            to: TEST_ADDRESS,
-            value: ethers.parseEther("1.0"),
-        });
+        await fundSignerWithETH(TEST_ADDRESS);
 
         aaveV3Helper = new AaveV3Helper(impersonatedSigner);
         compoundHelper = new CompoundHelper(impersonatedSigner);

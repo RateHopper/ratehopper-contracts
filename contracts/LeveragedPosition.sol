@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import "./dependencies/uniswapV3/CallbackValidation.sol";
 import {PoolAddress} from "./dependencies/uniswapV3/PoolAddress.sol";
-import {IERC20} from "./dependencies/IERC20.sol";
-import {GPv2SafeERC20} from "./dependencies/GPv2SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IProtocolHandler} from "./interfaces/IProtocolHandler.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -12,11 +12,10 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "./Types.sol";
 import "./interfaces/safe/ISafe.sol";
-import "./dependencies/TransferHelper.sol";
 import "./ProtocolRegistry.sol";
 
 contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
-    using GPv2SafeERC20 for IERC20;
+    using SafeERC20 for IERC20;
     uint8 public protocolFee;
     address public feeBeneficiary;
     ProtocolRegistry public immutable registry;
@@ -382,8 +381,8 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         require(_txParams.length >= 4, "Invalid calldata");
         
         // amount + 1 to avoid rounding errors
-        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), amount + 1);
-        
+        IERC20(srcAsset).forceApprove(registry.paraswapV6(), amount + 1);
+
         (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");
 
@@ -393,7 +392,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         }
 
         //remove approval
-        TransferHelper.safeApprove(srcAsset, registry.paraswapV6(), 0);
+        IERC20(srcAsset).forceApprove(registry.paraswapV6(), 0);
     }
 
     function emergencyWithdraw(address token, uint256 amount) external onlyOwner {

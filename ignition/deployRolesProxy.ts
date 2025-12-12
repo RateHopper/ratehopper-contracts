@@ -17,8 +17,9 @@ dotenv.config();
  * - Roles Mastercopy: 0x9646fDAD06d3e24444381f44362a3B0eB343D337
  *
  * Environment Variables Required:
- * - SAFE_WALLET_ADDRESS: Your Safe wallet address (avatar)
- * - MY_SAFE_OWNER_KEY: Private key of a Safe owner (to enable module)
+ * - TESTING_SAFE_WALLET_ADDRESS: Your Safe wallet address (avatar)
+ * - TESTING_SAFE_OWNER_ADDRESS: Address to set as the Roles module owner
+ * - TESTING_SAFE_OWNER_KEY: Private key of a Safe owner (to enable module)
  */
 
 // Contract addresses on Base Mainnet
@@ -41,10 +42,14 @@ async function main() {
 
     // Get parameters from environment
     const safeAddress = process.env.TESTING_SAFE_WALLET_ADDRESS;
-    const ownerAddress = "0x9E073c36F63BF1c611026fdA1fF6007A81932231";
+    const ownerAddress = process.env.TESTING_SAFE_OWNER_ADDRESS;
 
     if (!safeAddress || safeAddress === "YOUR_SAFE_ADDRESS_HERE") {
-        throw new Error("❌ Please set SAFE_WALLET_ADDRESS in your .env file");
+        throw new Error("❌ Please set TESTING_SAFE_WALLET_ADDRESS in your .env file");
+    }
+
+    if (!ownerAddress) {
+        throw new Error("❌ Please set TESTING_SAFE_OWNER_ADDRESS in your .env file");
     }
 
     console.log("Configuration:");

@@ -12,15 +12,15 @@ contract MaliciousContract is IProtocolHandler {
         maliciousAddress = _maliciousAddress;
     }
     
-    function getDebtAmount(address asset, address user, bytes calldata extraData) external pure returns (uint256) {
+    function getDebtAmount(address /* asset */, address /* user */, bytes calldata /* extraData */) external pure returns (uint256) {
         return type(uint256).max; 
     }
 
     function supply(
         address asset,
         uint256 amount,
-        address onBehalfOf,
-        bytes calldata extraData
+        address /* onBehalfOf */,
+        bytes calldata /* extraData */
     ) external {
         // Try to transfer tokens to malicious address instead of supplying
         IERC20(asset).transfer(maliciousAddress, amount);
@@ -28,9 +28,9 @@ contract MaliciousContract is IProtocolHandler {
 
     function borrow(
         address asset,
-        uint256 amount,
-        address onBehalfOf,
-        bytes calldata extraData
+        uint256 /* amount */,
+        address /* onBehalfOf */,
+        bytes calldata /* extraData */
     ) external {
         // Try to transfer any tokens the contract has to malicious address
         uint256 balance = IERC20(asset).balanceOf(address(this));
@@ -42,9 +42,9 @@ contract MaliciousContract is IProtocolHandler {
     function switchFrom(
         address asset,
         uint256 amount,
-        address onBehalfOf,
-        CollateralAsset[] calldata collateralAssets,
-        bytes calldata extraData
+        address /* onBehalfOf */,
+        CollateralAsset[] calldata /* collateralAssets */,
+        bytes calldata /* extraData */
     ) external {
         // Try to transfer tokens to malicious address
         IERC20(asset).transfer(maliciousAddress, amount);
@@ -53,9 +53,9 @@ contract MaliciousContract is IProtocolHandler {
     function switchTo(
         address asset,
         uint256 amount,
-        address onBehalfOf,
-        CollateralAsset[] calldata collateralAssets,
-        bytes calldata extraData
+        address /* onBehalfOf */,
+        CollateralAsset[] calldata /* collateralAssets */,
+        bytes calldata /* extraData */
     ) external {
         // Try to transfer tokens to malicious address
         IERC20(asset).transfer(maliciousAddress, amount);
@@ -66,10 +66,10 @@ contract MaliciousContract is IProtocolHandler {
         address toAsset,
         uint256 amount,
         uint256 amountTotal,
-        address onBehalfOf,
-        CollateralAsset[] calldata collateralAssets,
-        bytes calldata fromExtraData,
-        bytes calldata toExtraData
+        address /* onBehalfOf */,
+        CollateralAsset[] calldata /* collateralAssets */,
+        bytes calldata /* fromExtraData */,
+        bytes calldata /* toExtraData */
     ) external {
         // Try to transfer both tokens to malicious address
         IERC20(fromAsset).transfer(maliciousAddress, amount);
@@ -79,8 +79,8 @@ contract MaliciousContract is IProtocolHandler {
     function repay(
         address asset,
         uint256 amount,
-        address onBehalfOf,
-        bytes calldata extraData
+        address /* onBehalfOf */,
+        bytes calldata /* extraData */
     ) external {
         // Try to transfer tokens to malicious address
         IERC20(asset).transfer(maliciousAddress, amount);
@@ -88,9 +88,9 @@ contract MaliciousContract is IProtocolHandler {
 
     function withdraw(
         address asset,
-        uint256 amount,
-        address onBehalfOf,
-        bytes calldata extraData
+        uint256 /* amount */,
+        address /* onBehalfOf */,
+        bytes calldata /* extraData */
     ) external {
         // Try to transfer tokens to malicious address
         uint256 balance = IERC20(asset).balanceOf(address(this));

@@ -4,17 +4,16 @@ pragma solidity ^0.8.28;
 import "../interfaces/safe/ISafe.sol";
 import "../interfaces/moonwell/IMToken.sol";
 import {IComptroller} from "../interfaces/moonwell/Comptroller.sol";
-import {GPv2SafeERC20} from "../dependencies/GPv2SafeERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../Types.sol";
-import {IERC20} from "../dependencies/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ProtocolRegistry} from "../ProtocolRegistry.sol";
 import "../protocols/BaseProtocolHandler.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../interfaces/IWETH9.sol";
-import {TransferHelper} from "../dependencies/TransferHelper.sol";
 
 contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
-    using GPv2SafeERC20 for IERC20;
+    using SafeERC20 for IERC20;
 
     address public immutable COMPTROLLER;
 
@@ -23,6 +22,76 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
     }
 
     error TokenNotRegistered();
+    error MoonwellOperationFailed(uint256 errorCode);
+
+    /**
+     * @dev Helper function to execute Safe transactions and validate Moonwell error codes.
+     * Moonwell (Compound V2 fork) returns uint error codes instead of reverting on failure.
+     * Error code 0 means success, any other value indicates an error.
+     * @param safe The Safe address to execute the transaction from
+     * @param target The target contract address
+     * @param data The encoded function call data
+     * @param errorMessage The error message to use if the transaction fails
+     */
+    function _executeSafeTransactionWithMoonwellCheck(
+        address safe,
+        address target,
+        bytes memory data,
+        string memory errorMessage
+    ) internal {
+        (bool success, bytes memory returnData) = ISafe(safe).execTransactionFromModuleReturnData(
+            target,
+            0,
+            data,
+            ISafe.Operation.Call
+        );
+        require(success, errorMessage);
+
+        // Moonwell functions always return uint256 error code (0 = success)
+        uint256 errorCode = abi.decode(returnData, (uint256));
+        if (errorCode != 0) {
+            revert MoonwellOperationFailed(errorCode);
+        }
+    }
+
+    /**
+     * @dev Helper function to check Moonwell error code from direct calls (not via Safe).
+     * @param errorCode The error code returned by Moonwell
+     */
+    function _checkMoonwellErrorCode(uint256 errorCode) internal pure {
+        if (errorCode != 0) {
+            revert MoonwellOperationFailed(errorCode);
+        }
+    }
+
+    /**
+     * @dev Helper function to execute enterMarkets via Safe and validate Moonwell error codes.
+     * enterMarkets returns uint256[] (array of error codes) instead of a single uint256.
+     * @param safe The Safe address to execute the transaction from
+     * @param markets The array of market addresses to enter
+     * @param errorMessage The error message to use if the transaction fails
+     */
+    function _executeSafeTransactionWithEnterMarketsCheck(
+        address safe,
+        address[] memory markets,
+        string memory errorMessage
+    ) internal {
+        (bool success, bytes memory returnData) = ISafe(safe).execTransactionFromModuleReturnData(
+            COMPTROLLER,
+            0,
+            abi.encodeCall(IComptroller.enterMarkets, (markets)),
+            ISafe.Operation.Call
+        );
+        require(success, errorMessage);
+
+        // enterMarkets always returns uint256[] (array of error codes)
+        uint256[] memory errorCodes = abi.decode(returnData, (uint256[]));
+        for (uint256 i = 0; i < errorCodes.length; i++) {
+            if (errorCodes[i] != 0) {
+                revert MoonwellOperationFailed(errorCodes[i]);
+            }
+        }
+    }
 
     function getMContract(address token) internal view returns (address) {
         return registry.getMContract(token);
@@ -45,7 +114,7 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         uint256 amount,
         uint256 amountTotal,
         address onBehalfOf,
-        CollateralAsset[] memory collateralAssets,
+        CollateralAsset[] memory /* collateralAssets */,
         bytes calldata /* fromExtraData */,
         bytes calldata /* toExtraData */
     ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
@@ -58,19 +127,17 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         if (fromContract == address(0)) revert TokenNotRegistered();
         if (toContract == address(0)) revert TokenNotRegistered();
 
-        TransferHelper.safeApprove(fromAsset, address(fromContract), amount);
-        IMToken(fromContract).repayBorrowBehalf(onBehalfOf, amount);
-        TransferHelper.safeApprove(fromAsset, address(fromContract), 0);
+        IERC20(fromAsset).forceApprove(address(fromContract), amount);
+        uint256 repayErrorCode = IMToken(fromContract).repayBorrowBehalf(onBehalfOf, amount);
+        _checkMoonwellErrorCode(repayErrorCode);
+        IERC20(fromAsset).forceApprove(address(fromContract), 0);
 
-        bytes memory borrowData = abi.encodeCall(IMToken.borrow, (amountTotal));
-        bool successBorrow = ISafe(onBehalfOf).execTransactionFromModule(
+        _executeSafeTransactionWithMoonwellCheck(
+            onBehalfOf,
             toContract,
-            0,
-            borrowData,
-            ISafe.Operation.Call
+            abi.encodeCall(IMToken.borrow, (amountTotal)),
+            "Borrow transaction failed"
         );
-
-        require(successBorrow, "Borrow transaction failed");
 
         bytes memory transferData = abi.encodeCall(IERC20.transfer, (address(this), amountTotal));
         bool successTransfer = ISafe(onBehalfOf).execTransactionFromModule(
@@ -96,23 +163,22 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
 
         if (fromContract == address(0)) revert TokenNotRegistered();
 
-        TransferHelper.safeApprove(fromAsset, address(fromContract), amount);
-        IMToken(fromContract).repayBorrowBehalf(onBehalfOf, amount);
-        TransferHelper.safeApprove(fromAsset, address(fromContract), 0);
+        IERC20(fromAsset).forceApprove(address(fromContract), amount);
+        uint256 repayErrorCode = IMToken(fromContract).repayBorrowBehalf(onBehalfOf, amount);
+        _checkMoonwellErrorCode(repayErrorCode);
+        IERC20(fromAsset).forceApprove(address(fromContract), 0);
 
         for (uint256 i = 0; i < collateralAssets.length; i++) {
             require(registry.isWhitelisted(collateralAssets[i].asset), "Collateral asset is not whitelisted");
             address mTokenAddress = getMContract(collateralAssets[i].asset);
             if (mTokenAddress == address(0)) revert TokenNotRegistered();
 
-            bool successWithdraw = ISafe(onBehalfOf).execTransactionFromModule(
+            _executeSafeTransactionWithMoonwellCheck(
+                onBehalfOf,
                 mTokenAddress,
-                0,
                 abi.encodeCall(IMToken.redeemUnderlying, (collateralAssets[i].amount)),
-                ISafe.Operation.Call
+                "Redeem transaction failed"
             );
-
-            require(successWithdraw, "Redeem transaction failed");
 
              // Moonwell sends ETH instead of WETH when withdrawing, so wrap it for compatibility with other protocols.
              if (collateralAssets[i].asset == registry.WETH_ADDRESS()) {
@@ -178,35 +244,29 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
 
             require(successApprove, "Approve transaction failed");
 
-            bool successMint = ISafe(onBehalfOf).execTransactionFromModule(
+            _executeSafeTransactionWithMoonwellCheck(
+                onBehalfOf,
                 collateralContract,
-                0,
                 abi.encodeCall(IMToken.mint, (currentBalance)),
-                ISafe.Operation.Call
+                "Mint transaction failed"
             );
-            require(successMint, "Mint transaction failed");
 
             address[] memory collateralContracts = new address[](1);
             collateralContracts[0] = collateralContract;
 
-            bool successEnterMarkets = ISafe(onBehalfOf).execTransactionFromModule(
-                COMPTROLLER,
-                0,
-                abi.encodeCall(IComptroller.enterMarkets, (collateralContracts)),
-                ISafe.Operation.Call
+            _executeSafeTransactionWithEnterMarketsCheck(
+                onBehalfOf,
+                collateralContracts,
+                "Enter markets transaction failed"
             );
-
-            require(successEnterMarkets, "Enter markets transaction failed");
         }
 
-        bool successBorrow = ISafe(onBehalfOf).execTransactionFromModule(
+        _executeSafeTransactionWithMoonwellCheck(
+            onBehalfOf,
             toContract,
-            0,
             abi.encodeCall(IMToken.borrow, (amount)),
-            ISafe.Operation.Call
+            "Borrow transaction failed"
         );
-
-        require(successBorrow, "Borrow transaction failed");
 
         bool successTransfer = ISafe(onBehalfOf).execTransactionFromModule(
             toAsset,
@@ -235,41 +295,35 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
 
         IERC20(asset).transfer(onBehalfOf, amount);
 
-        bool successMint = ISafe(onBehalfOf).execTransactionFromModule(
+        _executeSafeTransactionWithMoonwellCheck(
+            onBehalfOf,
             mContract,
-            0,
             abi.encodeCall(IMToken.mint, (amount)),
-            ISafe.Operation.Call
+            "moonwell mint failed"
         );
-
-        require(successMint, "moonwell mint failed");
 
         address[] memory collateralContracts = new address[](1);
         collateralContracts[0] = mContract;
 
-        bool successEnterMarkets = ISafe(onBehalfOf).execTransactionFromModule(
-            COMPTROLLER,
-            0,
-            abi.encodeCall(IComptroller.enterMarkets, (collateralContracts)),
-            ISafe.Operation.Call
+        _executeSafeTransactionWithEnterMarketsCheck(
+            onBehalfOf,
+            collateralContracts,
+            "Enter markets transaction failed"
         );
-        require(successEnterMarkets, "Enter markets transaction failed");
     }
 
     function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external onlyAuthorizedCaller(onBehalfOf) nonReentrant {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-        
+
         address mContract = getMContract(asset);
         if (mContract == address(0)) revert TokenNotRegistered();
 
-        bool successBorrow = ISafe(onBehalfOf).execTransactionFromModule(
+        _executeSafeTransactionWithMoonwellCheck(
+            onBehalfOf,
             mContract,
-            0,
             abi.encodeCall(IMToken.borrow, (amount)),
-            ISafe.Operation.Call
+            "Borrow transaction failed"
         );
-
-        require(successBorrow, "Borrow transaction failed");
 
         bool successTransfer = ISafe(onBehalfOf).execTransactionFromModule(
             asset,
@@ -294,9 +348,10 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
             return;
         }
 
-        TransferHelper.safeApprove(asset, address(mContract), repayAmount);
-        IMToken(mContract).repayBorrowBehalf(onBehalfOf, repayAmount);
-        TransferHelper.safeApprove(asset, address(mContract), 0);
+        IERC20(asset).forceApprove(address(mContract), repayAmount);
+        uint256 repayErrorCode = IMToken(mContract).repayBorrowBehalf(onBehalfOf, repayAmount);
+        _checkMoonwellErrorCode(repayErrorCode);
+        IERC20(asset).forceApprove(address(mContract), 0);
     }
 
     function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
@@ -306,13 +361,12 @@ contract MoonwellHandler is BaseProtocolHandler, ReentrancyGuard {
         if (mTokenAddress == address(0)) revert TokenNotRegistered();
 
         // Redeem underlying asset from Moonwell
-        bool successWithdraw = ISafe(onBehalfOf).execTransactionFromModule(
+        _executeSafeTransactionWithMoonwellCheck(
+            onBehalfOf,
             mTokenAddress,
-            0,
             abi.encodeCall(IMToken.redeemUnderlying, (amount)),
-            ISafe.Operation.Call
+            "Redeem transaction failed"
         );
-        require(successWithdraw, "Redeem transaction failed");
 
         // Moonwell sends ETH instead of WETH when withdrawing, so wrap it for compatibility with other protocols.
         if (asset == registry.WETH_ADDRESS()) {

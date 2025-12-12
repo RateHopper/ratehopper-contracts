@@ -10,7 +10,7 @@ import { UNISWAP_V3_FACTORY_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS } from "../con
  * Reads deployed addresses from ignition/deployments and verifies with correct constructor arguments.
  *
  * Environment Variables Required:
- * - ADMIN_ADDRESS: Initial admin address
+ * - DEPLOYER_PRIVATE_KEY: The private key used to deploy the contract (address is derived from it)
  * - SAFE_OPERATOR_ADDRESS: Initial operator address
  *
  * Usage:
@@ -18,16 +18,20 @@ import { UNISWAP_V3_FACTORY_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS } from "../con
  */
 
 async function main() {
-    const ADMIN_ADDRESS = process.env.ADMIN_ADDRESS;
+    const DEPLOYER_PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY;
     const SAFE_OPERATOR_ADDRESS = process.env.SAFE_OPERATOR_ADDRESS;
 
-    if (!ADMIN_ADDRESS) {
-        throw new Error("Please set ADMIN_ADDRESS environment variable");
+    if (!DEPLOYER_PRIVATE_KEY) {
+        throw new Error("Please set DEPLOYER_PRIVATE_KEY environment variable");
     }
 
     if (!SAFE_OPERATOR_ADDRESS) {
         throw new Error("Please set SAFE_OPERATOR_ADDRESS environment variable");
     }
+
+    // Derive deployer address from private key
+    const deployerWallet = new hre.ethers.Wallet(DEPLOYER_PRIVATE_KEY);
+    const DEPLOYER_ADDRESS = deployerWallet.address;
 
     const chainId = (await hre.ethers.provider.getNetwork()).chainId;
 
@@ -61,7 +65,7 @@ async function main() {
     const constructorArguments = [
         WETH_ADDRESS, // _wethAddress
         UNISWAP_V3_FACTORY_ADDRESS, // _uniswapV3Factory
-        ADMIN_ADDRESS, // _initialAdmin
+        DEPLOYER_ADDRESS, // _initialAdmin (deployer was used as initial admin during deployment)
         timelockAddress, // _timelock
         SAFE_OPERATOR_ADDRESS, // _initialOperator
         PARASWAP_V6_CONTRACT_ADDRESS, // _initialParaswapV6
@@ -71,7 +75,7 @@ async function main() {
     console.log("Constructor arguments:");
     console.log("  - WETH Address:", WETH_ADDRESS);
     console.log("  - Uniswap V3 Factory:", UNISWAP_V3_FACTORY_ADDRESS);
-    console.log("  - Initial Admin:", ADMIN_ADDRESS);
+    console.log("  - Initial Admin (Deployer):", DEPLOYER_ADDRESS);
     console.log("  - Timelock:", timelockAddress);
     console.log("  - Initial Operator:", SAFE_OPERATOR_ADDRESS);
     console.log("  - Initial Paraswap V6:", PARASWAP_V6_CONTRACT_ADDRESS);

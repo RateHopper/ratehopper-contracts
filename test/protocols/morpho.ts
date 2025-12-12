@@ -212,7 +212,11 @@ export class MorphoHelper {
         }
     }
 
-    async getSupplyAndBorrowTxdata(debtTokenAddress, collateralAddress = cbETH_ADDRESS): Promise<MetaTransactionData[]> {
+    async getSupplyAndBorrowTxdata(
+        debtTokenAddress,
+        collateralAddress = cbETH_ADDRESS,
+        customBorrowAmount?: bigint,
+    ): Promise<MetaTransactionData[]> {
         const morphoContract = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, defaultProvider);
         const marketParams = marketParamsMap.get(morphoMarket1Id)!;
 

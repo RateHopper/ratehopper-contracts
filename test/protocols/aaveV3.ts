@@ -67,12 +67,14 @@ export class AaveV3Helper {
     }
 
     async borrow(tokenAddress: string, borrowAmount?: bigint) {
-        const amount = borrowAmount || ethers.parseUnits("1", 6);
+        const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.signer);
+        const decimals = await tokenContract.decimals();
+        const decimalsNumber = typeof decimals === "bigint" ? Number(decimals) : decimals;
+        const amount = borrowAmount || ethers.parseUnits("1", decimalsNumber);
 
         const borrowTx = await this.pool.borrow(tokenAddress, amount, 2, 0, TEST_ADDRESS);
         await borrowTx.wait();
 
-        const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.signer);
         const walletBalance = await tokenContract.balanceOf(TEST_ADDRESS);
         console.log(`borrowed ${amount}, ${tokenAddress} Wallet Balance:`, formatAmount(walletBalance));
     }
@@ -80,10 +82,21 @@ export class AaveV3Helper {
     async getSupplyAndBorrowTxdata(
         debtTokenAddress,
         collateralTokenAddress = cbETH_ADDRESS,
+        customBorrowAmount?: bigint,
     ): Promise<MetaTransactionData[]> {
         const aavePool = new ethers.Contract(AAVE_V3_POOL_ADDRESS, aaveV3PoolJson, defaultProvider);
 
         const collateralContract = new ethers.Contract(collateralTokenAddress, ERC20_ABI, defaultProvider);
+        let borrowAmount: bigint;
+        if (customBorrowAmount) {
+            borrowAmount = customBorrowAmount;
+        } else {
+            const debtTokenContract = new ethers.Contract(debtTokenAddress, ERC20_ABI, defaultProvider);
+            const debtTokenDecimals = await debtTokenContract.decimals();
+            const debtTokenDecimalsNumber =
+                typeof debtTokenDecimals === "bigint" ? Number(debtTokenDecimals) : debtTokenDecimals;
+            borrowAmount = ethers.parseUnits("1", debtTokenDecimalsNumber);
+        }
         const approveTransactionData: MetaTransactionData = {
             to: collateralTokenAddress,
             value: "0",
@@ -109,13 +122,7 @@ export class AaveV3Helper {
         const borrowTransactionData: MetaTransactionData = {
             to: AAVE_V3_POOL_ADDRESS,
             value: "0",
-            data: aavePool.interface.encodeFunctionData("borrow", [
-                debtTokenAddress,
-                ethers.parseUnits("1", 6),
-                2,
-                0,
-                safeAddress,
-            ]),
+            data: aavePool.interface.encodeFunctionData("borrow", [debtTokenAddress, borrowAmount, 2, 0, safeAddress]),
             operation: OperationType.Call,
         };
         return [approveTransactionData, supplyTransactionData, borrowTransactionData];
