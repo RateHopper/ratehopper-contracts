@@ -8,9 +8,8 @@ import {DataTypes} from "../interfaces/aaveV3/DataTypes.sol";
 import {IAaveProtocolDataProvider} from "../interfaces/aaveV3/IAaveProtocolDataProvider.sol";
 import "./BaseProtocolHandler.sol";
 import "../ProtocolRegistry.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
+contract AaveV3Handler is BaseProtocolHandler {
     using SafeERC20 for IERC20;
 
     IPoolV3 public immutable aaveV3Pool;
@@ -46,7 +45,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         CollateralAsset[] memory /* collateralAssets */,
         bytes calldata /* fromExtraData */,
         bytes calldata /* toExtraData */
-    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         IERC20(fromAsset).forceApprove(address(aaveV3Pool), amount);
         aaveV3Pool.repay(fromAsset, amount, 2, onBehalfOf);
 
@@ -60,7 +59,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata /* extraData */
-    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         _validateCollateralAssets(collateralAssets);
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
 
@@ -85,7 +84,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata /* extraData */
-    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         _validateCollateralAssets(collateralAssets);
 
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
@@ -113,17 +112,17 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         aaveV3Pool.borrow(toAsset, amount, 2, 0, onBehalfOf);
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) {
         IERC20(asset).forceApprove(address(aaveV3Pool), amount);
         aaveV3Pool.supply(asset, amount, onBehalfOf, 0);
         IERC20(asset).forceApprove(address(aaveV3Pool), 0);
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) {
         aaveV3Pool.borrow(asset, amount, 2, 0, onBehalfOf);
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) public onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) public onlyAuthorizedCaller(onBehalfOf) {
         // Skip repayment if amount is 1 wei or less to prevent Aave v3 InvalidBurnAmount error
         if (amount <= 1) {
             return;
@@ -134,7 +133,7 @@ contract AaveV3Handler is BaseProtocolHandler, ReentrancyGuard {
         IERC20(asset).forceApprove(address(aaveV3Pool), 0);
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         // Get aToken address for the asset

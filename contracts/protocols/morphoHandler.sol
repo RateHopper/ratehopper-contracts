@@ -9,9 +9,8 @@ import {MarketParamsLib} from "../dependencies/morpho/MarketParamsLib.sol";
 import {SharesMathLib} from "../dependencies/morpho/SharesMathLib.sol";
 import "./BaseProtocolHandler.sol";
 import "../ProtocolRegistry.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
+contract MorphoHandler is BaseProtocolHandler {
     using MarketParamsLib for MarketParams;
     using SafeERC20 for IERC20;
     using SharesMathLib for uint256;
@@ -42,7 +41,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         CollateralAsset[] memory collateralAssets,
         bytes calldata fromExtraData,
         bytes calldata toExtraData
-    ) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         switchFrom(fromAsset, amount, onBehalfOf, collateralAssets, fromExtraData);
         switchTo(toAsset, amountTotal, onBehalfOf, collateralAssets, toExtraData);
     }
@@ -101,7 +100,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         IERC20(marketParams.collateralToken).forceApprove(address(morpho), 0);
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
@@ -111,7 +110,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         IERC20(asset).forceApprove(address(morpho), 0);
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
@@ -119,7 +118,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         morpho.borrow(marketParams, amount, 0, onBehalfOf, address(this));
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(extraData, (MarketParams, uint256));
@@ -147,7 +146,7 @@ contract MorphoHandler is BaseProtocolHandler, ReentrancyGuard {
         IERC20(asset).forceApprove(address(morpho), 0);
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) nonReentrant {
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         // Decode market parameters from extraData

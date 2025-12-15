@@ -240,7 +240,7 @@ export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWall
     };
 }
 
-describe.only("Safe wallet should debtSwap", function () {
+describe("Safe wallet should debtSwap", function () {
     // Increase timeout for memory-intensive operations
     this.timeout(300000); // 5 minutes
 
@@ -709,7 +709,7 @@ describe.only("Safe wallet should debtSwap", function () {
             );
         });
 
-        it.only("WETH debt on Aave to Compound", async function () {
+        it("WETH debt on Aave to Compound", async function () {
             await supplyAndBorrow(Protocols.AAVE_V3, WETH_ADDRESS, cbETH_ADDRESS);
 
             await executeDebtSwap(
