@@ -1,5 +1,5 @@
-import { ethers } from "hardhat";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import * as ethersLib from "ethers";
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { Contract, MaxUint256 } from "ethers";
 import {
     cbBTC_ADDRESS,
@@ -10,15 +10,18 @@ import {
     TEST_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
-} from "../constants";
+} from "../constants.js";
 
-import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { approve, defaultProvider, formatAmount } from "../utils";
-import chainAgnosticBundlerV2Abi from "../../externalAbi/morpho/chainAgnosticBundlerV2.json";
-import morphoAbi from "../../externalAbi/morpho/morpho.json";
+import ERC20Json from "@openzeppelin/contracts/build/contracts/ERC20.json" with { type: "json" };
+const ERC20_ABI = ERC20Json.abi;
+import { approve, defaultProvider, formatAmount } from "../utils.js";
+import chainAgnosticBundlerV2Abi from "../../externalAbi/morpho/chainAgnosticBundlerV2.json" with { type: "json" };
+import morphoAbi from "../../externalAbi/morpho/morpho.json" with { type: "json" };
 import { BundlerAction } from "@morpho-org/bundler-sdk-ethers";
-import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { safeAddress } from "../debtSwapBySafe";
+import * as SafeTypes from "@safe-global/types-kit";
+type MetaTransactionData = SafeTypes.MetaTransactionData;
+const OperationType = SafeTypes.OperationType;
+import { safeAddress } from "../debtSwapBySafe.js";
 
 export const bundlerAddress = "0x23055618898e202386e6c13955a58d3c68200bfb";
 export const MORPHO_ADDRESS = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
@@ -101,7 +104,7 @@ export class MorphoHelper {
     private morpho;
 
     constructor(private signer: HardhatEthersSigner | any) {
-        this.morpho = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, signer);
+        this.morpho = new ethersLib.Contract(MORPHO_ADDRESS, morphoAbi, signer);
     }
 
     async getDebtAmount(marketId: string, userAddress?: string): Promise<bigint> {
@@ -143,24 +146,16 @@ export class MorphoHelper {
 
     async borrow(marketId: string, decimals = 6) {
         const marketParams = marketParamsMap.get(marketId)!;
-        const amount = ethers.parseUnits("1", decimals);
+        const amount = ethersLib.parseUnits("1", decimals);
         const tx = await this.morpho.borrow(marketParams, amount, 0, TEST_ADDRESS, TEST_ADDRESS);
         await tx.wait();
         console.log("borrowed", amount);
-        // const receipt = await tx.wait();
-        // console.log("Transaction Receipt:", receipt);
-
-        // if (receipt.logs) {
-        //     receipt.logs.forEach((log, index) => {
-        //         console.log(`Log ${index}:`, log);
-        //     });
-        // }
     }
 
     async supply(collateralTokenAddress: string, marketId: string) {
-        const tokenContract = new ethers.Contract(collateralTokenAddress, ERC20_ABI, this.signer);
+        const tokenContract = new ethersLib.Contract(collateralTokenAddress, ERC20_ABI, this.signer);
         await approve(collateralTokenAddress, bundlerAddress, this.signer);
-        const amount = ethers.parseEther(DEFAULT_SUPPLY_AMOUNT);
+        const amount = ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT);
 
         const walletBalance = await tokenContract.balanceOf(TEST_ADDRESS);
         console.log(`${collateralTokenAddress} Wallet Balance:`, formatAmount(walletBalance));
@@ -171,7 +166,7 @@ export class MorphoHelper {
 
         const supplyAction = BundlerAction.morphoSupplyCollateral(marketParam, amount, TEST_ADDRESS, []);
 
-        const borrowAmount = ethers.parseUnits("1", 6);
+        const borrowAmount = ethersLib.parseUnits("1", 6);
         const borrowAction = BundlerAction.morphoBorrow(marketParam, borrowAmount, 0n, 0n, TEST_ADDRESS);
 
         const bundler = new Contract(bundlerAddress, chainAgnosticBundlerV2Abi, this.signer);
@@ -193,14 +188,14 @@ export class MorphoHelper {
             fromMarketParams.lltv,
         ];
 
-        return ethers.AbiCoder.defaultAbiCoder().encode(
+        return ethersLib.AbiCoder.defaultAbiCoder().encode(
             [`tuple(${structType.join(",")})`, "uint256"],
             [structValue, borrowShares],
         );
     }
 
     async decode(rawData: string) {
-        const iface = new ethers.Interface(chainAgnosticBundlerV2Abi);
+        const iface = new ethersLib.Interface(chainAgnosticBundlerV2Abi);
         const calldataArray = iface.decodeFunctionData(rawData.slice(0, 10), rawData);
         console.log("Calldata Array:", calldataArray.length);
 
@@ -213,19 +208,19 @@ export class MorphoHelper {
     }
 
     async getSupplyAndBorrowTxdata(
-        debtTokenAddress,
+        debtTokenAddress: string,
         collateralAddress = cbETH_ADDRESS,
         customBorrowAmount?: bigint,
     ): Promise<MetaTransactionData[]> {
-        const morphoContract = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, defaultProvider);
+        const morphoContract = new ethersLib.Contract(MORPHO_ADDRESS, morphoAbi, defaultProvider);
         const marketParams = marketParamsMap.get(morphoMarket1Id)!;
 
-        const collateralContract = new ethers.Contract(collateralAddress, ERC20_ABI, defaultProvider);
+        const collateralContract = new ethersLib.Contract(collateralAddress, ERC20_ABI, defaultProvider);
 
         const approveTransactionData: MetaTransactionData = {
             to: collateralAddress,
             value: "0",
-            data: collateralContract.interface.encodeFunctionData("approve", [MORPHO_ADDRESS, ethers.parseEther("1")]),
+            data: collateralContract.interface.encodeFunctionData("approve", [MORPHO_ADDRESS, ethersLib.parseEther("1")]),
             operation: OperationType.Call,
         };
 
@@ -234,14 +229,14 @@ export class MorphoHelper {
             value: "0",
             data: morphoContract.interface.encodeFunctionData("supplyCollateral", [
                 marketParams,
-                ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
+                ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT),
                 safeAddress,
                 "0x",
             ]),
             operation: OperationType.Call,
         };
 
-        const amount = ethers.parseUnits("1", 6);
+        const amount = ethersLib.parseUnits("1", 6);
         const borrowTransactionData: MetaTransactionData = {
             to: MORPHO_ADDRESS,
             value: "0",

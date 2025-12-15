@@ -1,10 +1,10 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { ProtocolRegistry } from "../typechain-types";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { USDC_ADDRESS, cbETH_ADDRESS, WETH_ADDRESS, DAI_ADDRESS } from "./constants";
-import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS } from "../contractAddresses";
+import * as ethersLib from "ethers";
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import type { ProtocolRegistry } from "../typechain-types/index.js";
+import { connectNetwork, getEthers, loadFixture } from "./testSetup.js";
+import { USDC_ADDRESS, cbETH_ADDRESS, WETH_ADDRESS, DAI_ADDRESS } from "./constants.js";
+import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS } from "../contractAddresses.js";
 
 describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", function () {
     let protocolRegistry: ProtocolRegistry;
@@ -13,16 +13,22 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
     let mockMContract: HardhatEthersSigner;
     let mockCContract: HardhatEthersSigner;
 
+    before(async function () {
+        await connectNetwork();
+    });
+
     async function deployProtocolRegistryFixture() {
+        const ethers = getEthers();
         const [owner, nonOwner, operator, mockMContract, mockCContract] = await ethers.getSigners();
 
         // Deploy a dummy timelock for testing
-        const TimelockController = await ethers.getContractFactory("TimelockController");
+        // In Hardhat 3, we use the wrapper contract from Imports.sol
+        const TimelockController = await ethers.getContractFactory("TimelockControllerForTest");
         const timelock = await TimelockController.deploy(
             0, // 0 delay for testing
             [owner.address],
             [owner.address],
-            ethers.ZeroAddress,
+            ethersLib.ZeroAddress,
         );
         await timelock.waitForDeployment();
 
@@ -48,7 +54,7 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
 
     beforeEach(async function () {
         const fixture = await loadFixture(deployProtocolRegistryFixture);
-        protocolRegistry = fixture.protocolRegistry;
+        protocolRegistry = fixture.protocolRegistry as ProtocolRegistry;
         owner = fixture.owner;
         nonOwner = fixture.nonOwner;
         mockMContract = fixture.mockMContract;
@@ -88,8 +94,8 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
                 expect(await protocolRegistry.getMContract(USDC_ADDRESS)).to.equal(mockMContract.address);
 
                 // Then set to zero address (effectively removing the mapping)
-                await protocolRegistry.setTokenMContract(USDC_ADDRESS, ethers.ZeroAddress);
-                expect(await protocolRegistry.getMContract(USDC_ADDRESS)).to.equal(ethers.ZeroAddress);
+                await protocolRegistry.setTokenMContract(USDC_ADDRESS, ethersLib.ZeroAddress);
+                expect(await protocolRegistry.getMContract(USDC_ADDRESS)).to.equal(ethersLib.ZeroAddress);
             });
         });
 
@@ -102,9 +108,11 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
             });
 
             it("Should only allow admin to call the function", async function () {
+                const ethers = getEthers();
                 // Owner (has DEFAULT_ADMIN_ROLE) should succeed
-                await expect(protocolRegistry.connect(owner).setTokenMContract(USDC_ADDRESS, mockMContract.address)).to
-                    .not.be.reverted;
+                await expect(
+                    protocolRegistry.connect(owner).setTokenMContract(USDC_ADDRESS, mockMContract.address),
+                ).to.not.be.revert(ethers);
 
                 // Non-admin should fail
                 const DEFAULT_ADMIN_ROLE = await protocolRegistry.DEFAULT_ADMIN_ROLE();
@@ -117,12 +125,15 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
         describe("Input Validation", function () {
             it("Should revert when token address is zero", async function () {
                 await expect(
-                    protocolRegistry.setTokenMContract(ethers.ZeroAddress, mockMContract.address),
+                    protocolRegistry.setTokenMContract(ethersLib.ZeroAddress, mockMContract.address),
                 ).to.be.revertedWithCustomError(protocolRegistry, "ZeroAddress");
             });
 
             it("Should not revert when mContract address is zero", async function () {
-                await expect(protocolRegistry.setTokenMContract(USDC_ADDRESS, ethers.ZeroAddress)).to.not.be.reverted;
+                const ethers = getEthers();
+                await expect(protocolRegistry.setTokenMContract(USDC_ADDRESS, ethersLib.ZeroAddress)).to.not.be.revert(
+                    ethers,
+                );
             });
         });
 
@@ -133,7 +144,7 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
             });
 
             it("Should return zero address for non-existent mappings", async function () {
-                expect(await protocolRegistry.getMContract(WETH_ADDRESS)).to.equal(ethers.ZeroAddress);
+                expect(await protocolRegistry.getMContract(WETH_ADDRESS)).to.equal(ethersLib.ZeroAddress);
             });
         });
     });
@@ -171,8 +182,8 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
                 expect(await protocolRegistry.getCContract(USDC_ADDRESS)).to.equal(mockCContract.address);
 
                 // Then set to zero address (effectively removing the mapping)
-                await protocolRegistry.setTokenCContract(USDC_ADDRESS, ethers.ZeroAddress);
-                expect(await protocolRegistry.getCContract(USDC_ADDRESS)).to.equal(ethers.ZeroAddress);
+                await protocolRegistry.setTokenCContract(USDC_ADDRESS, ethersLib.ZeroAddress);
+                expect(await protocolRegistry.getCContract(USDC_ADDRESS)).to.equal(ethersLib.ZeroAddress);
             });
         });
 
@@ -185,9 +196,11 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
             });
 
             it("Should only allow admin to call the function", async function () {
+                const ethers = getEthers();
                 // Owner (has DEFAULT_ADMIN_ROLE) should succeed
-                await expect(protocolRegistry.connect(owner).setTokenCContract(USDC_ADDRESS, mockCContract.address)).to
-                    .not.be.reverted;
+                await expect(
+                    protocolRegistry.connect(owner).setTokenCContract(USDC_ADDRESS, mockCContract.address),
+                ).to.not.be.revert(ethers);
 
                 // Non-admin should fail
                 const DEFAULT_ADMIN_ROLE = await protocolRegistry.DEFAULT_ADMIN_ROLE();
@@ -200,12 +213,15 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
         describe("Input Validation", function () {
             it("Should revert when token address is zero", async function () {
                 await expect(
-                    protocolRegistry.setTokenCContract(ethers.ZeroAddress, mockCContract.address),
+                    protocolRegistry.setTokenCContract(ethersLib.ZeroAddress, mockCContract.address),
                 ).to.be.revertedWithCustomError(protocolRegistry, "ZeroAddress");
             });
 
             it("Should not revert when cContract address is zero", async function () {
-                await expect(protocolRegistry.setTokenCContract(USDC_ADDRESS, ethers.ZeroAddress)).to.not.be.reverted;
+                const ethers = getEthers();
+                await expect(protocolRegistry.setTokenCContract(USDC_ADDRESS, ethersLib.ZeroAddress)).to.not.be.revert(
+                    ethers,
+                );
             });
         });
 
@@ -216,7 +232,7 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
             });
 
             it("Should return zero address for non-existent mappings", async function () {
-                expect(await protocolRegistry.getCContract(WETH_ADDRESS)).to.equal(ethers.ZeroAddress);
+                expect(await protocolRegistry.getCContract(WETH_ADDRESS)).to.equal(ethersLib.ZeroAddress);
             });
         });
     });
@@ -297,12 +313,13 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
             });
 
             it("Should only allow admin to call the function", async function () {
+                const ethers = getEthers();
                 // Add tokens first
                 await protocolRegistry.addToWhitelist(USDC_ADDRESS);
                 await protocolRegistry.addToWhitelist(cbETH_ADDRESS);
 
                 // Owner (has DEFAULT_ADMIN_ROLE) should succeed
-                await expect(protocolRegistry.connect(owner).removeFromWhitelist(USDC_ADDRESS)).to.not.be.reverted;
+                await expect(protocolRegistry.connect(owner).removeFromWhitelist(USDC_ADDRESS)).to.not.be.revert(ethers);
 
                 // Non-admin should fail
                 const DEFAULT_ADMIN_ROLE = await protocolRegistry.DEFAULT_ADMIN_ROLE();
@@ -314,7 +331,7 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
 
         describe("Input Validation", function () {
             it("Should revert when token address is zero", async function () {
-                await expect(protocolRegistry.removeFromWhitelist(ethers.ZeroAddress)).to.be.revertedWithCustomError(
+                await expect(protocolRegistry.removeFromWhitelist(ethersLib.ZeroAddress)).to.be.revertedWithCustomError(
                     protocolRegistry,
                     "ZeroAddress",
                 );
@@ -398,6 +415,7 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
 
         describe("Integration with addToWhitelist", function () {
             it("Should be able to add token after removal", async function () {
+                const ethers = getEthers();
                 // Add token
                 await protocolRegistry.addToWhitelist(USDC_ADDRESS);
                 expect(await protocolRegistry.isWhitelisted(USDC_ADDRESS)).to.be.true;
@@ -407,7 +425,7 @@ describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", fun
                 expect(await protocolRegistry.isWhitelisted(USDC_ADDRESS)).to.be.false;
 
                 // Add token again (should not revert with "already whitelisted")
-                await expect(protocolRegistry.addToWhitelist(USDC_ADDRESS)).to.not.be.reverted;
+                await expect(protocolRegistry.addToWhitelist(USDC_ADDRESS)).to.not.be.revert(ethers);
                 expect(await protocolRegistry.isWhitelisted(USDC_ADDRESS)).to.be.true;
             });
 

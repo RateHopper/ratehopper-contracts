@@ -1,23 +1,19 @@
-import { base } from "./node_modules/acorn-walk/dist/walk.d";
-import { HardhatUserConfig } from "hardhat/config";
-import "@nomicfoundation/hardhat-toolbox";
-import "hardhat-contract-sizer";
-import "hardhat-gas-reporter";
+import { defineConfig, configVariable } from "hardhat/config";
+import HardhatToolboxMochaEthers from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
+// import HardhatUpgrades from "@openzeppelin/hardhat-upgrades"; // TODO: Re-enable when compatible with Hardhat 3
 import dotenv from "dotenv";
 dotenv.config();
-require("hardhat-tracer");
-require("@openzeppelin/hardhat-upgrades");
 
-// const baseUrl = "https://base.llamarpc.com";
-const baseUrl = "https://mainnet.base.org";
+// Use BASE_RPC_URL env var if available, otherwise fall back to public endpoint
+const baseUrl = process.env.BASE_RPC_URL || "https://base.llamarpc.com";
+console.log("Using RPC URL:", baseUrl);
+console.log("Fork block:", process.env.FORK_BLOCK_NUMBER || "latest");
 
-const config: HardhatUserConfig = {
+export default defineConfig({
+    plugins: [HardhatToolboxMochaEthers],
     solidity: {
-        compilers: [
-            {
-                version: "0.7.6",
-            },
-            {
+        profiles: {
+            default: {
                 version: "0.8.28",
                 settings: {
                     optimizer: {
@@ -27,75 +23,82 @@ const config: HardhatUserConfig = {
                     viaIR: true,
                 },
             },
-        ],
-    },
-    etherscan: {
-        apiKey: process.env.EXPLORER_KEY!,
-        customChains: [
-            {
-                network: "base",
-                chainId: 8453,
-                urls: {
-                    apiURL: "https://api.etherscan.io/v2/api",
-                    browserURL: "https://basescan.org",
-                },
+            legacy: {
+                version: "0.7.6",
             },
-            {
-                network: "baseSepolia",
-                chainId: 84532,
-                urls: {
-                    apiURL: "https://api.etherscan.io/v2/api",
-                    browserURL: "https://sepolia.basescan.org",
-                },
-            },
-        ],
-    },
-    mocha: {
-        timeout: 300000, // 5 minutes for memory-intensive tests
-        parallel: false, // Disable parallel to reduce memory usage
-        bail: false, // Continue running tests even if one fails
-        slow: 30000, // Mark tests as slow if they take more than 30 seconds
-    },
-    gasReporter: {
-        enabled: process.env.REPORT_GAS ? true : false,
+        },
     },
     networks: {
-        base: {
-            url: baseUrl,
-            chainId: 8453,
-            timeout: 10_000_000,
-            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
-            gasPrice: "auto",
-            gasMultiplier: 1.2,
-        },
-        baseSepolia: {
-            url: "https://sepolia.base.org",
-            chainId: 84532,
-            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
-        },
-        sepolia: {
-            url: "https://eth-sepolia.public.blastapi.io",
-            chainId: 11155111,
-            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
-        },
-        localhost: {
-            url: "http://localhost:8545",
-            timeout: 100_000_000,
-        },
         hardhat: {
+            type: "edr-simulated",
             chainId: 8453,
-            chains: {
-                8453: {
-                    hardforkHistory: {
-                        london: 1,
-                    },
-                },
-            },
+            // Note: Using "l1" instead of "op" as workaround for EDR OP stack block builder bug
+            // See: https://github.com/NomicFoundation/edr/issues
+            chainType: "l1",
             forking: {
                 url: baseUrl,
+                enabled: true,
+                // Pin to a specific block for reproducible tests
+                // Update this periodically as needed
+                blockNumber: process.env.FORK_BLOCK_NUMBER ? parseInt(process.env.FORK_BLOCK_NUMBER) : undefined,
             },
         },
+        base: {
+            type: "http",
+            chainType: "op",
+            chainId: 8453,
+            url: baseUrl,
+            accounts: [configVariable("DEPLOYER_PRIVATE_KEY")],
+        },
+        baseSepolia: {
+            type: "http",
+            chainType: "op",
+            chainId: 84532,
+            url: "https://sepolia.base.org",
+            accounts: [configVariable("DEPLOYER_PRIVATE_KEY")],
+        },
+        sepolia: {
+            type: "http",
+            chainType: "l1",
+            chainId: 11155111,
+            url: "https://eth-sepolia.public.blastapi.io",
+            accounts: [configVariable("DEPLOYER_PRIVATE_KEY")],
+        },
+        localhost: {
+            type: "http",
+            chainType: "l1",
+            url: "http://localhost:8545",
+        },
     },
-};
-
-export default config;
+    test: {
+        mocha: {
+            timeout: 300000,
+            parallel: false,
+            bail: false,
+            slow: 30000,
+        },
+    },
+    // TODO: etherscan config needs to be updated for Hardhat 3
+    // The verification plugin may need different configuration
+    // etherscan: {
+    //     apiKey: configVariable("EXPLORER_KEY"),
+    //     customChains: [
+    //         {
+    //             network: "base",
+    //             chainId: 8453,
+    //             urls: {
+    //                 apiURL: "https://api.basescan.org/api",
+    //                 browserURL: "https://basescan.org",
+    //             },
+    //         },
+    //         {
+    //             network: "baseSepolia",
+    //             chainId: 84532,
+    //             urls: {
+    //                 apiURL: "https://api-sepolia.basescan.org/api",
+    //                 browserURL: "https://sepolia.basescan.org",
+    //             },
+    //         },
+    //     ],
+    // },
+});

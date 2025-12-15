@@ -1,0 +1,2 @@
+- Follow DRY principle whenever possible
+- Follow hardhat 3 guide for test code https://hardhat.org/docs/migrate-from-hardhat2/guides/mocha-tests

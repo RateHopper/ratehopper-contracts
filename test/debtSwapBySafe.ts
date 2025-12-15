@@ -1,7 +1,9 @@
-import { ethers } from "hardhat";
+import * as ethersLib from "ethers";
+import { MaxUint256 } from "ethers";
 import dotenv from "dotenv";
 dotenv.config();
-import Safe from "@safe-global/protocol-kit";
+import SafeModule from "@safe-global/protocol-kit";
+const Safe = SafeModule.default || SafeModule;
 import {
     AAVE_V3_POOL_ADDRESS,
     cbBTC_ADDRESS,
@@ -20,13 +22,15 @@ import {
     ETH_USDC_POOL,
     WETH_ADDRESS,
     wstETH_ADDRESS,
-} from "./constants";
-import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import cometAbi from "../externalAbi/compound/comet.json";
-import morphoAbi from "../externalAbi/morpho/morpho.json";
-import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { MaxUint256 } from "ethers";
-import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
+} from "./constants.js";
+import ERC20Json from "@openzeppelin/contracts/build/contracts/ERC20.json" with { type: "json" };
+const ERC20_ABI = ERC20Json.abi;
+import cometAbi from "../externalAbi/compound/comet.json" with { type: "json" };
+import morphoAbi from "../externalAbi/morpho/morpho.json" with { type: "json" };
+import * as SafeTypes from "@safe-global/types-kit";
+type MetaTransactionData = SafeTypes.MetaTransactionData;
+const OperationType = SafeTypes.OperationType;
+import { connectNetwork, getEthers, getTime, loadFixture } from "./testSetup.js";
 import {
     eip1193Provider,
     formatAmount,
@@ -35,7 +39,7 @@ import {
     getDecimals,
     getParaswapData,
     protocolHelperMap,
-} from "./utils";
+} from "./utils.js";
 import {
     FLUID_cbETH_EURC_VAULT,
     FLUID_cbETH_USDC_VAULT,
@@ -43,22 +47,26 @@ import {
     FLUID_wstETH_sUSDS_VAULT,
     FLUID_wstETH_USDC_VAULT,
     FluidHelper,
-} from "./protocols/fluid";
-import { cometAddressMap, CompoundHelper, USDC_COMET_ADDRESS } from "./protocols/compound";
-import { MORPHO_ADDRESS, morphoMarket1Id, morphoMarket2Id, morphoMarket7Id, MorphoHelper } from "./protocols/morpho";
-import { AaveV3Helper } from "./protocols/aaveV3";
-import FluidVaultAbi from "../externalAbi/fluid/fluidVaultT1.json";
-import aaveDebtTokenJson from "../externalAbi/aaveV3/aaveDebtToken.json";
-import aaveV3PoolJson from "../externalAbi/aaveV3/aaveV3Pool.json";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+} from "./protocols/fluid.js";
+import { cometAddressMap, CompoundHelper, USDC_COMET_ADDRESS } from "./protocols/compound.js";
+import { MORPHO_ADDRESS, morphoMarket1Id, morphoMarket2Id, morphoMarket7Id, MorphoHelper } from "./protocols/morpho.js";
+import { AaveV3Helper } from "./protocols/aaveV3.js";
+import FluidVaultAbi from "../externalAbi/fluid/fluidVaultT1.json" with { type: "json" };
+import aaveDebtTokenJson from "../externalAbi/aaveV3/aaveDebtToken.json" with { type: "json" };
+import aaveV3PoolJson from "../externalAbi/aaveV3/aaveV3Pool.json" with { type: "json" };
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect } from "chai";
-import { deploySafeContractFixture } from "./deployUtils";
+import { deploySafeContractFixture } from "./deployUtils.js";
 import { zeroAddress } from "viem";
 
 export const safeAddress = process.env.TESTING_SAFE_WALLET_ADDRESS!;
 
 // Export helper functions for reuse in other test files
-export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWallet: any; safeModuleAddress: string }) {
+export function createSafeTestHelpers(context: {
+    signer: ethersLib.Wallet;
+    safeWallet: any;
+    safeModuleAddress: string;
+}) {
     const { signer, safeWallet, safeModuleAddress } = context;
 
     async function sendCollateralToSafe(tokenAddress = cbETH_ADDRESS, protocol?: Protocols) {
@@ -66,12 +74,12 @@ export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWall
             // Send ETH directly to Safe for WETH only for Fluid protocol
             const tx = await signer.sendTransaction({
                 to: safeAddress,
-                value: ethers.parseEther("0.001"),
+                value: ethersLib.parseEther("0.001"),
             });
             await tx.wait();
         } else {
-            const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
-            const tx = await tokenContract.transfer(safeAddress, ethers.parseEther("0.001"));
+            const tokenContract = new ethersLib.Contract(tokenAddress, ERC20_ABI, signer);
+            const tx = await tokenContract.transfer(safeAddress, ethersLib.parseEther("0.001"));
             await tx.wait();
         }
     }
@@ -86,19 +94,19 @@ export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWall
         const helper = new Helper(signer);
 
         // Use smaller borrow amount for WETH to avoid requiring excessive collateral
-        const customBorrowAmount = debtTokenAddress === WETH_ADDRESS ? ethers.parseEther("0.0005") : undefined;
+        const customBorrowAmount = debtTokenAddress === WETH_ADDRESS ? ethersLib.parseEther("0.0005") : undefined;
         const protocolCallData = await helper.getSupplyAndBorrowTxdata(
             debtTokenAddress,
             collateralTokenAddress,
             customBorrowAmount,
         );
 
-        const tokenContract = new ethers.Contract(debtTokenAddress, ERC20_ABI, signer);
+        const tokenContract = new ethersLib.Contract(debtTokenAddress, ERC20_ABI, signer);
 
         const decimals = await getDecimals(debtTokenAddress);
         // Transfer amount should match borrow amount for WETH
         const transferAmount =
-            debtTokenAddress === WETH_ADDRESS ? ethers.parseEther("0.0004") : ethers.parseUnits("1", decimals);
+            debtTokenAddress === WETH_ADDRESS ? ethersLib.parseEther("0.0004") : ethersLib.parseUnits("1", decimals);
 
         const transferTransactionData: MetaTransactionData = {
             to: debtTokenAddress,
@@ -115,21 +123,21 @@ export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWall
         console.log(`Supplied and borrowed on protocol: ${protocol}`);
 
         const tokenBalance = await tokenContract.balanceOf(safeAddress);
-        console.log("Token Balance on Safe:", ethers.formatUnits(tokenBalance, decimals));
+        console.log("Token Balance on Safe:", ethersLib.formatUnits(tokenBalance, decimals));
 
         const userTokenBalance = await tokenContract.balanceOf(TEST_ADDRESS);
-        console.log("Token Balance on user:", ethers.formatUnits(userTokenBalance, decimals));
+        console.log("Token Balance on user:", ethersLib.formatUnits(userTokenBalance, decimals));
     }
 
     async function supplyAndBorrowOnFluid(
         vaultAddress = FLUID_cbETH_USDC_VAULT,
         collateralTokenAddress = cbETH_ADDRESS,
-        supplyAmount = ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
+        supplyAmount = ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT),
     ) {
         await sendCollateralToSafe(collateralTokenAddress, Protocols.FLUID);
-        const collateralTokenContract = new ethers.Contract(collateralTokenAddress, ERC20_ABI, signer);
+        const collateralTokenContract = new ethersLib.Contract(collateralTokenAddress, ERC20_ABI, signer);
 
-        const fluidVault = new ethers.Contract(vaultAddress, FluidVaultAbi, signer);
+        const fluidVault = new ethersLib.Contract(vaultAddress, FluidVaultAbi, signer);
 
         const transactions: MetaTransactionData[] = [];
 
@@ -140,7 +148,7 @@ export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWall
                 value: "0",
                 data: collateralTokenContract.interface.encodeFunctionData("approve", [
                     vaultAddress,
-                    ethers.parseEther("1"),
+                    ethersLib.parseEther("1"),
                 ]),
                 operation: OperationType.Call,
             };
@@ -171,18 +179,18 @@ export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWall
             data: fluidVault.interface.encodeFunctionData("operate", [
                 nftId,
                 0,
-                ethers.parseUnits("1", 6),
+                ethersLib.parseUnits("1", 6),
                 safeAddress,
             ]),
             operation: OperationType.Call,
         };
 
-        const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+        const usdcContract = new ethersLib.Contract(USDC_ADDRESS, ERC20_ABI, signer);
 
         const transferTransactionData: MetaTransactionData = {
             to: USDC_ADDRESS,
             value: "0",
-            data: usdcContract.interface.encodeFunctionData("transfer", [TEST_ADDRESS, ethers.parseUnits("1", 6)]),
+            data: usdcContract.interface.encodeFunctionData("transfer", [TEST_ADDRESS, ethersLib.parseUnits("1", 6)]),
             operation: OperationType.Call,
         };
 
@@ -195,7 +203,7 @@ export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWall
     }
 
     async function morphoAuthorizeTxBySafe() {
-        const morphoContract = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, signer);
+        const morphoContract = new ethersLib.Contract(MORPHO_ADDRESS, morphoAbi, signer);
 
         const authTransactionData: MetaTransactionData = {
             to: MORPHO_ADDRESS,
@@ -214,7 +222,7 @@ export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWall
 
     async function compoundAllowTxBySafe(tokenAddress: string) {
         const cometAddress = cometAddressMap.get(tokenAddress)!;
-        const comet = new ethers.Contract(cometAddress, cometAbi, signer);
+        const comet = new ethersLib.Contract(cometAddress, cometAbi, signer);
 
         const allowTransactionData: MetaTransactionData = {
             to: cometAddress,
@@ -244,7 +252,7 @@ describe("Safe wallet should debtSwap", function () {
     // Increase timeout for memory-intensive operations
     this.timeout(300000); // 5 minutes
 
-    const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
+    let signer: ethersLib.Wallet;
     let operator: HardhatEthersSigner;
     let safeWallet;
     let safeModuleContract;
@@ -255,7 +263,13 @@ describe("Safe wallet should debtSwap", function () {
     let compoundHelper: CompoundHelper;
     let morphoHelper: MorphoHelper;
 
+    before(async function () {
+        await connectNetwork();
+    });
+
     this.beforeEach(async () => {
+        const ethers = getEthers();
+        signer = new ethersLib.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
         // Get the operator (third signer)
         const signers = await ethers.getSigners();
         operator = signers[2];
@@ -378,8 +392,25 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         describe("In Morpho", function () {
-            it("from market 1 to market 2", async function () {
+            it.only("from market 1 to market 1 (same market test)", async function () {
+                const ethers = getEthers();
+                // Check market liquidity before the swap
+                const morphoContract = new ethersLib.Contract(MORPHO_ADDRESS, morphoAbi, signer);
+                const market1Data = await morphoContract.market(morphoMarket1Id);
+                console.log("Market 1 - totalSupplyAssets:", market1Data.totalSupplyAssets.toString(), "totalBorrowAssets:", market1Data.totalBorrowAssets.toString());
+
                 await supplyAndBorrow(Protocols.MORPHO);
+
+                // Verify authorization is set
+                const isAuthorized = await morphoContract.isAuthorized(safeAddress, safeModuleAddress);
+                console.log("Is Safe authorized SafeDebtManager on Morpho?", isAuthorized);
+
+                // Verify operator
+                const registryOperator = await protocolRegistryContract.safeOperator();
+                console.log("Registry operator:", registryOperator);
+                console.log("Test operator:", operator.address);
+
+                // Try switching within the same market to test if the basic flow works
                 await executeDebtSwap(
                     ETH_USDC_POOL,
                     USDC_ADDRESS,
@@ -389,7 +420,8 @@ describe("Safe wallet should debtSwap", function () {
                     cbETH_ADDRESS,
                     {
                         morphoFromMarketId: morphoMarket1Id,
-                        morphoToMarketId: morphoMarket2Id,
+                        morphoToMarketId: morphoMarket1Id, // Same market
+                        operator: operator,
                     },
                 );
             });
@@ -442,6 +474,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("from Aave to Compound with protocol fee", async function () {
+            const ethers = getEthers();
             // set protocol fee
             const signers = await ethers.getSigners();
             const contractByOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
@@ -476,6 +509,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("from Fluid to Moonwell", async function () {
+            const time = getTime();
             await supplyAndBorrowOnFluid();
 
             await time.increaseTo((await time.latest()) + 86400); // 1 day
@@ -579,6 +613,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("from Aave to Moonwell with protocol fee", async function () {
+            const ethers = getEthers();
             // set protocol fee
             const signers = await ethers.getSigners();
             const contractByOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
@@ -595,6 +630,7 @@ describe("Safe wallet should debtSwap", function () {
 
         // TODO: Fix this test
         it.skip("from Moonwell USDC to DAI with protocol fee - tests decimal mismatch", async function () {
+            const ethers = getEthers();
             // set protocol fee to 1% (100 basis points)
             const signers = await ethers.getSigners();
             const contractByOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
@@ -608,7 +644,7 @@ describe("Safe wallet should debtSwap", function () {
             await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS);
 
             // Get DAI contract for balance checks
-            const daiContract = new ethers.Contract(DAI_ADDRESS, ERC20_ABI, signer);
+            const daiContract = new ethersLib.Contract(DAI_ADDRESS, ERC20_ABI, signer);
 
             // Record fee beneficiary's DAI balance before swap
             const beneficiaryDaiBalanceBefore = await daiContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
@@ -621,12 +657,12 @@ describe("Safe wallet should debtSwap", function () {
             const feeReceived = beneficiaryDaiBalanceAfter - beneficiaryDaiBalanceBefore;
 
             // Log the fee received
-            console.log("Protocol fee received (DAI):", ethers.formatUnits(feeReceived, 18));
+            console.log("Protocol fee received (DAI):", ethersLib.formatUnits(feeReceived, 18));
 
             // The fee should be approximately 1% of the debt amount in DAI terms
             // For example, if swapping 100 USDC to ~100 DAI, fee should be ~1 DAI (not 0.000001 DAI)
-            expect(feeReceived).to.be.gt(ethers.parseUnits("0.5", 18)); // At least 0.5 DAI
-            expect(feeReceived).to.be.lt(ethers.parseUnits("5", 18)); // Less than 5 DAI
+            expect(feeReceived).to.be.gt(ethersLib.parseUnits("0.5", 18)); // At least 0.5 DAI
+            expect(feeReceived).to.be.lt(ethersLib.parseUnits("5", 18)); // Less than 5 DAI
         });
 
         it("from Aave to Morpho", async function () {
@@ -729,8 +765,8 @@ describe("Safe wallet should debtSwap", function () {
             await helpers.sendCollateralToSafe(WETH_ADDRESS);
 
             // Create supply transaction for WETH to Aave
-            const wethContract = new ethers.Contract(WETH_ADDRESS, ERC20_ABI, signer);
-            const aavePool = new ethers.Contract(AAVE_V3_POOL_ADDRESS, aaveV3PoolJson, signer);
+            const wethContract = new ethersLib.Contract(WETH_ADDRESS, ERC20_ABI, signer);
+            const aavePool = new ethersLib.Contract(AAVE_V3_POOL_ADDRESS, aaveV3PoolJson, signer);
 
             const wethBalance = await wethContract.balanceOf(safeAddress);
             if (wethBalance > 0n) {
@@ -739,7 +775,7 @@ describe("Safe wallet should debtSwap", function () {
                     value: "0",
                     data: wethContract.interface.encodeFunctionData("approve", [
                         AAVE_V3_POOL_ADDRESS,
-                        ethers.parseEther("1"),
+                        ethersLib.parseEther("1"),
                     ]),
                     operation: OperationType.Call,
                 };
@@ -749,7 +785,7 @@ describe("Safe wallet should debtSwap", function () {
                     value: "0",
                     data: aavePool.interface.encodeFunctionData("supply", [
                         WETH_ADDRESS,
-                        ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
+                        ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT),
                         safeAddress,
                         0,
                     ]),
@@ -763,22 +799,22 @@ describe("Safe wallet should debtSwap", function () {
             }
 
             const WETHAmountInAaveBefore = await aaveV3Helper.getCollateralAmount(WETH_ADDRESS, safeAddress);
-            console.log("WETH collateralAmountInAaveBefore:", ethers.formatEther(WETHAmountInAaveBefore));
+            console.log("WETH collateralAmountInAaveBefore:", ethersLib.formatEther(WETHAmountInAaveBefore));
             const WETHAmountInCompoundBefore = await compoundHelper.getCollateralAmount(
                 USDC_COMET_ADDRESS,
                 WETH_ADDRESS,
                 safeAddress,
             );
-            console.log("WETH collateralAmountInCompoundBefore:", ethers.formatEther(WETHAmountInCompoundBefore));
+            console.log("WETH collateralAmountInCompoundBefore:", ethersLib.formatEther(WETHAmountInCompoundBefore));
 
             const cbETHAmountInAaveBefore = await aaveV3Helper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-            console.log("cbETH collateralAmountInAaveBefore:", ethers.formatEther(cbETHAmountInAaveBefore));
+            console.log("cbETH collateralAmountInAaveBefore:", ethersLib.formatEther(cbETHAmountInAaveBefore));
             const cbETHAmountInCompoundBefore = await compoundHelper.getCollateralAmount(
                 USDC_COMET_ADDRESS,
                 cbETH_ADDRESS,
                 safeAddress,
             );
-            console.log("cbETH collateralAmountInCompoundBefore:", ethers.formatEther(cbETHAmountInCompoundBefore));
+            console.log("cbETH collateralAmountInCompoundBefore:", ethersLib.formatEther(cbETHAmountInCompoundBefore));
 
             await executeDebtSwap(
                 ETH_USDC_POOL,
@@ -791,22 +827,22 @@ describe("Safe wallet should debtSwap", function () {
             );
 
             const WETHAmountInAave = await aaveV3Helper.getCollateralAmount(WETH_ADDRESS, safeAddress);
-            console.log("WETH collateralAmountInAave:", ethers.formatEther(WETHAmountInAave));
+            console.log("WETH collateralAmountInAave:", ethersLib.formatEther(WETHAmountInAave));
             const WETHAmountInCompound = await compoundHelper.getCollateralAmount(
                 USDC_COMET_ADDRESS,
                 WETH_ADDRESS,
                 safeAddress,
             );
-            console.log("WETH collateralAmountInCompound:", ethers.formatEther(WETHAmountInCompound));
+            console.log("WETH collateralAmountInCompound:", ethersLib.formatEther(WETHAmountInCompound));
 
             const cbETHAmountInAave = await aaveV3Helper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-            console.log("cbETH collateralAmountInAave:", ethers.formatEther(cbETHAmountInAave));
+            console.log("cbETH collateralAmountInAave:", ethersLib.formatEther(cbETHAmountInAave));
             const cbETHAmountInCompound = await compoundHelper.getCollateralAmount(
                 USDC_COMET_ADDRESS,
                 cbETH_ADDRESS,
                 safeAddress,
             );
-            console.log("cbETH collateralAmountInCompound:", ethers.formatEther(cbETHAmountInCompound));
+            console.log("cbETH collateralAmountInCompound:", ethersLib.formatEther(cbETHAmountInCompound));
         });
 
         it("Multiple collateral case from Compound to Aave", async function () {
@@ -816,15 +852,15 @@ describe("Safe wallet should debtSwap", function () {
             await helpers.sendCollateralToSafe(WETH_ADDRESS);
 
             // Create supply transaction for WETH to Compound
-            const wethContract = new ethers.Contract(WETH_ADDRESS, ERC20_ABI, signer);
-            const cometContract = new ethers.Contract(USDC_COMET_ADDRESS, cometAbi, signer);
+            const wethContract = new ethersLib.Contract(WETH_ADDRESS, ERC20_ABI, signer);
+            const cometContract = new ethersLib.Contract(USDC_COMET_ADDRESS, cometAbi, signer);
 
             const approveTransactionData: MetaTransactionData = {
                 to: WETH_ADDRESS,
                 value: "0",
                 data: wethContract.interface.encodeFunctionData("approve", [
                     USDC_COMET_ADDRESS,
-                    ethers.parseEther("1"),
+                    ethersLib.parseEther("1"),
                 ]),
                 operation: OperationType.Call,
             };
@@ -834,7 +870,7 @@ describe("Safe wallet should debtSwap", function () {
                 value: "0",
                 data: cometContract.interface.encodeFunctionData("supply", [
                     WETH_ADDRESS,
-                    ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
+                    ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT),
                 ]),
                 operation: OperationType.Call,
             };
@@ -855,36 +891,37 @@ describe("Safe wallet should debtSwap", function () {
             );
 
             const WETHAmountInAave = await aaveV3Helper.getCollateralAmount(WETH_ADDRESS, safeAddress);
-            console.log("WETH collateralAmountInAave:", ethers.formatEther(WETHAmountInAave));
+            console.log("WETH collateralAmountInAave:", ethersLib.formatEther(WETHAmountInAave));
             const WETHAmountInCompound = await compoundHelper.getCollateralAmount(
                 USDC_COMET_ADDRESS,
                 WETH_ADDRESS,
                 safeAddress,
             );
-            console.log("WETH collateralAmountInCompound:", ethers.formatEther(WETHAmountInCompound));
+            console.log("WETH collateralAmountInCompound:", ethersLib.formatEther(WETHAmountInCompound));
 
             const cbETHAmountInAave = await aaveV3Helper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-            console.log("cbETH collateralAmountInAave:", ethers.formatEther(cbETHAmountInAave));
+            console.log("cbETH collateralAmountInAave:", ethersLib.formatEther(cbETHAmountInAave));
             const cbETHAmountInCompound = await compoundHelper.getCollateralAmount(
                 USDC_COMET_ADDRESS,
                 cbETH_ADDRESS,
                 safeAddress,
             );
-            console.log("cbETH collateralAmountInCompound:", ethers.formatEther(cbETHAmountInCompound));
+            console.log("cbETH collateralAmountInCompound:", ethersLib.formatEther(cbETHAmountInCompound));
         });
     });
 
     describe("Util function", function () {
         it("emergency withdraw", async function () {
-            const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
-            const transfer = await usdcContract.transfer(safeModuleAddress, ethers.parseUnits("1", 6));
+            const ethers = getEthers();
+            const usdcContract = new ethersLib.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+            const transfer = await usdcContract.transfer(safeModuleAddress, ethersLib.parseUnits("1", 6));
             await transfer.wait();
 
             const signers = await ethers.getSigners();
             const contract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
-            await contract.emergencyWithdraw(USDC_ADDRESS, ethers.parseUnits("1", 6));
+            await contract.emergencyWithdraw(USDC_ADDRESS, ethersLib.parseUnits("1", 6));
             const balance = await usdcContract.balanceOf(signers[0].address);
-            console.log(`Balance:`, ethers.formatUnits(balance, 6));
+            console.log(`Balance:`, ethersLib.formatUnits(balance, 6));
         });
     });
 
@@ -905,6 +942,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("revert when calling executeDebtSwap by non operator(wallet4)", async function () {
+            const ethers = getEthers();
             const [_, , , wallet4] = await ethers.getSigners();
 
             await supplyAndBorrow(Protocols.MOONWELL);
@@ -944,18 +982,21 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("if non-owner call setProtocolFee()", async function () {
+            const ethers = getEthers();
             const signers = await ethers.getSigners();
             const contractByNotOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[1]);
-            await expect(contractByNotOwner.setProtocolFee(100)).to.be.reverted;
+            await expect(contractByNotOwner.setProtocolFee(100)).to.be.revert(ethers);
         });
 
         it("Call uniswapV3FlashCallback() directly with invalid callback data", async function () {
+            const ethers = getEthers();
             const signers = await ethers.getSigners();
             const contractByNotOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[1]);
-            await expect(contractByNotOwner.uniswapV3FlashCallback(100, 100, "0x")).to.be.reverted;
+            await expect(contractByNotOwner.uniswapV3FlashCallback(100, 100, "0x")).to.be.revert(ethers);
         });
 
         it("if flashloan pool is zero address", async function () {
+            const ethers = getEthers();
             await expect(
                 executeDebtSwap(
                     zeroAddress,
@@ -966,10 +1007,11 @@ describe("Safe wallet should debtSwap", function () {
                     cbETH_ADDRESS,
                     { operator },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if fromTokenAddress is zero address", async function () {
+            const ethers = getEthers();
             await expect(
                 executeDebtSwap(
                     ETH_USDC_POOL,
@@ -980,10 +1022,11 @@ describe("Safe wallet should debtSwap", function () {
                     cbETH_ADDRESS,
                     { operator },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if toTokenAddress is zero address", async function () {
+            const ethers = getEthers();
             await expect(
                 executeDebtSwap(
                     ETH_USDC_POOL,
@@ -994,10 +1037,11 @@ describe("Safe wallet should debtSwap", function () {
                     cbETH_ADDRESS,
                     { operator },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if collateralArray is empty", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1012,10 +1056,11 @@ describe("Safe wallet should debtSwap", function () {
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if collateralArray contains zero address", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1025,15 +1070,16 @@ describe("Safe wallet should debtSwap", function () {
                     USDC_ADDRESS,
                     USDC_ADDRESS,
                     MaxUint256,
-                    [{ asset: zeroAddress, amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
+                    [{ asset: zeroAddress, amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
                     safeAddress,
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if collateralArray contains zero amount", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1048,10 +1094,11 @@ describe("Safe wallet should debtSwap", function () {
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if debtAmount is zero", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1061,15 +1108,16 @@ describe("Safe wallet should debtSwap", function () {
                     USDC_ADDRESS,
                     USDC_ADDRESS,
                     0n,
-                    [{ asset: cbETH_ADDRESS, amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
+                    [{ asset: cbETH_ADDRESS, amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
                     safeAddress,
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if fromProtocol is invalid (out of range)", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1079,15 +1127,16 @@ describe("Safe wallet should debtSwap", function () {
                     USDC_ADDRESS,
                     USDC_ADDRESS,
                     MaxUint256,
-                    [{ asset: cbETH_ADDRESS, amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
+                    [{ asset: cbETH_ADDRESS, amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
                     safeAddress,
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if toProtocol is invalid (out of range)", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1097,15 +1146,16 @@ describe("Safe wallet should debtSwap", function () {
                     USDC_ADDRESS,
                     USDC_ADDRESS,
                     MaxUint256,
-                    [{ asset: cbETH_ADDRESS, amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
+                    [{ asset: cbETH_ADDRESS, amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
                     safeAddress,
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if fromTokenAddress is not a valid ERC20 token", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1115,15 +1165,16 @@ describe("Safe wallet should debtSwap", function () {
                     "0x1234567890123456789012345678901234567890", // Invalid token address
                     USDC_ADDRESS,
                     MaxUint256,
-                    [{ asset: cbETH_ADDRESS, amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
+                    [{ asset: cbETH_ADDRESS, amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
                     safeAddress,
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if toTokenAddress is not a valid ERC20 token", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1133,15 +1184,16 @@ describe("Safe wallet should debtSwap", function () {
                     USDC_ADDRESS,
                     "0x1234567890123456789012345678901234567890", // Invalid token address
                     MaxUint256,
-                    [{ asset: cbETH_ADDRESS, amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
+                    [{ asset: cbETH_ADDRESS, amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
                     safeAddress,
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if collateralArray asset is not a valid ERC20 token", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1154,17 +1206,18 @@ describe("Safe wallet should debtSwap", function () {
                     [
                         {
                             asset: "0x1234567890123456789012345678901234567890",
-                            amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
+                            amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT),
                         },
                     ],
                     safeAddress,
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if paraswapData has excessively large srcAmount", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1174,15 +1227,16 @@ describe("Safe wallet should debtSwap", function () {
                     USDC_ADDRESS,
                     USDC_ADDRESS,
                     MaxUint256,
-                    [{ asset: cbETH_ADDRESS, amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
+                    [{ asset: cbETH_ADDRESS, amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
                     safeAddress,
                     ["0x", "0x"],
                     { srcAmount: MaxUint256, swapData: "0x12345678" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if collateralArray has mixed valid and invalid assets", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1193,17 +1247,18 @@ describe("Safe wallet should debtSwap", function () {
                     USDC_ADDRESS,
                     MaxUint256,
                     [
-                        { asset: cbETH_ADDRESS, amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT) },
-                        { asset: zeroAddress, amount: ethers.parseEther("0.1") },
+                        { asset: cbETH_ADDRESS, amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT) },
+                        { asset: zeroAddress, amount: ethersLib.parseEther("0.1") },
                     ],
                     safeAddress,
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if collateralArray has excessively large amount", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1218,10 +1273,11 @@ describe("Safe wallet should debtSwap", function () {
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if user has no debt to swap", async function () {
+            const ethers = getEthers();
             // Use a fresh Safe address with no positions
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
@@ -1232,15 +1288,16 @@ describe("Safe wallet should debtSwap", function () {
                     USDC_ADDRESS,
                     USDC_ADDRESS,
                     MaxUint256,
-                    [{ asset: cbETH_ADDRESS, amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
+                    [{ asset: cbETH_ADDRESS, amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
                     safeAddress, // Safe has no debt position
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("if same fromProtocol and toProtocol but different invalid tokens", async function () {
+            const ethers = getEthers();
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
                 moduleContract.executeDebtSwap(
@@ -1250,15 +1307,16 @@ describe("Safe wallet should debtSwap", function () {
                     "0x1111111111111111111111111111111111111111",
                     "0x2222222222222222222222222222222222222222",
                     MaxUint256,
-                    [{ asset: cbETH_ADDRESS, amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
+                    [{ asset: cbETH_ADDRESS, amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT) }],
                     safeAddress,
                     ["0x", "0x"],
                     { srcAmount: 0n, swapData: "0x" },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
 
         it("revert when paraswap data is fetched with wrong contract address", async function () {
+            const ethers = getEthers();
             await supplyAndBorrow(Protocols.MOONWELL);
 
             // Fetch paraswap data with wrong contract address (using TEST_ADDRESS instead of safeModuleAddress)
@@ -1291,7 +1349,7 @@ describe("Safe wallet should debtSwap", function () {
                         operator, // Call directly to properly catch the revert
                     },
                 ),
-            ).to.be.reverted;
+            ).to.be.revert(ethers);
         });
     });
 
@@ -1330,6 +1388,8 @@ describe("Safe wallet should debtSwap", function () {
             tofluidVaultAddress?: string;
         } = {},
     ) {
+        const ethers = getEthers();
+        const time = getTime();
         const FromHelper = protocolHelperMap.get(fromProtocol)!;
         const fromHelper = new FromHelper(signer);
         const ToHelper = protocolHelperMap.get(toProtocol)!;
@@ -1348,7 +1408,7 @@ describe("Safe wallet should debtSwap", function () {
         // Handle toProtocol setup (Aave approveDelegation)
         if (toProtocol === Protocols.AAVE_V3) {
             const debtTokenAddress = await toHelper.getDebtTokenAddress(toTokenAddress);
-            const aaveDebtToken = new ethers.Contract(debtTokenAddress, aaveDebtTokenJson, signer);
+            const aaveDebtToken = new ethersLib.Contract(debtTokenAddress, aaveDebtTokenJson, signer);
 
             const authTransactionData: MetaTransactionData = {
                 to: debtTokenAddress,
@@ -1364,7 +1424,7 @@ describe("Safe wallet should debtSwap", function () {
             await safeWallet.executeTransaction(safeTransaction);
         }
 
-        let collateralAmount = ethers.parseEther(DEFAULT_SUPPLY_AMOUNT);
+        let collateralAmount = ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT);
         if (fromProtocol === Protocols.MOONWELL) {
             collateralAmount = await fromHelper.getCollateralAmount(collateralTokenAddress, safeAddress);
         }
@@ -1410,6 +1470,8 @@ describe("Safe wallet should debtSwap", function () {
             tofluidVaultAddress: FLUID_cbETH_USDC_VAULT,
         },
     ) {
+        const ethers = getEthers();
+        const time = getTime();
         const FromHelper = protocolHelperMap.get(fromProtocol)!;
         const fromHelper = new FromHelper(signer);
         const ToHelper = protocolHelperMap.get(toProtocol)!;
@@ -1474,14 +1536,14 @@ describe("Safe wallet should debtSwap", function () {
                 if (toProtocol != Protocols.AAVE_V3) {
                     const aTokenAddress = await fromHelper.getATokenAddress(collateralTokenAddress || cbETH_ADDRESS);
 
-                    const token = new ethers.Contract(aTokenAddress, ERC20_ABI, signer);
+                    const token = new ethersLib.Contract(aTokenAddress, ERC20_ABI, signer);
 
                     const approveTransactionData: MetaTransactionData = {
                         to: aTokenAddress,
                         value: "0",
                         data: token.interface.encodeFunctionData("approve", [
                             safeModuleAddress,
-                            ethers.parseEther("1"),
+                            ethersLib.parseEther("1"),
                         ]),
                         operation: OperationType.Call,
                     };
@@ -1493,14 +1555,14 @@ describe("Safe wallet should debtSwap", function () {
                         const anotherATokenAddress = await fromHelper.getATokenAddress(
                             options.anotherCollateralTokenAddress,
                         );
-                        const anotherToken = new ethers.Contract(anotherATokenAddress, ERC20_ABI, signer);
+                        const anotherToken = new ethersLib.Contract(anotherATokenAddress, ERC20_ABI, signer);
 
                         approveTransactions.push({
                             to: anotherATokenAddress,
                             value: "0",
                             data: anotherToken.interface.encodeFunctionData("approve", [
                                 safeModuleAddress,
-                                ethers.parseEther("1"),
+                                ethersLib.parseEther("1"),
                             ]),
                             operation: OperationType.Call,
                         });
@@ -1516,7 +1578,7 @@ describe("Safe wallet should debtSwap", function () {
                 break;
             case Protocols.COMPOUND:
                 const cometAddress = cometAddressMap.get(fromTokenAddress)!;
-                const comet = new ethers.Contract(cometAddress, cometAbi, signer);
+                const comet = new ethersLib.Contract(cometAddress, cometAbi, signer);
 
                 const allowTransactionData: MetaTransactionData = {
                     to: cometAddress,
@@ -1535,6 +1597,17 @@ describe("Safe wallet should debtSwap", function () {
             case Protocols.MORPHO:
                 await helpers.morphoAuthorizeTxBySafe();
 
+                // Verify authorization was set
+                const morphoContractCheck = new ethersLib.Contract(MORPHO_ADDRESS, morphoAbi, signer);
+                const isAuthAfter = await morphoContractCheck.isAuthorized(safeAddress, safeModuleAddress);
+                console.log("After setAuthorization - Is Safe authorized SafeDebtManager?", isAuthAfter);
+
+                // Check if tokens are whitelisted in registry
+                const usdcWhitelisted = await protocolRegistryContract.isWhitelisted(USDC_ADDRESS);
+                const cbEthWhitelisted = await protocolRegistryContract.isWhitelisted(cbETH_ADDRESS);
+                console.log("USDC whitelisted:", usdcWhitelisted);
+                console.log("cbETH whitelisted:", cbEthWhitelisted);
+
                 const borrowShares = await fromHelper.getBorrowShares(options!.morphoFromMarketId!, safeAddress);
 
                 fromExtraData = fromHelper.encodeExtraData(options!.morphoFromMarketId!, borrowShares);
@@ -1542,7 +1615,7 @@ describe("Safe wallet should debtSwap", function () {
             case Protocols.FLUID:
                 const vaultAddress = options.fromFluidVaultAddress || FLUID_cbETH_USDC_VAULT;
                 const nftId = await fromHelper.getNftId(vaultAddress, safeAddress);
-                fromExtraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                fromExtraData = ethersLib.AbiCoder.defaultAbiCoder().encode(
                     ["address", "uint256", "bool"],
                     [vaultAddress, nftId, true],
                 );
@@ -1552,7 +1625,7 @@ describe("Safe wallet should debtSwap", function () {
         switch (toProtocol) {
             case Protocols.AAVE_V3:
                 const debtTokenAddress = await toHelper.getDebtTokenAddress(toTokenAddress);
-                const aaveDebtToken = new ethers.Contract(debtTokenAddress, aaveDebtTokenJson, signer);
+                const aaveDebtToken = new ethersLib.Contract(debtTokenAddress, aaveDebtTokenJson, signer);
 
                 const authTransactionData: MetaTransactionData = {
                     to: debtTokenAddress,
@@ -1573,7 +1646,7 @@ describe("Safe wallet should debtSwap", function () {
                 break;
             case Protocols.COMPOUND:
                 const cometAddress = cometAddressMap.get(toTokenAddress)!;
-                const comet = new ethers.Contract(cometAddress, cometAbi, signer);
+                const comet = new ethersLib.Contract(cometAddress, cometAbi, signer);
 
                 const allowTransactionData: MetaTransactionData = {
                     to: cometAddress,
@@ -1600,14 +1673,14 @@ describe("Safe wallet should debtSwap", function () {
                 break;
             case Protocols.FLUID:
                 const vaultAddress = options.tofluidVaultAddress || FLUID_cbETH_USDC_VAULT;
-                toExtraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                toExtraData = ethersLib.AbiCoder.defaultAbiCoder().encode(
                     ["address", "uint256", "bool"],
                     [vaultAddress, 0, false],
                 );
                 break;
         }
 
-        let collateralAmount = ethers.parseEther(DEFAULT_SUPPLY_AMOUNT);
+        let collateralAmount = ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT);
         switch (fromProtocol) {
             case Protocols.MOONWELL:
                 collateralAmount = await fromHelper.getCollateralAmount(collateralTokenAddress, safeAddress);
@@ -1634,7 +1707,7 @@ describe("Safe wallet should debtSwap", function () {
                   { asset: collateralTokenAddress, amount: collateralAmount },
                   {
                       asset: options.anotherCollateralTokenAddress,
-                      amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
+                      amount: ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT),
                   },
               ]
             : [{ asset: collateralTokenAddress, amount: collateralAmount }];
@@ -1660,6 +1733,17 @@ describe("Safe wallet should debtSwap", function () {
             ]),
             operation: OperationType.Call,
         };
+
+        // Debug: Print parameters before calling executeDebtSwap
+        console.log("executeDebtSwap parameters:");
+        console.log("  flashloanPool:", flashloanPool);
+        console.log("  fromProtocol:", fromProtocol, "toProtocol:", toProtocol);
+        console.log("  fromToken:", fromTokenAddress, "toToken:", toTokenAddress);
+        console.log("  debtAmount:", debtAmount.toString());
+        console.log("  collateralArray:", JSON.stringify(collateralArray.map(c => ({ asset: c.asset, amount: c.amount.toString() }))));
+        console.log("  fromExtraData length:", fromExtraData.length);
+        console.log("  toExtraData length:", toExtraData.length);
+        console.log("  paraswapData.srcAmount:", paraswapData.srcAmount.toString());
 
         // If operator is provided, call directly (for testing authorization)
         // Otherwise, call via Safe transaction
@@ -1695,16 +1779,16 @@ describe("Safe wallet should debtSwap", function () {
 
         console.log(
             `Source ${Protocols[fromProtocol]}, ${fromTokenAddress} Debt Amount:`,
-            ethers.formatUnits(srcDebtBefore, srcDecimals),
+            ethersLib.formatUnits(srcDebtBefore, srcDecimals),
             " -> ",
-            ethers.formatUnits(srcDebtAfter, srcDecimals),
+            ethersLib.formatUnits(srcDebtAfter, srcDecimals),
         );
 
         console.log(
             `Destination ${Protocols[toProtocol]}, ${toTokenAddress} Debt Amount:`,
-            ethers.formatUnits(dstDebtBefore, dstDecimals),
+            ethersLib.formatUnits(dstDebtBefore, dstDecimals),
             " -> ",
-            ethers.formatUnits(dstDebtAfter, dstDecimals),
+            ethersLib.formatUnits(dstDebtAfter, dstDecimals),
         );
 
         // Verify debt was switched (unless using randomized amounts)
@@ -1716,6 +1800,7 @@ describe("Safe wallet should debtSwap", function () {
 
     describe("Protocol Enable/Disable", function () {
         it("Should revert when switchFrom is disabled for from protocol", async function () {
+            const ethers = getEthers();
             await supplyAndBorrowOnFluid();
 
             // Get pauser signer (4th signer, index 3)
@@ -1745,6 +1830,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("Should revert when switchTo is disabled for to protocol", async function () {
+            const ethers = getEthers();
             await supplyAndBorrowOnFluid();
 
             // Get pauser signer (4th signer, index 3)
@@ -1774,6 +1860,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("Should allow debt swap after re-enabling protocols", async function () {
+            const ethers = getEthers();
             await supplyAndBorrowOnFluid();
 
             // Get pauser signer (4th signer, index 3)
@@ -1804,6 +1891,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("Should only allow pauser to disable/enable protocols", async function () {
+            const ethers = getEthers();
             const [_, wallet2] = await ethers.getSigners();
             const contractByWallet2 = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, wallet2);
 
@@ -1819,6 +1907,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("Should emit ProtocolStatusChanged event when enabling/disabling", async function () {
+            const ethers = getEthers();
             // Get pauser signer (4th signer, index 3)
             const signers = await ethers.getSigners();
             const pauser = signers[3];
@@ -1844,6 +1933,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("Should allow disabling switchFrom while keeping switchTo enabled", async function () {
+            const ethers = getEthers();
             // Get pauser signer (4th signer, index 3)
             const signers = await ethers.getSigners();
             const pauser = signers[3];
@@ -1872,6 +1962,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("Should allow disabling switchTo while keeping switchFrom enabled", async function () {
+            const ethers = getEthers();
             // Get pauser signer (4th signer, index 3)
             const signers = await ethers.getSigners();
             const pauser = signers[3];
@@ -1900,6 +1991,7 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("Should revert switchIn when either switchFrom or switchTo is disabled", async function () {
+            const ethers = getEthers();
             await supplyAndBorrowOnFluid();
 
             // Get pauser signer (4th signer, index 3)

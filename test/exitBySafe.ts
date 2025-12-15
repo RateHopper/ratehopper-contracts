@@ -1,33 +1,43 @@
-import { ethers } from "hardhat";
+import * as ethersLib from "ethers";
 import dotenv from "dotenv";
 dotenv.config();
-import Safe from "@safe-global/protocol-kit";
-import { cbETH_ADDRESS, DEFAULT_SUPPLY_AMOUNT, Protocols, USDC_ADDRESS, WETH_ADDRESS } from "./constants";
-import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { eip1193Provider, fundETH, fundSignerWithETH } from "./utils";
-import { FLUID_cbETH_USDC_VAULT, FLUID_WETH_USDC_VAULT, FluidHelper } from "./protocols/fluid";
-import { CompoundHelper, USDC_COMET_ADDRESS } from "./protocols/compound";
-import { morphoMarket1Id, MorphoHelper } from "./protocols/morpho";
-import { AaveV3Helper } from "./protocols/aaveV3";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import SafeModule from "@safe-global/protocol-kit";
+const Safe = SafeModule.default || SafeModule;
+import { cbETH_ADDRESS, DEFAULT_SUPPLY_AMOUNT, Protocols, USDC_ADDRESS, WETH_ADDRESS } from "./constants.js";
+import ERC20Json from "@openzeppelin/contracts/build/contracts/ERC20.json" with { type: "json" };
+const ERC20_ABI = ERC20Json.abi;
+import * as SafeTypes from "@safe-global/types-kit";
+type MetaTransactionData = SafeTypes.MetaTransactionData;
+const OperationType = SafeTypes.OperationType;
+import { connectNetwork, getEthers, getTime, loadFixture } from "./testSetup.js";
+import { eip1193Provider, fundETH, fundSignerWithETH } from "./utils.js";
+import { FLUID_cbETH_USDC_VAULT, FLUID_WETH_USDC_VAULT, FluidHelper } from "./protocols/fluid.js";
+import { CompoundHelper, USDC_COMET_ADDRESS } from "./protocols/compound.js";
+import { morphoMarket1Id, MorphoHelper } from "./protocols/morpho.js";
+import { AaveV3Helper } from "./protocols/aaveV3.js";
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect } from "chai";
-import { deploySafeContractFixture } from "./deployUtils";
-import { safeAddress, createSafeTestHelpers } from "./debtSwapBySafe";
+import { deploySafeContractFixture } from "./deployUtils.js";
+import { safeAddress, createSafeTestHelpers } from "./debtSwapBySafe.js";
 
 describe("Safe wallet exit function tests", function () {
     // Increase timeout for memory-intensive operations
     this.timeout(300000); // 5 minutes
 
-    const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
+    let signer: ethersLib.Wallet;
     let operator: HardhatEthersSigner;
     let safeWallet;
     let safeModuleContract;
     let safeModuleAddress;
     let helpers: ReturnType<typeof createSafeTestHelpers>;
 
+    before(async function () {
+        await connectNetwork();
+    });
+
     this.beforeEach(async () => {
+        const ethers = getEthers();
+        signer = new ethersLib.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
         // Get the operator (third signer)
         const signers = await ethers.getSigners();
         operator = signers[2];
@@ -96,6 +106,8 @@ describe("Safe wallet exit function tests", function () {
         debtAmountOverride?: bigint;
         callViaSafe?: boolean;
     }) {
+        const ethers = getEthers();
+        const time = getTime();
         const {
             protocol,
             debtAsset,
@@ -124,24 +136,24 @@ describe("Safe wallet exit function tests", function () {
 
         // Step 2: Get current debt amount
         const debtBefore = await getDebtAmount();
-        console.log("Debt before exit:", ethers.formatUnits(debtBefore, debtDecimals));
+        console.log("Debt before exit:", ethersLib.formatUnits(debtBefore, debtDecimals));
         expect(debtBefore).to.be.gt(0);
 
         // Step 3: Send debt tokens to Safe to cover the repayment (including any accrued interest)
-        const debtContract = new ethers.Contract(debtAsset, ERC20_ABI, signer);
-        const repayAmount = debtBefore + ethers.parseUnits("1", debtDecimals); // Add buffer for interest
+        const debtContract = new ethersLib.Contract(debtAsset, ERC20_ABI, signer);
+        const repayAmount = debtBefore + ethersLib.parseUnits("1", debtDecimals); // Add buffer for interest
         const transferTx = await debtContract.transfer(safeAddress, repayAmount);
         await transferTx.wait();
         console.log("Debt tokens transferred to Safe");
 
         // Step 4: Get collateral amount
         const collateralAmount = await getCollateralAmount();
-        console.log("Collateral amount:", ethers.formatUnits(collateralAmount, collateralDecimals));
+        console.log("Collateral amount:", ethersLib.formatUnits(collateralAmount, collateralDecimals));
 
         // Step 5: Get collateral balance before exit
-        const collateralContract = new ethers.Contract(collateralAsset, ERC20_ABI, signer);
+        const collateralContract = new ethersLib.Contract(collateralAsset, ERC20_ABI, signer);
         const collateralBalanceBefore = await collateralContract.balanceOf(safeAddress);
-        console.log("Collateral balance before exit:", ethers.formatUnits(collateralBalanceBefore, collateralDecimals));
+        console.log("Collateral balance before exit:", ethersLib.formatUnits(collateralBalanceBefore, collateralDecimals));
         // Step 7: Get extra data for protocol-specific parameters
         const extraData = await getExtraData();
 
@@ -221,12 +233,12 @@ describe("Safe wallet exit function tests", function () {
         const collateralInProtocolAfter = await getCollateralAmount();
         console.log(
             "Collateral in protocol after exit:",
-            ethers.formatUnits(collateralInProtocolAfter, collateralDecimals),
+            ethersLib.formatUnits(collateralInProtocolAfter, collateralDecimals),
         );
 
         // Step 11: Verify collateral withdrawal behavior based on withdrawCollateral parameter
         const collateralBalanceAfter = await collateralContract.balanceOf(safeAddress);
-        console.log("Collateral balance after exit:", ethers.formatUnits(collateralBalanceAfter, collateralDecimals));
+        console.log("Collateral balance after exit:", ethersLib.formatUnits(collateralBalanceAfter, collateralDecimals));
 
         if (withdrawCollateral) {
             // When withdrawCollateral=true, balance should increase
@@ -234,16 +246,16 @@ describe("Safe wallet exit function tests", function () {
 
             // The withdrawn collateral should approximately equal the collateral amount
             const withdrawnAmount = collateralBalanceAfter - collateralBalanceBefore;
-            console.log("Withdrawn collateral:", ethers.formatUnits(withdrawnAmount, collateralDecimals));
+            console.log("Withdrawn collateral:", ethersLib.formatUnits(withdrawnAmount, collateralDecimals));
             const tolerance =
-                collateralDecimals === 18 ? ethers.parseEther("0.001") : ethers.parseUnits("0.001", collateralDecimals);
+                collateralDecimals === 18 ? ethersLib.parseEther("0.001") : ethersLib.parseUnits("0.001", collateralDecimals);
             expect(withdrawnAmount).to.be.closeTo(collateralAmount, tolerance);
 
             // Collateral should be 0 or very close to 0 (allowing small rounding errors)
             const collateralTolerance =
                 collateralDecimals === 18
-                    ? ethers.parseEther("0.0001")
-                    : ethers.parseUnits("0.0001", collateralDecimals);
+                    ? ethersLib.parseEther("0.0001")
+                    : ethersLib.parseUnits("0.0001", collateralDecimals);
             expect(collateralInProtocolAfter).to.be.closeTo(0n, collateralTolerance);
         } else {
             // When withdrawCollateral=false, balance should remain unchanged
@@ -274,14 +286,14 @@ describe("Safe wallet exit function tests", function () {
                 },
                 getExtraData: async () => {
                     const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-                    return ethers.AbiCoder.defaultAbiCoder().encode(
+                    return ethersLib.AbiCoder.defaultAbiCoder().encode(
                         ["address", "uint256", "bool"],
                         [vaultAddress, nftId, true], // isFullRepay = true
                     );
                 },
                 validateDebtRepaid: async () => {
                     const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    console.log("Debt after exit:", ethersLib.formatUnits(debtAfter, 6));
                     expect(debtAfter).to.equal(0);
                 },
             });
@@ -308,14 +320,14 @@ describe("Safe wallet exit function tests", function () {
                 },
                 getExtraData: async () => {
                     const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-                    return ethers.AbiCoder.defaultAbiCoder().encode(
+                    return ethersLib.AbiCoder.defaultAbiCoder().encode(
                         ["address", "uint256", "bool"],
                         [vaultAddress, nftId, true], // isFullRepay = true
                     );
                 },
                 validateDebtRepaid: async () => {
                     const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    console.log("Debt after exit:", ethersLib.formatUnits(debtAfter, 6));
                     expect(debtAfter).to.equal(0);
                 },
             });
@@ -342,14 +354,14 @@ describe("Safe wallet exit function tests", function () {
                 },
                 getExtraData: async () => {
                     const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-                    return ethers.AbiCoder.defaultAbiCoder().encode(
+                    return ethersLib.AbiCoder.defaultAbiCoder().encode(
                         ["address", "uint256", "bool"],
                         [vaultAddress, nftId, true], // isFullRepay = true
                     );
                 },
                 validateDebtRepaid: async () => {
                     const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    console.log("Debt after exit:", ethersLib.formatUnits(debtAfter, 6));
                     expect(debtAfter).to.equal(0);
                 },
                 callViaSafe: true, // Call exit via Safe transaction instead of operator
@@ -377,14 +389,14 @@ describe("Safe wallet exit function tests", function () {
                 },
                 getExtraData: async () => {
                     const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-                    return ethers.AbiCoder.defaultAbiCoder().encode(
+                    return ethersLib.AbiCoder.defaultAbiCoder().encode(
                         ["address", "uint256", "bool"],
                         [vaultAddress, nftId, true], // isFullRepay = true
                     );
                 },
                 validateDebtRepaid: async () => {
                     const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    console.log("Debt after exit:", ethersLib.formatUnits(debtAfter, 6));
                     expect(debtAfter).to.equal(0);
                 },
                 withdrawCollateral: false, // Test with withdrawCollateral=false
@@ -418,7 +430,7 @@ describe("Safe wallet exit function tests", function () {
                 },
                 validateDebtRepaid: async () => {
                     const debtAfter = await morphoHelper.getDebtAmount(marketId, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    console.log("Debt after exit:", ethersLib.formatUnits(debtAfter, 6));
                     expect(debtAfter).to.equal(0);
                 },
             });
@@ -450,7 +462,7 @@ describe("Safe wallet exit function tests", function () {
                 },
                 validateDebtRepaid: async () => {
                     const debtAfter = await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    console.log("Debt after exit:", ethersLib.formatUnits(debtAfter, 6));
                     expect(debtAfter).to.equal(0);
                 },
             });
@@ -470,14 +482,14 @@ describe("Safe wallet exit function tests", function () {
 
                     // Approve aToken for SafeDebtManager to withdraw collateral
                     const aTokenAddress = await aaveHelper.getATokenAddress(cbETH_ADDRESS);
-                    const token = new ethers.Contract(aTokenAddress, ERC20_ABI, signer);
+                    const token = new ethersLib.Contract(aTokenAddress, ERC20_ABI, signer);
 
                     const approveTransactionData: MetaTransactionData = {
                         to: aTokenAddress,
                         value: "0",
                         data: token.interface.encodeFunctionData("approve", [
                             safeModuleAddress,
-                            ethers.parseEther("1"),
+                            ethersLib.parseEther("1"),
                         ]),
                         operation: OperationType.Call,
                     };
@@ -500,7 +512,7 @@ describe("Safe wallet exit function tests", function () {
                 },
                 validateDebtRepaid: async () => {
                     const debtAfter = await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    console.log("Debt after exit:", ethersLib.formatUnits(debtAfter, 6));
                     expect(debtAfter).to.equal(0);
                 },
             });
@@ -527,17 +539,17 @@ describe("Safe wallet exit function tests", function () {
                 },
                 getExtraData: async () => {
                     const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-                    return ethers.AbiCoder.defaultAbiCoder().encode(
+                    return ethersLib.AbiCoder.defaultAbiCoder().encode(
                         ["address", "uint256", "bool"],
                         [vaultAddress, nftId, true], // isFullRepay = true
                     );
                 },
                 validateDebtRepaid: async () => {
                     const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
+                    console.log("Debt after exit:", ethersLib.formatUnits(debtAfter, 6));
                     expect(debtAfter).to.equal(0);
                 },
-                debtAmountOverride: ethers.MaxUint256, // Use type(uint256).max
+                debtAmountOverride: ethersLib.MaxUint256, // Use type(uint256).max
             });
         });
     });

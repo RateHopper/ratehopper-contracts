@@ -1,20 +1,26 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { ProtocolRegistry } from "../typechain-types";
-import { TimelockController } from "../typechain-types/@openzeppelin/contracts/governance/TimelockController";
-import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
-import { WETH_ADDRESS } from "./constants";
-import { UNISWAP_V3_FACTORY_ADDRESS } from "../contractAddresses";
+import * as ethersLib from "ethers";
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import type { ProtocolRegistry } from "../typechain-types/index.js";
+import type { TimelockController } from "../typechain-types/@openzeppelin/contracts/governance/TimelockController.js";
+import { connectNetwork, getEthers, getTime, loadFixture } from "./testSetup.js";
+import { WETH_ADDRESS } from "./constants.js";
+import { UNISWAP_V3_FACTORY_ADDRESS } from "../contractAddresses.js";
 
 describe("ProtocolRegistry - Timelock Integration Tests", function () {
     const TWO_DAYS = 2 * 24 * 60 * 60; // 2 days in seconds
 
+    before(async function () {
+        await connectNetwork();
+    });
+
     async function deployTimelockFixture() {
+        const ethers = getEthers();
         const [deployer, admin, user, mockParaswap, mockOperator] = await ethers.getSigners();
 
         // Deploy TimelockController first
-        const TimelockController = await ethers.getContractFactory("TimelockController");
+        // In Hardhat 3, we use the wrapper contract from Imports.sol
+        const TimelockController = await ethers.getContractFactory("TimelockControllerForTest");
         const timelock = await TimelockController.deploy(
             TWO_DAYS,
             [deployer.address], // proposers
@@ -35,7 +41,18 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
         );
         await protocolRegistry.waitForDeployment();
 
-        const newMockParaswapAddress = "0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7";
+        // Deploy a mock contract to use as the new paraswap address
+        // (setParaswapV6 validates that the address is a contract, and forked state
+        // may not persist through loadFixture snapshots)
+        const MockContract = await ethers.getContractFactory("TimelockControllerForTest");
+        const mockNewParaswap = await MockContract.deploy(
+            0, // no delay
+            [deployer.address],
+            [deployer.address],
+            deployer.address,
+        );
+        await mockNewParaswap.waitForDeployment();
+        const newMockParaswapAddress = await mockNewParaswap.getAddress();
 
         // Note: CRITICAL_ROLE is automatically granted to timelock in constructor
         const CRITICAL_ROLE = await protocolRegistry.CRITICAL_ROLE();
@@ -129,8 +146,8 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
             const target = await protocolRegistry.getAddress();
             const value = 0;
             const data = protocolRegistry.interface.encodeFunctionData("setParaswapV6", [newMockParaswapAddress]);
-            const predecessor = ethers.ZeroHash;
-            const salt = ethers.id("test-paraswap-update");
+            const predecessor = ethersLib.ZeroHash;
+            const salt = ethersLib.id("test-paraswap-update");
 
             // Schedule the operation
             await timelock.schedule(target, value, data, predecessor, salt, TWO_DAYS);
@@ -142,6 +159,7 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
             );
 
             // Fast forward 2 days
+            const time = getTime();
             await time.increase(TWO_DAYS);
 
             // Execute the operation
@@ -157,10 +175,11 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
             const target = await protocolRegistry.getAddress();
             const value = 0;
             const data = protocolRegistry.interface.encodeFunctionData("setParaswapV6", [newMockParaswapAddress]);
-            const predecessor = ethers.ZeroHash;
-            const salt = ethers.id("test-paraswap-event");
+            const predecessor = ethersLib.ZeroHash;
+            const salt = ethersLib.id("test-paraswap-event");
 
             await timelock.schedule(target, value, data, predecessor, salt, TWO_DAYS);
+            const time = getTime();
             await time.increase(TWO_DAYS);
 
             const oldAddress = await protocolRegistry.paraswapV6();
@@ -175,11 +194,12 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
 
             const target = await protocolRegistry.getAddress();
             const value = 0;
-            const data = protocolRegistry.interface.encodeFunctionData("setParaswapV6", [ethers.ZeroAddress]);
-            const predecessor = ethers.ZeroHash;
-            const salt = ethers.id("test-zero-address");
+            const data = protocolRegistry.interface.encodeFunctionData("setParaswapV6", [ethersLib.ZeroAddress]);
+            const predecessor = ethersLib.ZeroHash;
+            const salt = ethersLib.id("test-zero-address");
 
             await timelock.schedule(target, value, data, predecessor, salt, TWO_DAYS);
+            const time = getTime();
             await time.increase(TWO_DAYS);
 
             await expect(timelock.execute(target, value, data, predecessor, salt)).to.be.revertedWithCustomError(
@@ -197,10 +217,11 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
                 "setParaswapV6",
                 [user.address], // EOA, not a contract
             );
-            const predecessor = ethers.ZeroHash;
-            const salt = ethers.id("test-non-contract");
+            const predecessor = ethersLib.ZeroHash;
+            const salt = ethersLib.id("test-non-contract");
 
             await timelock.schedule(target, value, data, predecessor, salt, TWO_DAYS);
+            const time = getTime();
             await time.increase(TWO_DAYS);
 
             await expect(timelock.execute(target, value, data, predecessor, salt)).to.be.revertedWith("Not a contract");
@@ -214,10 +235,11 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
             const target = await protocolRegistry.getAddress();
             const value = 0;
             const data = protocolRegistry.interface.encodeFunctionData("setOperator", [mockOperator.address]);
-            const predecessor = ethers.ZeroHash;
-            const salt = ethers.id("test-operator-update");
+            const predecessor = ethersLib.ZeroHash;
+            const salt = ethersLib.id("test-operator-update");
 
             await timelock.schedule(target, value, data, predecessor, salt, TWO_DAYS);
+            const time = getTime();
             await time.increase(TWO_DAYS);
             await timelock.execute(target, value, data, predecessor, salt);
 
@@ -275,8 +297,8 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
             const target = await protocolRegistry.getAddress();
             const value = 0;
             const data = protocolRegistry.interface.encodeFunctionData("setParaswapV6", [newMockParaswapAddress]);
-            const predecessor = ethers.ZeroHash;
-            const salt = ethers.id("test-cancel-operation");
+            const predecessor = ethersLib.ZeroHash;
+            const salt = ethersLib.id("test-cancel-operation");
 
             // Schedule
             await timelock.schedule(target, value, data, predecessor, salt, TWO_DAYS);
@@ -293,6 +315,7 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
             expect(await timelock.isOperationPending(operationId)).to.be.false;
 
             // Should not be able to execute
+            const time = getTime();
             await time.increase(TWO_DAYS);
             await expect(timelock.execute(target, value, data, predecessor, salt)).to.be.revertedWithCustomError(
                 timelock,

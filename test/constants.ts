@@ -26,7 +26,7 @@ export {
     eUSD_ADDRESS,
     MAI_ADDRESS,
     sUSDS_ADDRESS,
-} from "../contractAddresses";
+} from "../contractAddresses.js";
 
 export const UNISWAP_V3_SWAP_ROUTER_ADDRESS = "0x2626664c2603336E57B271c5C0b26F421741e481";
 

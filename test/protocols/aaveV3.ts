@@ -1,27 +1,35 @@
-import { ethers } from "hardhat";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import * as ethersLib from "ethers";
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { Contract, MaxUint256 } from "ethers";
-import { AAVE_V3_POOL_ADDRESS, cbETH_ADDRESS, DEFAULT_SUPPLY_AMOUNT, TEST_ADDRESS } from "../constants";
-const aaveV3ProtocolDataProvider = "0xd82a47fdebB5bf5329b09441C3DaB4b5df2153Ad";
-const aaveProtocolDataProviderAbi = require("../../externalAbi/aaveV3/aaveProtocolDataProvider.json");
-import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { approve, defaultProvider, formatAmount } from "../utils";
-import aaveDebtTokenJson from "../../externalAbi/aaveV3/aaveDebtToken.json";
-import aaveV3PoolJson from "../../externalAbi/aaveV3/aaveV3Pool.json";
-import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { safeAddress } from "../debtSwapBySafe";
+import {
+    AAVE_V3_DATA_PROVIDER_ADDRESS,
+    AAVE_V3_POOL_ADDRESS,
+    cbETH_ADDRESS,
+    DEFAULT_SUPPLY_AMOUNT,
+    TEST_ADDRESS,
+} from "../constants.js";
+import aaveProtocolDataProviderAbi from "../../externalAbi/aaveV3/aaveProtocolDataProvider.json" with { type: "json" };
+import ERC20Json from "@openzeppelin/contracts/build/contracts/ERC20.json" with { type: "json" };
+const ERC20_ABI = ERC20Json.abi;
+import { approve, defaultProvider, formatAmount } from "../utils.js";
+import aaveDebtTokenJson from "../../externalAbi/aaveV3/aaveDebtToken.json" with { type: "json" };
+import aaveV3PoolJson from "../../externalAbi/aaveV3/aaveV3Pool.json" with { type: "json" };
+import * as SafeTypes from "@safe-global/types-kit";
+type MetaTransactionData = SafeTypes.MetaTransactionData;
+const OperationType = SafeTypes.OperationType;
+import { safeAddress } from "../debtSwapBySafe.js";
 
 export class AaveV3Helper {
     private protocolDataProvider;
     private pool;
 
     constructor(private signer: HardhatEthersSigner | any) {
-        this.protocolDataProvider = new ethers.Contract(
-            aaveV3ProtocolDataProvider,
+        this.protocolDataProvider = new ethersLib.Contract(
+            AAVE_V3_DATA_PROVIDER_ADDRESS,
             aaveProtocolDataProviderAbi,
             signer,
         );
-        this.pool = new ethers.Contract(AAVE_V3_POOL_ADDRESS, aaveV3PoolJson, signer);
+        this.pool = new ethersLib.Contract(AAVE_V3_POOL_ADDRESS, aaveV3PoolJson, signer);
     }
 
     async getDebtTokenAddress(assetAddress: string): Promise<string> {
@@ -47,30 +55,30 @@ export class AaveV3Helper {
 
     async approveDelegation(tokenAddress: string, deployedContractAddress: string) {
         const debtTokenAddress = await this.getDebtTokenAddress(tokenAddress);
-        const aaveDebtToken = new ethers.Contract(debtTokenAddress, aaveDebtTokenJson, this.signer);
+        const aaveDebtToken = new ethersLib.Contract(debtTokenAddress, aaveDebtTokenJson, this.signer);
         const approveDelegationTx = await aaveDebtToken.approveDelegation(deployedContractAddress, MaxUint256);
         await approveDelegationTx.wait();
         console.log("approveDelegation:", debtTokenAddress);
     }
 
     async supply(tokenAddress: string) {
-        const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.signer);
+        const tokenContract = new ethersLib.Contract(tokenAddress, ERC20_ABI, this.signer);
 
         await approve(tokenAddress, AAVE_V3_POOL_ADDRESS, this.signer);
-        const amount = ethers.parseEther(DEFAULT_SUPPLY_AMOUNT);
+        const amount = ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT);
 
         const supplyTx = await this.pool.supply(tokenAddress, amount, TEST_ADDRESS, 0);
         await supplyTx.wait();
 
         const walletBalance = await tokenContract.balanceOf(TEST_ADDRESS);
-        console.log(`${tokenAddress} Wallet Balance:`, ethers.formatEther(walletBalance));
+        console.log(`${tokenAddress} Wallet Balance:`, ethersLib.formatEther(walletBalance));
     }
 
     async borrow(tokenAddress: string, borrowAmount?: bigint) {
-        const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.signer);
+        const tokenContract = new ethersLib.Contract(tokenAddress, ERC20_ABI, this.signer);
         const decimals = await tokenContract.decimals();
         const decimalsNumber = typeof decimals === "bigint" ? Number(decimals) : decimals;
-        const amount = borrowAmount || ethers.parseUnits("1", decimalsNumber);
+        const amount = borrowAmount || ethersLib.parseUnits("1", decimalsNumber);
 
         const borrowTx = await this.pool.borrow(tokenAddress, amount, 2, 0, TEST_ADDRESS);
         await borrowTx.wait();
@@ -84,25 +92,25 @@ export class AaveV3Helper {
         collateralTokenAddress = cbETH_ADDRESS,
         customBorrowAmount?: bigint,
     ): Promise<MetaTransactionData[]> {
-        const aavePool = new ethers.Contract(AAVE_V3_POOL_ADDRESS, aaveV3PoolJson, defaultProvider);
+        const aavePool = new ethersLib.Contract(AAVE_V3_POOL_ADDRESS, aaveV3PoolJson, defaultProvider);
 
-        const collateralContract = new ethers.Contract(collateralTokenAddress, ERC20_ABI, defaultProvider);
+        const collateralContract = new ethersLib.Contract(collateralTokenAddress, ERC20_ABI, defaultProvider);
         let borrowAmount: bigint;
         if (customBorrowAmount) {
             borrowAmount = customBorrowAmount;
         } else {
-            const debtTokenContract = new ethers.Contract(debtTokenAddress, ERC20_ABI, defaultProvider);
+            const debtTokenContract = new ethersLib.Contract(debtTokenAddress, ERC20_ABI, defaultProvider);
             const debtTokenDecimals = await debtTokenContract.decimals();
             const debtTokenDecimalsNumber =
                 typeof debtTokenDecimals === "bigint" ? Number(debtTokenDecimals) : debtTokenDecimals;
-            borrowAmount = ethers.parseUnits("1", debtTokenDecimalsNumber);
+            borrowAmount = ethersLib.parseUnits("1", debtTokenDecimalsNumber);
         }
         const approveTransactionData: MetaTransactionData = {
             to: collateralTokenAddress,
             value: "0",
             data: collateralContract.interface.encodeFunctionData("approve", [
                 AAVE_V3_POOL_ADDRESS,
-                ethers.parseEther("1"),
+                ethersLib.parseEther("1"),
             ]),
             operation: OperationType.Call,
         };
@@ -112,7 +120,7 @@ export class AaveV3Helper {
             value: "0",
             data: aavePool.interface.encodeFunctionData("supply", [
                 collateralTokenAddress,
-                ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
+                ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT),
                 safeAddress,
                 0,
             ]),

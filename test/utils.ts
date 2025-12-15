@@ -1,16 +1,18 @@
-import { ethers } from "hardhat";
+import * as ethersLib from "ethers";
 import { Eip1193Provider, RequestArguments } from "@safe-global/protocol-kit";
-import { Protocols, WETH_ADDRESS } from "./constants";
-import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
+import { Protocols, WETH_ADDRESS } from "./constants.js";
+import ERC20Json from "@openzeppelin/contracts/build/contracts/ERC20.json" with { type: "json" };
+const ERC20_ABI = ERC20Json.abi;
 import { MaxUint256 } from "ethers";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import WETH_ABI from "../externalAbi/weth.json";
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import WETH_ABI from "../externalAbi/weth.json" with { type: "json" };
+import { getEthers } from "./testSetup.js";
 
-import { AaveV3Helper } from "./protocols/aaveV3";
-import { CompoundHelper } from "./protocols/compound";
-import { MorphoHelper } from "./protocols/morpho";
-import { MoonwellHelper } from "./protocols/moonwell";
-import { FluidHelper } from "./protocols/fluid";
+import { AaveV3Helper } from "./protocols/aaveV3.js";
+import { CompoundHelper } from "./protocols/compound.js";
+import { MorphoHelper } from "./protocols/morpho.js";
+import { MoonwellHelper } from "./protocols/moonwell.js";
+import { FluidHelper } from "./protocols/fluid.js";
 import axios from "axios";
 
 export const protocolHelperMap = new Map<Protocols, any>([
@@ -21,19 +23,19 @@ export const protocolHelperMap = new Map<Protocols, any>([
     [Protocols.MOONWELL, MoonwellHelper],
 ]);
 
-export const defaultProvider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
+export const defaultProvider = new ethersLib.JsonRpcProvider("https://base.llamarpc.com");
 
 export async function approve(tokenAddress: string, spenderAddress: string, signer: any) {
-    const token = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+    const token = new ethersLib.Contract(tokenAddress, ERC20_ABI, signer);
     const approveTx = await token.approve(spenderAddress, MaxUint256);
     await approveTx.wait();
     console.log("approve:" + tokenAddress + "token to " + spenderAddress);
 }
 
 export async function getDecimals(tokenAddress: string): Promise<number> {
-    const provider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
+    const provider = new ethersLib.JsonRpcProvider("https://base.llamarpc.com");
 
-    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+    const tokenContract = new ethersLib.Contract(tokenAddress, ERC20_ABI, provider);
     return await tokenContract.decimals();
 }
 
@@ -46,13 +48,13 @@ export function getAmountInMax(amountOut: bigint): bigint {
 }
 
 export function formatAmount(amount: bigint): string {
-    return ethers.formatUnits(String(amount), 6);
+    return ethersLib.formatUnits(String(amount), 6);
 }
 
 export async function wrapETH(amountIn: string, signer: HardhatEthersSigner) {
-    const wethContract = new ethers.Contract(WETH_ADDRESS, WETH_ABI, signer);
+    const wethContract = new ethersLib.Contract(WETH_ADDRESS, WETH_ABI, signer);
 
-    const amount = ethers.parseEther(amountIn);
+    const amount = ethersLib.parseEther(amountIn);
     const tx = await wethContract.deposit({ value: amount });
     await tx.wait();
     console.log("Wrapped ETH to WETH:", amount);
@@ -121,17 +123,18 @@ export async function getParaswapData(
 }
 
 export async function fundETH(receiverAddress: string) {
-    const wallet = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider); // Replace with a funded Hardhat account
+    const ethers = getEthers();
+    const wallet = new ethersLib.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
 
     const tx = await wallet.sendTransaction({
         to: receiverAddress,
-        value: ethers.parseEther("0.001"),
+        value: ethersLib.parseEther("0.001"),
     });
 
     console.log("Transaction Hash:", tx.hash);
 
     const balance = await ethers.provider.getBalance(receiverAddress);
-    console.log(`Balance:`, ethers.formatEther(balance), "ETH");
+    console.log(`Balance:`, ethersLib.formatEther(balance), "ETH");
 }
 
 /**
@@ -141,10 +144,11 @@ export async function fundETH(receiverAddress: string) {
  * @param amount The amount of ETH to send (default: "1.0")
  */
 export async function fundSignerWithETH(receiverAddress: string, amount: string = "1.0") {
+    const ethers = getEthers();
     const [deployer] = await ethers.getSigners();
     const tx = await deployer.sendTransaction({
         to: receiverAddress,
-        value: ethers.parseEther(amount),
+        value: ethersLib.parseEther(amount),
     });
     await tx.wait();
     console.log(`Funded ${receiverAddress} with ${amount} ETH for gas fees`);
@@ -154,8 +158,20 @@ export async function fundSignerWithETH(receiverAddress: string, amount: string 
  * EIP-1193 Provider wrapper for Safe SDK
  * This is used to wrap Hardhat's provider for use with Safe SDK
  */
+export function createEip1193Provider(): Eip1193Provider {
+    const ethers = getEthers();
+    return {
+        request: async (args: RequestArguments) => {
+            const { method, params } = args;
+            return ethers.provider.send(method, Array.isArray(params) ? params : []);
+        },
+    };
+}
+
+// For backward compatibility - but requires network to be connected first
 export const eip1193Provider: Eip1193Provider = {
     request: async (args: RequestArguments) => {
+        const ethers = getEthers();
         const { method, params } = args;
         return ethers.provider.send(method, Array.isArray(params) ? params : []);
     },

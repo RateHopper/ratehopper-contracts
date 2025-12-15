@@ -1,13 +1,13 @@
-import { time, loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
-const { expect } = require("chai");
-import { ethers } from "hardhat";
-
+import { expect } from "chai";
+import * as ethersLib from "ethers";
 import "dotenv/config";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { LeveragedPosition } from "../typechain-types";
-import morphoAbi from "../externalAbi/morpho/morpho.json";
-import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { approve, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import type { LeveragedPosition } from "../typechain-types/index.js";
+import morphoAbi from "../externalAbi/morpho/morpho.json" with { type: "json" };
+import ERC20Json from "@openzeppelin/contracts/build/contracts/ERC20.json" with { type: "json" };
+const ERC20_ABI = ERC20Json.abi;
+import { approve, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "./utils.js";
+import { connectNetwork, getEthers, getTime, loadFixture } from "./testSetup.js";
 
 import {
     USDC_ADDRESS,
@@ -21,10 +21,10 @@ import {
     cbBTC_ADDRESS,
     cbBTC_USDC_POOL,
     ETH_USDC_POOL,
-} from "./constants";
+} from "./constants.js";
 
-import { AaveV3Helper } from "./protocols/aaveV3";
-import { cometAddressMap, CompoundHelper } from "./protocols/compound";
+import { AaveV3Helper } from "./protocols/aaveV3.js";
+import { cometAddressMap, CompoundHelper } from "./protocols/compound.js";
 import {
     MORPHO_ADDRESS,
     MorphoHelper,
@@ -33,8 +33,8 @@ import {
     morphoMarket5Id,
     morphoMarket6Id,
     morphoMarket7Id,
-} from "./protocols/morpho";
-import { deployLeveragedPositionContractFixture } from "./deployUtils";
+} from "./protocols/morpho.js";
+import { deployLeveragedPositionContractFixture } from "./deployUtils.js";
 
 describe("Create leveraged position", function () {
     let myContract: LeveragedPosition;
@@ -48,7 +48,12 @@ describe("Create leveraged position", function () {
     const defaultTargetSupplyAmount = "0.002";
     const cbBTCPrincipleAmount = 0.00006;
 
+    before(async function () {
+        await connectNetwork();
+    });
+
     this.beforeEach(async () => {
+        const ethers = getEthers();
         impersonatedSigner = await ethers.getImpersonatedSigner(TEST_ADDRESS);
 
         // Fund the impersonated account with ETH for gas fees
@@ -73,6 +78,7 @@ describe("Create leveraged position", function () {
         targetAmount = Number(defaultTargetSupplyAmount),
         morphoMarketId?: string,
     ) {
+        const ethers = getEthers();
         const Helper = protocolHelperMap.get(protocol)!;
         const protocolHelper = new Helper(impersonatedSigner);
 
@@ -84,11 +90,11 @@ describe("Create leveraged position", function () {
         const debtDecimals = await getDecimals(debtAsset);
 
         // Check debt token balance in contract before creating position
-        const debtToken = new ethers.Contract(debtAsset, ERC20_ABI, impersonatedSigner);
+        const debtToken = new ethersLib.Contract(debtAsset, ERC20_ABI, impersonatedSigner);
         const debtBalanceBefore = await debtToken.balanceOf(deployedContractAddress);
         console.log(
             "Debt token balance in contract before creating position: ",
-            ethers.formatUnits(debtBalanceBefore, debtDecimals),
+            ethersLib.formatUnits(debtBalanceBefore, debtDecimals),
         );
 
         switch (protocol) {
@@ -99,7 +105,7 @@ describe("Create leveraged position", function () {
                 await compoundHelper.allow(debtAsset, deployedContractAddress);
                 break;
             case Protocols.MORPHO:
-                const morphoContract = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, impersonatedSigner);
+                const morphoContract = new ethersLib.Contract(MORPHO_ADDRESS, morphoAbi, impersonatedSigner);
                 await morphoContract.setAuthorization(deployedContractAddress, true);
                 break;
         }
@@ -115,9 +121,9 @@ describe("Create leveraged position", function () {
                 break;
         }
 
-        const parsedTargetAmount = ethers.parseUnits(targetAmount.toString(), collateralDecimals);
+        const parsedTargetAmount = ethersLib.parseUnits(targetAmount.toString(), collateralDecimals);
 
-        const diffAmount = parsedTargetAmount - ethers.parseUnits(principleAmount.toString(), collateralDecimals);
+        const diffAmount = parsedTargetAmount - ethersLib.parseUnits(principleAmount.toString(), collateralDecimals);
 
         const paraswapData = await getParaswapData(collateralAddress, debtAsset, deployedContractAddress, diffAmount);
 
@@ -125,7 +131,7 @@ describe("Create leveraged position", function () {
             flashloanPool,
             protocol,
             collateralAddress,
-            ethers.parseUnits(principleAmount.toString(), collateralDecimals),
+            ethersLib.parseUnits(principleAmount.toString(), collateralDecimals),
             parsedTargetAmount,
             debtAsset,
             impersonatedSigner.address, // _onBehalfOf parameter
@@ -135,7 +141,7 @@ describe("Create leveraged position", function () {
 
         const debtAmountParameter = protocol === Protocols.MORPHO ? morphoMarketId! : debtAsset;
         const debtAmount = await protocolHelper.getDebtAmount(debtAmountParameter);
-        console.log("debtAmount: ", ethers.formatUnits(debtAmount, debtDecimals));
+        console.log("debtAmount: ", ethersLib.formatUnits(debtAmount, debtDecimals));
 
         let collateralAmount: bigint;
         switch (protocol) {
@@ -154,7 +160,7 @@ describe("Create leveraged position", function () {
             default:
                 throw new Error("Unsupported protocol");
         }
-        console.log("collateralAmount: ", ethers.formatUnits(collateralAmount, collateralDecimals));
+        console.log("collateralAmount: ", ethersLib.formatUnits(collateralAmount, collateralDecimals));
 
         expect(debtAmount).to.be.gt(0);
 
@@ -162,7 +168,7 @@ describe("Create leveraged position", function () {
         const tolerance = parsedTargetAmount / 10000n; // 0.01% tolerance
         expect(collateralAmount).to.be.closeTo(parsedTargetAmount, tolerance);
 
-        const collateralToken = new ethers.Contract(collateralAddress, ERC20_ABI, impersonatedSigner);
+        const collateralToken = new ethersLib.Contract(collateralAddress, ERC20_ABI, impersonatedSigner);
         const collateralRemainingBalance = await collateralToken.balanceOf(deployedContractAddress);
         expect(Number(collateralRemainingBalance)).to.be.equal(0);
 
@@ -178,6 +184,7 @@ describe("Create leveraged position", function () {
         morphoMarketId?: string,
         partialClosePercentage: number = 100, // 100 = full close, 50 = half close, etc.
     ) {
+        const ethers = getEthers();
         const Helper = protocolHelperMap.get(protocol)!;
         const protocolHelper = new Helper(impersonatedSigner);
 
@@ -189,7 +196,7 @@ describe("Create leveraged position", function () {
         // Get current debt amount before closing
         const debtAmountParameter = protocol === Protocols.MORPHO ? morphoMarketId! : debtAsset;
         const debtAmountFull = await protocolHelper.getDebtAmount(debtAmountParameter);
-        console.log("Debt amount before closing: ", ethers.formatUnits(debtAmountFull, debtDecimals));
+        console.log("Debt amount before closing: ", ethersLib.formatUnits(debtAmountFull, debtDecimals));
 
         // Get current collateral amount before closing
         let collateralAmountFull: bigint;
@@ -213,7 +220,7 @@ describe("Create leveraged position", function () {
             default:
                 throw new Error("Unsupported protocol");
         }
-        console.log("Collateral amount before closing: ", ethers.formatUnits(collateralAmountFull, collateralDecimals));
+        console.log("Collateral amount before closing: ", ethersLib.formatUnits(collateralAmountFull, collateralDecimals));
 
         // Calculate amounts based on partial close percentage
         const debtAmountBefore = (debtAmountFull * BigInt(partialClosePercentage)) / 100n;
@@ -221,8 +228,8 @@ describe("Create leveraged position", function () {
 
         if (partialClosePercentage < 100) {
             console.log(`Partial close (${partialClosePercentage}%):`);
-            console.log("  Debt to repay:", ethers.formatUnits(debtAmountBefore, debtDecimals));
-            console.log("  Collateral to withdraw:", ethers.formatUnits(collateralAmountBefore, collateralDecimals));
+            console.log("  Debt to repay:", ethersLib.formatUnits(debtAmountBefore, debtDecimals));
+            console.log("  Collateral to withdraw:", ethersLib.formatUnits(collateralAmountBefore, collateralDecimals));
         }
 
         let extraData = "0x";
@@ -250,7 +257,7 @@ describe("Create leveraged position", function () {
         );
 
         // Get user's collateral token balance before closing
-        const collateralToken = new ethers.Contract(collateralAddress, ERC20_ABI, impersonatedSigner);
+        const collateralToken = new ethersLib.Contract(collateralAddress, ERC20_ABI, impersonatedSigner);
         const userCollateralBalanceBefore = await collateralToken.balanceOf(impersonatedSigner.address);
 
         // Log all parameters before calling deleveragePosition
@@ -258,15 +265,15 @@ describe("Create leveraged position", function () {
         console.log("flashloanPool:", flashloanPool);
         console.log("protocol:", protocol);
         console.log("collateralAddress:", collateralAddress);
-        console.log("collateralAmountBefore:", ethers.formatUnits(collateralAmountBefore, collateralDecimals));
+        console.log("collateralAmountBefore:", ethersLib.formatUnits(collateralAmountBefore, collateralDecimals));
         console.log("debtAsset:", debtAsset);
         console.log("extraData:", extraData);
         console.log("paraswapData.srcAmount:", paraswapData.srcAmount.toString());
         console.log("paraswapData.swapData length:", paraswapData.swapData.length);
         console.log("=========================================");
 
-        console.log("Original debt amount:", ethers.formatUnits(debtAmountBefore, debtDecimals));
-        console.log("Debt amount with 1% buffer:", ethers.formatUnits(debtAmountToPass, debtDecimals));
+        console.log("Original debt amount:", ethersLib.formatUnits(debtAmountBefore, debtDecimals));
+        console.log("Debt amount with 1% buffer:", ethersLib.formatUnits(debtAmountToPass, debtDecimals));
 
         const debtAmountWithInterestBuffer = (debtAmountBefore * 102n) / 100n;
 
@@ -284,7 +291,7 @@ describe("Create leveraged position", function () {
 
         // Verify debt and collateral amounts after closing
         const debtAmountAfter = await protocolHelper.getDebtAmount(debtAmountParameter);
-        console.log("Debt amount after closing: ", ethers.formatUnits(debtAmountAfter, debtDecimals));
+        console.log("Debt amount after closing: ", ethersLib.formatUnits(debtAmountAfter, debtDecimals));
 
         let collateralAmountAfter: bigint;
         switch (protocol) {
@@ -303,14 +310,14 @@ describe("Create leveraged position", function () {
             default:
                 throw new Error("Unsupported protocol");
         }
-        console.log("Collateral amount after closing: ", ethers.formatUnits(collateralAmountAfter, collateralDecimals));
+        console.log("Collateral amount after closing: ", ethersLib.formatUnits(collateralAmountAfter, collateralDecimals));
 
         if (partialClosePercentage === 100) {
             // For full close, expect debt to be 0
             expect(debtAmountAfter).to.equal(0);
 
             // For full close, allow for dust amount in collateral
-            const dustTolerance = ethers.parseUnits("0.00001", collateralDecimals);
+            const dustTolerance = ethersLib.parseUnits("0.00001", collateralDecimals);
             expect(collateralAmountAfter).to.be.lte(dustTolerance);
         } else {
             // For partial close, verify remaining amounts
@@ -322,10 +329,10 @@ describe("Create leveraged position", function () {
             const debtTolerance = expectedRemainingDebt / 20n; // 5%
             const collateralTolerance = expectedRemainingCollateral / 20n; // 5%
 
-            console.log("Expected remaining debt:", ethers.formatUnits(expectedRemainingDebt, debtDecimals));
+            console.log("Expected remaining debt:", ethersLib.formatUnits(expectedRemainingDebt, debtDecimals));
             console.log(
                 "Expected remaining collateral:",
-                ethers.formatUnits(expectedRemainingCollateral, collateralDecimals),
+                ethersLib.formatUnits(expectedRemainingCollateral, collateralDecimals),
             );
 
             expect(debtAmountAfter).to.be.closeTo(expectedRemainingDebt, debtTolerance);
@@ -335,16 +342,16 @@ describe("Create leveraged position", function () {
         // Verify user received collateral back
         const userCollateralBalanceAfter = await collateralToken.balanceOf(impersonatedSigner.address);
         const collateralReturned = userCollateralBalanceAfter - userCollateralBalanceBefore;
-        console.log("Collateral returned to user: ", ethers.formatUnits(collateralReturned, collateralDecimals));
+        console.log("Collateral returned to user: ", ethersLib.formatUnits(collateralReturned, collateralDecimals));
         expect(collateralReturned).to.be.gt(0);
 
         // Verify no tokens left in contract
         const collateralRemainingBalance = await collateralToken.balanceOf(deployedContractAddress);
         expect(Number(collateralRemainingBalance)).to.be.equal(0);
 
-        const debtToken = new ethers.Contract(debtAsset, ERC20_ABI, impersonatedSigner);
+        const debtToken = new ethersLib.Contract(debtAsset, ERC20_ABI, impersonatedSigner);
         const debtRemainingBalance = await debtToken.balanceOf(deployedContractAddress);
-        console.log("Debt remaining balance in contract: ", ethers.formatUnits(debtRemainingBalance, debtDecimals));
+        console.log("Debt remaining balance in contract: ", ethersLib.formatUnits(debtRemainingBalance, debtDecimals));
         expect(Number(debtRemainingBalance)).to.be.equal(0);
     }
 
@@ -352,6 +359,7 @@ describe("Create leveraged position", function () {
         it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
 
+            const time = getTime();
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3);
@@ -360,6 +368,7 @@ describe("Create leveraged position", function () {
         it("create and close position with WETH collateral", async function () {
             await createLeveragedPosition(ETH_USDC_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
 
+            const time = getTime();
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
@@ -368,6 +377,7 @@ describe("Create leveraged position", function () {
         it("partial close position with cbETH collateral", async function () {
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
 
+            const time = getTime();
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             // Partially close 50% of the position
@@ -409,6 +419,7 @@ describe("Create leveraged position", function () {
         it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.COMPOUND);
 
+            const time = getTime();
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             await deleveragePosition(ETH_USDC_POOL, Protocols.COMPOUND);
@@ -434,6 +445,7 @@ describe("Create leveraged position", function () {
         it("close position with WETH collateral", async function () {
             await createLeveragedPosition(ETH_USDC_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
 
+            const time = getTime();
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             await deleveragePosition(ETH_USDC_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
@@ -452,12 +464,14 @@ describe("Create leveraged position", function () {
                 morphoMarket1Id,
             );
 
+            const time = getTime();
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             await deleveragePosition(ETH_USDC_POOL, Protocols.MORPHO, cbETH_ADDRESS, USDC_ADDRESS, morphoMarket1Id);
         });
 
         it("with cbETH collateral and protocol fee", async function () {
+            const ethers = getEthers();
             // Set protocol fee
             const signers = await ethers.getSigners();
             const contractByOwner = await ethers.getContractAt(
@@ -469,7 +483,7 @@ describe("Create leveraged position", function () {
             await contractByOwner.setFeeBeneficiary(TEST_ADDRESS);
 
             // Get USDC contract for balance checks
-            const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, impersonatedSigner);
+            const usdcContract = new ethersLib.Contract(USDC_ADDRESS, ERC20_ABI, impersonatedSigner);
 
             // Record fee beneficiary's USDC balance before
             const beneficiaryUsdcBalanceBefore = await usdcContract.balanceOf(TEST_ADDRESS);
@@ -489,7 +503,7 @@ describe("Create leveraged position", function () {
 
             const feeReceived = beneficiaryUsdcBalanceAfter - beneficiaryUsdcBalanceBefore;
 
-            console.log("Protocol fee received (USDC):", ethers.formatUnits(feeReceived, 6));
+            console.log("Protocol fee received (USDC):", ethersLib.formatUnits(feeReceived, 6));
 
             // The fee should be greater than 0
             expect(feeReceived).to.be.gt(0);
@@ -521,6 +535,7 @@ describe("Create leveraged position", function () {
         });
 
         it("with USDC collateral and WETH debt with protocol fee - tests different decimals", async function () {
+            const ethers = getEthers();
             // Set protocol fee to 1%
             const signers = await ethers.getSigners();
             const contractByOwner = await ethers.getContractAt(
@@ -532,7 +547,7 @@ describe("Create leveraged position", function () {
             await contractByOwner.setFeeBeneficiary(TEST_ADDRESS);
 
             // Get WETH contract for balance checks
-            const wethContract = new ethers.Contract(WETH_ADDRESS, ERC20_ABI, impersonatedSigner);
+            const wethContract = new ethersLib.Contract(WETH_ADDRESS, ERC20_ABI, impersonatedSigner);
 
             // Record fee beneficiary's WETH balance before
             const beneficiaryWethBalanceBefore = await wethContract.balanceOf(TEST_ADDRESS);
@@ -552,13 +567,13 @@ describe("Create leveraged position", function () {
             const beneficiaryWethBalanceAfter = await wethContract.balanceOf(TEST_ADDRESS);
             const feeReceived = beneficiaryWethBalanceAfter - beneficiaryWethBalanceBefore;
 
-            console.log("Protocol fee received (WETH):", ethers.formatUnits(feeReceived, 18));
+            console.log("Protocol fee received (WETH):", ethersLib.formatUnits(feeReceived, 18));
 
             // The fee should be properly calculated in WETH terms (18 decimals)
             expect(feeReceived).to.be.gt(0);
 
             // Verify fee is reasonable (not too small due to decimal mismatch)
-            expect(feeReceived).to.be.gt(ethers.parseUnits("0.000002", 18)); // At least 0.000002 WETH
+            expect(feeReceived).to.be.gt(ethersLib.parseUnits("0.000002", 18)); // At least 0.000002 WETH
         });
 
         it("close position with WETH collateral", async function () {
@@ -572,6 +587,7 @@ describe("Create leveraged position", function () {
                 morphoMarket7Id,
             );
 
+            const time = getTime();
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             await deleveragePosition(ETH_USDC_POOL, Protocols.MORPHO, WETH_ADDRESS, USDC_ADDRESS, morphoMarket7Id);
@@ -583,6 +599,7 @@ describe("Create leveraged position", function () {
         let ownerSigner: HardhatEthersSigner;
 
         beforeEach(async function () {
+            const ethers = getEthers();
             // Get a different address for non-owner tests
             const [owner, nonOwner] = await ethers.getSigners();
             ownerSigner = owner;
@@ -625,6 +642,7 @@ describe("Create leveraged position", function () {
             });
 
             it("should revert when called by non-owner", async function () {
+                const ethers = getEthers();
                 const contractAsNonOwner = await ethers.getContractAt(
                     "LeveragedPosition",
                     deployedContractAddress,
@@ -649,13 +667,14 @@ describe("Create leveraged position", function () {
             });
 
             it("should revert when beneficiary is zero address", async function () {
-                const zeroAddress = ethers.ZeroAddress;
+                const zeroAddress = ethersLib.ZeroAddress;
                 await expect(myContract.setFeeBeneficiary(zeroAddress)).to.be.revertedWith(
                     "_feeBeneficiary cannot be zero address",
                 );
             });
 
             it("should revert when called by non-owner", async function () {
+                const ethers = getEthers();
                 const contractAsNonOwner = await ethers.getContractAt(
                     "LeveragedPosition",
                     deployedContractAddress,

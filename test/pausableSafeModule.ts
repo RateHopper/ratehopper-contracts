@@ -1,9 +1,8 @@
-import { ethers } from "hardhat";
 import { expect } from "chai";
-import { deploySafeContractFixture } from "./deployUtils";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { Protocols, USDC_ADDRESS, DAI_ADDRESS, ETH_USDC_POOL } from "./constants";
-import { SafeDebtManager } from "../typechain-types";
+import { connectNetwork, getEthers, loadFixture } from "./testSetup.js";
+import { deploySafeContractFixture } from "./deployUtils.js";
+import { Protocols, USDC_ADDRESS, DAI_ADDRESS, ETH_USDC_POOL } from "./constants.js";
+import type { SafeDebtManager } from "../typechain-types/index.js";
 
 describe("SafeDebtManager Pausable", function () {
     let safeModuleContract: any;
@@ -12,7 +11,12 @@ describe("SafeDebtManager Pausable", function () {
     let operator: any;
     let pauser: any;
 
+    before(async function () {
+        await connectNetwork();
+    });
+
     beforeEach(async function () {
+        const ethers = getEthers();
         const { safeModule } = await loadFixture(deploySafeContractFixture);
         safeModuleContract = safeModule;
 
@@ -68,6 +72,7 @@ describe("SafeDebtManager Pausable", function () {
         });
 
         it("Should not allow executeDebtSwap when contract is paused", async function () {
+            const ethers = getEthers();
             const mockSafeAddress = owner.address;
             await expect(
                 safeModuleContract

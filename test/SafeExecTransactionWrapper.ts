@@ -1,7 +1,9 @@
-import { ethers } from "hardhat";
+import * as ethersLib from "ethers";
+import { MaxUint256 } from "ethers";
 import dotenv from "dotenv";
 dotenv.config();
-import Safe from "@safe-global/protocol-kit";
+import SafeModule from "@safe-global/protocol-kit";
+const Safe = SafeModule.default || SafeModule;
 import {
     cbETH_ADDRESS,
     DEFAULT_SUPPLY_AMOUNT,
@@ -9,28 +11,37 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
     cbETH_ETH_POOL,
-} from "./constants";
-import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { eip1193Provider, fundETH, fundSignerWithETH, getDecimals, getParaswapData } from "./utils";
-import { FLUID_cbETH_USDC_VAULT, FluidHelper, fluidVaultMap } from "./protocols/fluid";
-import FluidVaultAbi from "../externalAbi/fluid/fluidVaultT1.json";
+} from "./constants.js";
+import ERC20Json from "@openzeppelin/contracts/build/contracts/ERC20.json" with { type: "json" };
+const ERC20_ABI = ERC20Json.abi;
+import * as SafeTypes from "@safe-global/types-kit";
+type MetaTransactionData = SafeTypes.MetaTransactionData;
+const OperationType = SafeTypes.OperationType;
+import { eip1193Provider, fundETH, fundSignerWithETH, getDecimals, getParaswapData } from "./utils.js";
+import { FLUID_cbETH_USDC_VAULT, FluidHelper, fluidVaultMap } from "./protocols/fluid.js";
+import FluidVaultAbi from "../externalAbi/fluid/fluidVaultT1.json" with { type: "json" };
 import { expect } from "chai";
-import { getGasOptions, deployLeveragedPositionContractFixture } from "./deployUtils";
-import { MaxUint256 } from "ethers";
-import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { safeAddress } from "./debtSwapBySafe";
+import { getGasOptions, deployLeveragedPositionContractFixture } from "./deployUtils.js";
+import { connectNetwork, getEthers, loadFixture } from "./testSetup.js";
+import { safeAddress } from "./debtSwapBySafe.js";
 
 describe("SafeExecTransactionWrapper", function () {
     // Increase timeout for memory-intensive operations
     this.timeout(300000); // 5 minutes
 
-    const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
-    let safeWallet: Safe;
+    let signer: ethersLib.Wallet;
+    let safeWallet: any;
     let wrapperContract: any;
     let wrapperAddress: string;
 
+    before(async function () {
+        await connectNetwork();
+    });
+
     this.beforeEach(async () => {
+        const ethers = getEthers();
+        signer = new ethersLib.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
+
         // Fund the signer wallet (TESTING_SAFE_OWNER_KEY) with ETH for gas fees
         await fundSignerWithETH(signer.address);
 
@@ -65,12 +76,12 @@ describe("SafeExecTransactionWrapper", function () {
             // Send ETH directly to Safe for WETH only for Fluid protocol
             const tx = await signer.sendTransaction({
                 to: safeAddress,
-                value: ethers.parseEther("0.001"),
+                value: ethersLib.parseEther("0.001"),
             });
             await tx.wait();
         } else {
-            const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
-            const tx = await tokenContract.transfer(safeAddress, ethers.parseEther("0.001"));
+            const tokenContract = new ethersLib.Contract(tokenAddress, ERC20_ABI, signer);
+            const tx = await tokenContract.transfer(safeAddress, ethersLib.parseEther("0.001"));
             await tx.wait();
         }
     }
@@ -78,12 +89,12 @@ describe("SafeExecTransactionWrapper", function () {
     async function supplyAndBorrowOnFluidViaWrapper(
         vaultAddress = FLUID_cbETH_USDC_VAULT,
         collateralTokenAddress = cbETH_ADDRESS,
-        supplyAmount = ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
+        supplyAmount = ethersLib.parseEther(DEFAULT_SUPPLY_AMOUNT),
     ) {
         await sendCollateralToSafe(collateralTokenAddress, Protocols.FLUID);
-        const collateralTokenContract = new ethers.Contract(collateralTokenAddress, ERC20_ABI, signer);
+        const collateralTokenContract = new ethersLib.Contract(collateralTokenAddress, ERC20_ABI, signer);
 
-        const fluidVault = new ethers.Contract(vaultAddress, FluidVaultAbi, signer);
+        const fluidVault = new ethersLib.Contract(vaultAddress, FluidVaultAbi, signer);
 
         const transactions: MetaTransactionData[] = [];
 
@@ -94,7 +105,7 @@ describe("SafeExecTransactionWrapper", function () {
                 value: "0",
                 data: collateralTokenContract.interface.encodeFunctionData("approve", [
                     vaultAddress,
-                    ethers.parseEther("1"),
+                    ethersLib.parseEther("1"),
                 ]),
                 operation: OperationType.Call,
             };
@@ -112,7 +123,7 @@ describe("SafeExecTransactionWrapper", function () {
             data: fluidVault.interface.encodeFunctionData("operate", [
                 0, // nftId = 0 creates new position
                 supplyAmount, // Supply collateral
-                ethers.parseUnits("1", 6), // Borrow 1 USDC
+                ethersLib.parseUnits("1", 6), // Borrow 1 USDC
                 safeAddress,
             ]),
             operation: OperationType.Call,
@@ -133,7 +144,7 @@ describe("SafeExecTransactionWrapper", function () {
         const txData = safeTx.data;
 
         // Execute all operations via wrapper in one call
-        const metadata = ethers.AbiCoder.defaultAbiCoder().encode(
+        const metadata = ethersLib.AbiCoder.defaultAbiCoder().encode(
             [
                 "uint8",
                 "uint8",
@@ -156,8 +167,8 @@ describe("SafeExecTransactionWrapper", function () {
                 3, // borrowProtocol
                 vaultAddress, // borrowMarketId
                 supplyAmount, // collateralAmount
-                ethers.parseUnits("1", 6), // debtAmount
-                ethers.ZeroAddress, // additionalInteractionContract
+                ethersLib.parseUnits("1", 6), // debtAmount
+                ethersLib.ZeroAddress, // additionalInteractionContract
                 "0x", // customData (empty bytes)
             ],
         );
@@ -170,8 +181,8 @@ describe("SafeExecTransactionWrapper", function () {
             0, // safeTxGas
             0, // baseGas
             0, // gasPrice
-            ethers.ZeroAddress, // gasToken
-            ethers.ZeroAddress, // refundReceiver
+            ethersLib.ZeroAddress, // gasToken
+            ethersLib.ZeroAddress, // refundReceiver
             signature.data,
             metadata,
             {
@@ -187,21 +198,21 @@ describe("SafeExecTransactionWrapper", function () {
         const fluidHelper = new FluidHelper(signer);
 
         // Get initial balances
-        const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+        const usdcContract = new ethersLib.Contract(USDC_ADDRESS, ERC20_ABI, signer);
         const usdcBalanceBefore = await usdcContract.balanceOf(safeAddress);
-        console.log("USDC balance before:", ethers.formatUnits(usdcBalanceBefore, 6));
+        console.log("USDC balance before:", ethersLib.formatUnits(usdcBalanceBefore, 6));
 
         // Execute supply and borrow via wrapper
         await supplyAndBorrowOnFluidViaWrapper();
 
         // Verify debt was created
         const debtAmount = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-        console.log("Debt amount after:", ethers.formatUnits(debtAmount, 6));
+        console.log("Debt amount after:", ethersLib.formatUnits(debtAmount, 6));
         expect(debtAmount).to.be.gt(0);
 
         // Verify collateral was supplied
         const collateralAmount = await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-        console.log("Collateral amount after:", ethers.formatUnits(collateralAmount, 18));
+        console.log("Collateral amount after:", ethersLib.formatUnits(collateralAmount, 18));
         expect(collateralAmount).to.be.gt(0);
 
         // Verify NFT was created
@@ -211,14 +222,14 @@ describe("SafeExecTransactionWrapper", function () {
 
         // Verify USDC was borrowed and some transferred out
         const usdcBalanceAfter = await usdcContract.balanceOf(safeAddress);
-        console.log("USDC balance after:", ethers.formatUnits(usdcBalanceAfter, 6));
+        console.log("USDC balance after:", ethersLib.formatUnits(usdcBalanceAfter, 6));
         // Should have borrowed but also transferred 1 USDC out
         expect(usdcBalanceAfter).to.be.gt(usdcBalanceBefore);
     });
 
     it("Should revert when trying to borrow without collateral via wrapper", async function () {
         const vaultAddress = FLUID_cbETH_USDC_VAULT;
-        const fluidVault = new ethers.Contract(vaultAddress, FluidVaultAbi, signer);
+        const fluidVault = new ethersLib.Contract(vaultAddress, FluidVaultAbi, signer);
 
         console.log("Attempting to borrow without supplying collateral via wrapper...");
 
@@ -229,7 +240,7 @@ describe("SafeExecTransactionWrapper", function () {
             data: fluidVault.interface.encodeFunctionData("operate", [
                 0, // nftId = 0 creates new position
                 0, // NO collateral supplied
-                ethers.parseUnits("1", 6), // Try to borrow 1 USDC
+                ethersLib.parseUnits("1", 6), // Try to borrow 1 USDC
                 safeAddress,
             ]),
             operation: OperationType.Call,
@@ -246,7 +257,7 @@ describe("SafeExecTransactionWrapper", function () {
         const txData = safeTx.data;
 
         // Execute via wrapper - should revert (Safe will revert with GS013 for failed transaction)
-        const metadata = ethers.AbiCoder.defaultAbiCoder().encode(
+        const metadata = ethersLib.AbiCoder.defaultAbiCoder().encode(
             [
                 "uint8",
                 "uint8",
@@ -269,8 +280,8 @@ describe("SafeExecTransactionWrapper", function () {
                 3, // borrowProtocol
                 vaultAddress, // borrowMarketId
                 0, // collateralAmount (0 - no collateral)
-                ethers.parseUnits("1", 6), // debtAmount
-                ethers.ZeroAddress, // additionalInteractionContract
+                ethersLib.parseUnits("1", 6), // debtAmount
+                ethersLib.ZeroAddress, // additionalInteractionContract
                 "0x", // customData (empty bytes)
             ],
         );
@@ -284,8 +295,8 @@ describe("SafeExecTransactionWrapper", function () {
                 0, // safeTxGas
                 0, // baseGas
                 0, // gasPrice
-                ethers.ZeroAddress, // gasToken
-                ethers.ZeroAddress, // refundReceiver
+                ethersLib.ZeroAddress, // gasToken
+                ethersLib.ZeroAddress, // refundReceiver
                 signature.data,
                 metadata,
                 {

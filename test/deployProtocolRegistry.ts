@@ -1,5 +1,6 @@
-import { ethers } from "hardhat";
-import { mcbETH, mUSDC, mDAI } from "./protocols/moonwell";
+import * as ethersLib from "ethers";
+import { getEthers } from "./testSetup.js";
+import { mcbETH, mUSDC, mDAI } from "./protocols/moonwell.js";
 import {
     cbETH_ADDRESS,
     USDC_ADDRESS,
@@ -13,25 +14,27 @@ import {
     wstETH_ADDRESS,
     PARASWAP_V6_CONTRACT_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
-} from "./constants";
-import { USDC_COMET_ADDRESS, WETH_COMET_ADDRESS } from "./protocols/compound";
-import { mAERO, mcbBTC, mEURC, mWeETH, mWETH, mwstETH, USDS_COMET_ADDRESS } from "../contractAddresses";
-import { getGasOptions } from "./deployUtils";
-import { FLUID_VAULT_RESOLVER } from "./protocols/fluid";
+} from "./constants.js";
+import { USDC_COMET_ADDRESS, WETH_COMET_ADDRESS } from "./protocols/compound.js";
+import { mAERO, mcbBTC, mEURC, mWeETH, mWETH, mwstETH, USDS_COMET_ADDRESS } from "../contractAddresses.js";
+import { getGasOptions } from "./deployUtils.js";
+import { FLUID_VAULT_RESOLVER } from "./protocols/fluid.js";
 
 export async function deployProtocolRegistry() {
+    const ethers = getEthers();
     const signers = await ethers.getSigners();
     const deployer = signers[0];
     const operator = signers[2];
     const gasOptions = await getGasOptions();
 
     // Deploy TimelockController first
-    const TimelockController = await ethers.getContractFactory("TimelockController");
+    // In Hardhat 3, we use the wrapper contract from Imports.sol
+    const TimelockController = await ethers.getContractFactory("TimelockControllerForTest");
     const timelock = await TimelockController.deploy(
         0, // 0 delay for testing
         [deployer.address], // proposers
         [deployer.address], // executors
-        ethers.ZeroAddress, // no admin
+        ethersLib.ZeroAddress, // no admin
     );
     await timelock.waitForDeployment();
     console.log("TimelockController deployed to:", await timelock.getAddress());

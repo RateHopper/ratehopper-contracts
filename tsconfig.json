@@ -1,12 +1,18 @@
 {
     "compilerOptions": {
-        "target": "es2020",
-        "module": "commonjs",
+        "target": "ES2022",
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
         "esModuleInterop": true,
         "forceConsistentCasingInFileNames": true,
         "strict": true,
         "skipLibCheck": true,
         "resolveJsonModule": true,
-        "noImplicitAny": false
-    }
+        "noImplicitAny": false,
+        "declaration": true,
+        "declarationMap": true,
+        "sourceMap": true
+    },
+    "include": ["./scripts", "./test", "./hardhat.config.ts"],
+    "exclude": ["node_modules", "artifacts", "cache"]
 }
