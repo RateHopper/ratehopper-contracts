@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import "./Types.sol";
 
 /**
  * @title ProtocolRegistry
@@ -13,7 +14,8 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
  * - CRITICAL_ROLE: Can perform critical operations that should be timelocked (Paraswap, operator changes)
  */
 contract ProtocolRegistry is AccessControl {
-    bytes32 public constant CRITICAL_ROLE = keccak256("CRITICAL_ROLE");
+    // Re-export CRITICAL_ROLE as public constant for external access
+    bytes32 public constant CRITICAL_ROLE_PUBLIC = CRITICAL_ROLE;
 
     /// @notice The TimelockController address that is the only allowed caller for critical functions
     address public immutable timelock;

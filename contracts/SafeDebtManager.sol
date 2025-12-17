@@ -15,8 +15,13 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 
+/// @title SafeDebtManager
+/// @notice Manages debt position switching between DeFi lending protocols for Gnosis Safe wallets
+/// @dev Uses Uniswap V3 flash loans to atomically switch debt positions between protocols
+/// @dev Supports Aave V3, Compound V3, Morpho, Moonwell, and Fluid protocols
 contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
+
     uint8 public protocolFee;
     address public feeBeneficiary;
     address public pauser;
@@ -66,6 +71,10 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
     event EmergencyWithdrawn(address indexed token, uint256 amount, address indexed to);
 
+    event EmergencyETHWithdrawn(uint256 amount, address indexed to);
+
+    event ProtocolHandlerUpdated(Protocol indexed protocol, address indexed oldHandler, address indexed newHandler);
+
     modifier onlyOwnerOrOperator(address onBehalfOf) {
         require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
 
@@ -76,6 +85,11 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
     modifier onlyPauser() {
         require(msg.sender == pauser, "Caller is not authorized to pause");
+        _;
+    }
+
+    modifier onlyCriticalRole() {
+        require(registry.hasRole(CRITICAL_ROLE, msg.sender), "Caller does not have CRITICAL_ROLE");
         _;
     }
 
@@ -99,6 +113,9 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         registry = ProtocolRegistry(_registry);
     }
 
+    /// @notice Sets the protocol fee charged on debt swaps
+    /// @param _fee The fee in basis points (100 = 1%, max 100)
+    /// @dev Only callable by the contract owner
     function setProtocolFee(uint8 _fee) public onlyOwner {
         require(_fee <= 100, "_fee cannot be greater than 1%");
         uint8 oldFee = protocolFee;
@@ -106,6 +123,9 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         emit ProtocolFeeSet(oldFee, _fee);
     }
 
+    /// @notice Sets the address that receives protocol fees
+    /// @param _feeBeneficiary The address to receive collected fees
+    /// @dev Only callable by the contract owner. Cannot be zero address.
     function setFeeBeneficiary(address _feeBeneficiary) public onlyOwner {
         require(_feeBeneficiary != address(0), "_feeBeneficiary cannot be zero address");
         address oldBeneficiary = feeBeneficiary;
@@ -113,18 +133,50 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         emit FeeBeneficiarySet(oldBeneficiary, _feeBeneficiary);
     }
 
+    /// @notice Enables or disables a protocol as a source for debt swaps
+    /// @param _protocol The protocol to enable/disable
+    /// @param _enabled True to enable, false to disable
+    /// @dev Only callable by the pauser. Used for emergency protocol disabling.
     function setProtocolEnabledForSwitchFrom(Protocol _protocol, bool _enabled) external onlyPauser {
         require(protocolHandlers[_protocol] != address(0), "Protocol handler not set");
         protocolEnabledForSwitchFrom[_protocol] = _enabled;
         emit ProtocolStatusChanged(_protocol, "switchFrom", _enabled);
     }
 
+    /// @notice Enables or disables a protocol as a destination for debt swaps
+    /// @param _protocol The protocol to enable/disable
+    /// @param _enabled True to enable, false to disable
+    /// @dev Only callable by the pauser. Used for emergency protocol disabling.
     function setProtocolEnabledForSwitchTo(Protocol _protocol, bool _enabled) external onlyPauser {
         require(protocolHandlers[_protocol] != address(0), "Protocol handler not set");
         protocolEnabledForSwitchTo[_protocol] = _enabled;
         emit ProtocolStatusChanged(_protocol, "switchTo", _enabled);
     }
 
+    /// @notice Updates the handler address for a specific protocol
+    /// @param _protocol The protocol to update the handler for
+    /// @param _handler The new handler address
+    /// @dev Only callable by addresses with CRITICAL_ROLE in ProtocolRegistry. For production, should be behind a timelock.
+    /// @dev Allows updating handlers if a bug is found or handler needs upgrade.
+    function setProtocolHandler(Protocol _protocol, address _handler) external onlyCriticalRole {
+        require(_handler != address(0), "Invalid handler address");
+        address oldHandler = protocolHandlers[_protocol];
+        protocolHandlers[_protocol] = _handler;
+        emit ProtocolHandlerUpdated(_protocol, oldHandler, _handler);
+    }
+
+    /// @notice Executes a debt swap from one protocol to another using flash loans
+    /// @param _flashloanPool The Uniswap V3 pool address to use for flash loan
+    /// @param _fromProtocol The source lending protocol
+    /// @param _toProtocol The destination lending protocol
+    /// @param _fromDebtAsset The debt token address on the source protocol
+    /// @param _toDebtAsset The debt token address on the destination protocol
+    /// @param _amount The amount of debt to swap (use type(uint256).max for full debt)
+    /// @param _collateralAssets Array of collateral assets to migrate
+    /// @param _onBehalfOf The Safe wallet address that owns the position
+    /// @param _extraData Protocol-specific data [fromProtocol, toProtocol]
+    /// @param _paraswapParams Swap parameters for converting between debt assets if different
+    /// @dev Uses Uniswap V3 flash loan to atomically repay source debt and borrow on destination
     function executeDebtSwap(
         address _flashloanPool,
         Protocol _fromProtocol,
@@ -187,6 +239,11 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         pool.flash(address(this), amount0, amount1, data);
     }
 
+    /// @notice Callback function called by Uniswap V3 pool during flash loan
+    /// @param fee0 The fee for borrowing token0
+    /// @param fee1 The fee for borrowing token1
+    /// @param data Encoded FlashCallbackData containing swap parameters
+    /// @dev This function executes the core debt swap logic. Only callable by valid Uniswap V3 pools.
     function uniswapV3FlashCallback(uint256 fee0, uint256 fee1, bytes calldata data) external whenNotPaused {
         FlashCallbackData memory decoded = abi.decode(data, (FlashCallbackData));
 
@@ -425,12 +482,26 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         emit DebtPositionExited(_onBehalfOf, _protocol, _debtAsset, _debtAmount, _collateralAssets);
     }
 
+    /// @notice Emergency function to withdraw ERC20 tokens stuck in the contract
+    /// @param token The address of the token to withdraw
+    /// @param amount The amount of tokens to withdraw
+    /// @dev Only callable by the contract owner. Used for recovering stuck funds.
     function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
         require(token != address(0), "Invalid token address");
         uint256 balance = IERC20(token).balanceOf(address(this));
         require(amount <= balance, "Insufficient balance");
         IERC20(token).safeTransfer(owner(), amount);
         emit EmergencyWithdrawn(token, amount, owner());
+    }
+
+    /// @notice Emergency function to withdraw ETH stuck in the contract
+    /// @param amount The amount of ETH to withdraw in wei
+    /// @dev Only callable by the contract owner. Used for recovering ETH from protocol interactions.
+    function emergencyWithdrawETH(uint256 amount) external onlyOwner {
+        require(amount <= address(this).balance, "Insufficient ETH balance");
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "ETH transfer failed");
+        emit EmergencyETHWithdrawn(amount, msg.sender);
     }
 
     /**
@@ -449,6 +520,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         _unpause();
     }
 
-    // // Allow contract to receive ETH (e.g., from protocols like Moonwell or Fluid)
+    /// @notice Allows contract to receive ETH from protocol interactions
+    /// @dev Required for receiving ETH from protocols like Moonwell or Fluid during withdrawals
     receive() external payable {}
 }

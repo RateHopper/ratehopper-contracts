@@ -14,8 +14,13 @@ import "./Types.sol";
 import "./interfaces/safe/ISafe.sol";
 import "./ProtocolRegistry.sol";
 
+/// @title LeveragedPosition
+/// @notice Creates and manages leveraged positions on DeFi lending protocols
+/// @dev Uses Uniswap V3 flash loans to atomically create/close leveraged positions
+/// @dev Supports Aave V3, Compound V3, Morpho, Moonwell, and Fluid protocols
 contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
+
     uint8 public protocolFee;
     address public feeBeneficiary;
     ProtocolRegistry public immutable registry;
@@ -37,6 +42,11 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
     modifier onlyPauser() {
         require(msg.sender == pauser, "Caller is not authorized to pause");
+        _;
+    }
+
+    modifier onlyCriticalRole() {
+        require(registry.hasRole(CRITICAL_ROLE, msg.sender), "Caller does not have CRITICAL_ROLE");
         _;
     }
 
@@ -89,6 +99,10 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
     event EmergencyWithdrawn(address indexed token, uint256 amount, address indexed to);
 
+    event EmergencyETHWithdrawn(uint256 amount, address indexed to);
+
+    event ProtocolHandlerUpdated(Protocol indexed protocol, address indexed oldHandler, address indexed newHandler);
+
     constructor(address _registry, Protocol[] memory protocols, address[] memory handlers, address _pauser) Ownable(msg.sender) {
         require(protocols.length == handlers.length, "Protocols and handlers length mismatch");
         require(_registry != address(0), "Registry cannot be zero address");
@@ -103,6 +117,9 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         pauser = _pauser;
     }
 
+    /// @notice Sets the protocol fee charged on leveraged positions
+    /// @param _fee The fee in basis points (100 = 1%, max 100)
+    /// @dev Only callable by the contract owner
     function setProtocolFee(uint8 _fee) public onlyOwner {
         require(_fee <= 100, "_fee cannot be greater than 1%");
         uint8 oldFee = protocolFee;
@@ -110,6 +127,9 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         emit ProtocolFeeSet(oldFee, _fee);
     }
 
+    /// @notice Sets the address that receives protocol fees
+    /// @param _feeBeneficiary The address to receive collected fees
+    /// @dev Only callable by the contract owner. Cannot be zero address.
     function setFeeBeneficiary(address _feeBeneficiary) public onlyOwner {
         require(_feeBeneficiary != address(0), "_feeBeneficiary cannot be zero address");
         address oldBeneficiary = feeBeneficiary;
@@ -117,6 +137,29 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         emit FeeBeneficiarySet(oldBeneficiary, _feeBeneficiary);
     }
 
+    /// @notice Updates the handler address for a specific protocol
+    /// @param _protocol The protocol to update the handler for
+    /// @param _handler The new handler address
+    /// @dev Only callable by addresses with CRITICAL_ROLE in ProtocolRegistry. For production, should be behind a timelock.
+    /// @dev Allows updating handlers if a bug is found or handler needs upgrade.
+    function setProtocolHandler(Protocol _protocol, address _handler) external onlyCriticalRole {
+        require(_handler != address(0), "Invalid handler address");
+        address oldHandler = protocolHandlers[_protocol];
+        protocolHandlers[_protocol] = _handler;
+        emit ProtocolHandlerUpdated(_protocol, oldHandler, _handler);
+    }
+
+    /// @notice Creates a leveraged position using flash loans
+    /// @param _flashloanPool The Uniswap V3 pool address to use for flash loan
+    /// @param _protocol The lending protocol to use (Aave, Compound, Morpho, etc.)
+    /// @param _collateralAsset The collateral token address
+    /// @param _principleCollateralAmount User's initial collateral amount
+    /// @param _targetCollateralAmount Target total collateral (principle + borrowed)
+    /// @param _debtAsset The debt token address to borrow
+    /// @param _onBehalfOf The address that will own the position
+    /// @param _extraData Protocol-specific data (e.g., market params for Morpho)
+    /// @param _paraswapParams Swap parameters for converting debt to collateral
+    /// @dev Flash loans collateral difference, supplies to protocol, borrows debt, swaps back to repay flash loan
     function createLeveragedPosition(
         address _flashloanPool,
         Protocol _protocol,
@@ -165,6 +208,17 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         pool.flash(address(this), amount0, amount1, data);
     }
 
+    /// @notice Closes or reduces a leveraged position using flash loans
+    /// @param _flashloanPool The Uniswap V3 pool address to use for flash loan
+    /// @param _protocol The lending protocol where the position exists
+    /// @param _collateralAsset The collateral token address
+    /// @param _collateralAmount The amount of collateral to withdraw
+    /// @param _debtAsset The debt token address
+    /// @param _debtAmount The amount of debt to repay
+    /// @param _onBehalfOf The address that owns the position
+    /// @param _extraData Protocol-specific data (e.g., market params for Morpho)
+    /// @param _paraswapParams Swap parameters for converting collateral to debt
+    /// @dev Flash loans debt amount, repays debt, withdraws collateral, swaps to repay flash loan
     function deleveragePosition(
         address _flashloanPool,
         Protocol _protocol,
@@ -215,7 +269,12 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         pool.flash(address(this), amount0, amount1, data);
     }
 
-    function uniswapV3FlashCallback(uint256 fee0, uint256 fee1, bytes calldata data) external {
+    /// @notice Callback function called by Uniswap V3 pool during flash loan
+    /// @param fee0 The fee for borrowing token0
+    /// @param fee1 The fee for borrowing token1
+    /// @param data Encoded callback data containing operation type and parameters
+    /// @dev Routes to create or close handlers based on operation type. Only callable by valid Uniswap V3 pools.
+    function uniswapV3FlashCallback(uint256 fee0, uint256 fee1, bytes calldata data) external whenNotPaused {
         // Decode operation type first
         (OperationType operationType) = abi.decode(data, (OperationType));
 
@@ -395,6 +454,10 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         IERC20(srcAsset).forceApprove(registry.paraswapV6(), 0);
     }
 
+    /// @notice Emergency function to withdraw ERC20 tokens stuck in the contract
+    /// @param token The address of the token to withdraw
+    /// @param amount The amount of tokens to withdraw
+    /// @dev Only callable by the contract owner. Used for recovering stuck funds.
     function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
         require(token != address(0), "Invalid token address");
         uint256 balance = IERC20(token).balanceOf(address(this));
@@ -403,14 +466,29 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         emit EmergencyWithdrawn(token, amount, owner());
     }
 
+    /// @notice Emergency function to withdraw ETH stuck in the contract
+    /// @param amount The amount of ETH to withdraw in wei
+    /// @dev Only callable by the contract owner. Used for recovering ETH from protocol interactions.
+    function emergencyWithdrawETH(uint256 amount) external onlyOwner {
+        require(amount <= address(this).balance, "Insufficient ETH balance");
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "ETH transfer failed");
+        emit EmergencyETHWithdrawn(amount, msg.sender);
+    }
+
+    /// @notice Pauses the contract, preventing position creation and closure
+    /// @dev Only callable by the pauser address
     function pause() external onlyPauser {
         _pause();
     }
 
+    /// @notice Unpauses the contract, allowing normal operations
+    /// @dev Only callable by the pauser address
     function unpause() external onlyPauser {
         _unpause();
     }
 
-    // Allow contract to receive ETH (e.g., from protocols like Moonwell or Fluid)
+    /// @notice Allows contract to receive ETH from protocol interactions
+    /// @dev Required for receiving ETH from protocols like Moonwell or Fluid during withdrawals
     receive() external payable {}
 }
