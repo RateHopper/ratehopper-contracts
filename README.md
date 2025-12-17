@@ -225,7 +225,7 @@ The contracts use Hardhat Ignition for declarative deployments. Make sure you co
 Deploy everything in one command:
 
 ```bash
-yarn hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base --verify
+yarn hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base --verify --reset
 ```
 
 This deploys:
@@ -253,16 +253,16 @@ Verify individual contracts on block explorers:
 
 ```bash
 # Verify TimelockController
-TIMELOCK_ADDRESS=0x... yarn hardhat run scripts/verify-timelock.ts --network base
+TIMELOCK_ADDRESS=0x... yarn hardhat run scripts/verifyTimelock.ts --network base
 
 # Verify ProtocolRegistry
-yarn hardhat run scripts/verify-protocolRegistry.ts --network base
+yarn hardhat run scripts/verifyProtocolRegistry.ts --network base
 
 # Verify SafeDebtManager
-yarn hardhat run scripts/verify-safe-debt-manager.ts --network base
+yarn hardhat run scripts/verifySafeDebtManager.ts --network base
 
 # Verify LeveragedPosition
-yarn hardhat run scripts/verify-leveraged-position.ts --network base
+yarn hardhat run scripts/verifyLeveragedPosition.ts --network base
 ```
 
 ### Timelock Operations

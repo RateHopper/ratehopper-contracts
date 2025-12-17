@@ -31,24 +31,9 @@ const config: HardhatUserConfig = {
     },
     etherscan: {
         apiKey: process.env.EXPLORER_KEY!,
-        customChains: [
-            {
-                network: "base",
-                chainId: 8453,
-                urls: {
-                    apiURL: "https://api.etherscan.io/v2/api",
-                    browserURL: "https://basescan.org",
-                },
-            },
-            {
-                network: "baseSepolia",
-                chainId: 84532,
-                urls: {
-                    apiURL: "https://api.etherscan.io/v2/api",
-                    browserURL: "https://sepolia.basescan.org",
-                },
-            },
-        ],
+    },
+    sourcify: {
+        enabled: true,
     },
     mocha: {
         timeout: 300000, // 5 minutes for memory-intensive tests
