@@ -433,8 +433,8 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         if (_debtAmount == type(uint256).max) {
             uint256 debtAmount = IProtocolHandler(handler).getDebtAmount(_debtAsset, _onBehalfOf, _extraData);
             uint256 safeBalance = IERC20(_debtAsset).balanceOf(_onBehalfOf);
-            // Use the smaller of debt amount or Safe balance
-            repayAmount = debtAmount < safeBalance ? debtAmount : safeBalance;
+            require(safeBalance >= debtAmount, "Insufficient balance");
+            repayAmount = debtAmount;
         }
 
         // Transfer debt tokens from Safe to this contract

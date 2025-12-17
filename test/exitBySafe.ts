@@ -540,5 +540,63 @@ describe("Safe wallet exit function tests", function () {
                 debtAmountOverride: ethers.MaxUint256, // Use type(uint256).max
             });
         });
+
+        it("Should revert exit with type(uint256).max when Safe has insufficient balance", async function () {
+            const vaultAddress = FLUID_cbETH_USDC_VAULT;
+            const fluidHelper = new FluidHelper(signer);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            // Fund the operator with ETH for gas
+            await fundSignerWithETH(operator.address, "0.01");
+
+            // Step 1: Create a position (supply collateral and borrow)
+            await supplyAndBorrowOnFluid();
+
+            // Step 2: Get current debt amount
+            const debtBefore = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
+            console.log("Debt before exit:", ethers.formatUnits(debtBefore, 6));
+            expect(debtBefore).to.be.gt(0);
+
+            // Step 3: Send LESS debt tokens to Safe than required (only half the debt)
+            const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+            const insufficientAmount = debtBefore / 2n; // Only half the debt
+            const transferTx = await debtContract.transfer(safeAddress, insufficientAmount);
+            await transferTx.wait();
+            console.log("Transferred insufficient debt tokens to Safe:", ethers.formatUnits(insufficientAmount, 6));
+
+            // Step 4: Verify Safe balance is less than debt
+            const safeBalance = await debtContract.balanceOf(safeAddress);
+            console.log("Safe balance:", ethers.formatUnits(safeBalance, 6));
+            expect(safeBalance).to.be.lt(debtBefore);
+
+            // Step 5: Get collateral amount and extra data
+            const collateralAmount = await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+            const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
+            const extraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address", "uint256", "bool"],
+                [vaultAddress, nftId, true],
+            );
+
+            // Step 6: Call exit with type(uint256).max - should revert
+            const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
+
+            await expect(
+                moduleContract.exit(
+                    Protocols.FLUID,
+                    USDC_ADDRESS,
+                    ethers.MaxUint256, // type(uint256).max
+                    [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                    safeAddress,
+                    extraData,
+                    true, // withdrawCollateral
+                    {
+                        gasLimit: "2000000",
+                    },
+                ),
+            ).to.be.revertedWith("Insufficient balance");
+
+            console.log("Transaction correctly reverted with 'Insufficient balance'");
+        });
     });
 });
