@@ -23,6 +23,7 @@
         "deploy:timelock": "npx hardhat run ignition/deployTimelock.ts --network base",
         "verify:safe-debt-manager": "npx hardhat run scripts/verifySafeDebtManager.ts --network base",
         "verify:leveraged-position": "npx hardhat run scripts/verifyLeveragedPosition.ts --network base",
+        "verify:handlers": "npx hardhat run scripts/verifyHandlers.ts --network base",
         "wipe": "npx hardhat ignition wipe chain-8453"
     },
     "author": "Ratehopper AI",
