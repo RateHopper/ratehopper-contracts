@@ -46,6 +46,9 @@ contract AaveV3Handler is BaseProtocolHandler {
         bytes calldata /* fromExtraData */,
         bytes calldata /* toExtraData */
     ) external override onlyAuthorizedCaller(onBehalfOf) {
+        require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
+        require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
+
         IERC20(fromAsset).forceApprove(address(aaveV3Pool), amount);
         aaveV3Pool.repay(fromAsset, amount, 2, onBehalfOf);
 
@@ -113,16 +116,22 @@ contract AaveV3Handler is BaseProtocolHandler {
     }
 
     function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) {
+        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
+
         IERC20(asset).forceApprove(address(aaveV3Pool), amount);
         aaveV3Pool.supply(asset, amount, onBehalfOf, 0);
         IERC20(asset).forceApprove(address(aaveV3Pool), 0);
     }
 
     function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) {
+        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
+
         aaveV3Pool.borrow(asset, amount, 2, 0, onBehalfOf);
     }
 
     function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) public onlyAuthorizedCaller(onBehalfOf) {
+        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
+
         // Skip repayment if amount is 1 wei or less to prevent Aave v3 InvalidBurnAmount error
         if (amount <= 1) {
             return;
