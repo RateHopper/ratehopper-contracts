@@ -14,6 +14,7 @@ import {
     USDbC_ADDRESS,
     cbETH_ADDRESS,
     TEST_ADDRESS,
+    TEST_FEE_BENEFICIARY_ADDRESS,
     Protocols,
     WETH_ADDRESS,
     DEFAULT_SUPPLY_AMOUNT,
@@ -355,6 +356,36 @@ describe("Create leveraged position", function () {
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3);
+        });
+
+        it("create position with cbETH collateral and protocol fee", async function () {
+            // Set protocol fee
+            const signers = await ethers.getSigners();
+            const contractByOwner = await ethers.getContractAt(
+                "LeveragedPosition",
+                deployedContractAddress,
+                signers[0],
+            );
+            await contractByOwner.setProtocolFee(50); // 0.5%
+            await contractByOwner.setFeeBeneficiary(TEST_FEE_BENEFICIARY_ADDRESS);
+
+            // Get USDC contract for balance checks
+            const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, impersonatedSigner);
+
+            // Record fee beneficiary's USDC balance before
+            const beneficiaryUsdcBalanceBefore = await usdcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+
+            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
+
+            // Check fee beneficiary's USDC balance after
+            const beneficiaryUsdcBalanceAfter = await usdcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+
+            const feeReceived = beneficiaryUsdcBalanceAfter - beneficiaryUsdcBalanceBefore;
+
+            console.log("Protocol fee received (USDC):", ethers.formatUnits(feeReceived, 6));
+
+            // The fee should be greater than 0
+            expect(feeReceived).to.be.gt(0);
         });
 
         it("create and close position with WETH collateral", async function () {

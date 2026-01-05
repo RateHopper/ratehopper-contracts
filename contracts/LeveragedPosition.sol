@@ -326,6 +326,11 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         );
         require(successBorrow, "Borrow failed");
 
+        // send protocol fee to fee beneficiary
+        if (protocolFee > 0 && feeBeneficiary != address(0)) {
+            IERC20(decoded.debtAsset).safeTransfer(feeBeneficiary, protocolFeeAmount);
+        }
+
         uint256 amountToRepay = flashloanBorrowAmount + totalFee;
 
         swapByParaswap(
@@ -343,11 +348,6 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         // transfer dust amount back to user
         uint256 remainingCollateralBalance = IERC20(decoded.collateralAsset).balanceOf(address(this));
         collateralToken.safeTransfer(decoded.onBehalfOf, remainingCollateralBalance);
-
-        // send protocol fee if applicable
-        if (protocolFee > 0 && feeBeneficiary != address(0)) {
-            IERC20(decoded.debtAsset).safeTransfer(feeBeneficiary, protocolFeeAmount);
-        }
 
         // repay remaining debt amount
         uint256 remainingBalance = IERC20(decoded.debtAsset).balanceOf(address(this));
