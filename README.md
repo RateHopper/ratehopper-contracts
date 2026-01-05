@@ -300,7 +300,7 @@ The contracts include several security features:
 
 - **Reentrancy Protection**: All state-changing functions protected via OpenZeppelin's `ReentrancyGuard`
 - **Ownership Pattern**: Uses OpenZeppelin's `Ownable` for administrative functions
-- **Safe ERC20 Operations**: Uses `GPv2SafeERC20` for secure token transfers
+- **Safe ERC20 Operations**: Uses OpenZeppelin's `SafeERC20` for secure token transfers
 - **Flash Loan Validation**: Validates Uniswap V3 pool callbacks via `CallbackValidation`
 
 ### Safe Integration Security
