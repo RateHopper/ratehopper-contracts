@@ -119,6 +119,8 @@ contract FluidSafeHandler is BaseProtocolHandler {
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
     ) public override onlyAuthorizedCaller(onBehalfOf) {
+        require(collateralAssets.length == 1, "Fluid only supports one collateral asset");
+
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
         _validateCollateralAssets(collateralAssets);
         for (uint256 i = 0; i < collateralAssets.length; i++) {

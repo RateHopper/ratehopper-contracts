@@ -1240,6 +1240,61 @@ describe("Safe wallet should debtSwap", function () {
             ).to.be.reverted;
         });
 
+        it("if switching to Fluid with multiple collateral assets", async function () {
+            // Fluid only supports one collateral asset
+            await supplyAndBorrow(Protocols.AAVE_V3);
+
+            // Supply additional WETH collateral to Aave
+            await helpers.sendCollateralToSafe(WETH_ADDRESS);
+
+            const wethContract = new ethers.Contract(WETH_ADDRESS, ERC20_ABI, signer);
+            const aavePool = new ethers.Contract(AAVE_V3_POOL_ADDRESS, aaveV3PoolJson, signer);
+
+            const approveTransactionData: MetaTransactionData = {
+                to: WETH_ADDRESS,
+                value: "0",
+                data: wethContract.interface.encodeFunctionData("approve", [
+                    AAVE_V3_POOL_ADDRESS,
+                    ethers.parseEther("1"),
+                ]),
+                operation: OperationType.Call,
+            };
+
+            const supplyTransactionData: MetaTransactionData = {
+                to: AAVE_V3_POOL_ADDRESS,
+                value: "0",
+                data: aavePool.interface.encodeFunctionData("supply", [
+                    WETH_ADDRESS,
+                    ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
+                    safeAddress,
+                    0,
+                ]),
+                operation: OperationType.Call,
+            };
+
+            const safeTransaction = await safeWallet.createTransaction({
+                transactions: [approveTransactionData, supplyTransactionData],
+            });
+            await safeWallet.executeTransaction(safeTransaction);
+
+            // Try to switch to Fluid with multiple collateral assets - should fail
+            // The underlying error "Fluid only supports one collateral asset" is wrapped by the delegatecall
+            await expect(
+                executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    Protocols.AAVE_V3,
+                    Protocols.FLUID,
+                    cbETH_ADDRESS,
+                    {
+                        anotherCollateralTokenAddress: WETH_ADDRESS,
+                        operator,
+                    },
+                ),
+            ).to.be.revertedWith("protocol switchTo failed");
+        });
+
         it("if same fromProtocol and toProtocol but different invalid tokens", async function () {
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
             await expect(
