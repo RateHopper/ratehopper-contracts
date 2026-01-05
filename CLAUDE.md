@@ -34,6 +34,7 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 ## Code Conventions
 
 - When contract code is changed, always check and update test and ignition codes too
+- Don't add unnecesarry comment in test codes.
 - Custom errors instead of require strings: `error ZeroAddress();`
 - OpenZeppelin's `SafeERC20` for all token transfers, `forceApprove` for approvals
 - Events for all state changes

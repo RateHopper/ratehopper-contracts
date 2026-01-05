@@ -331,10 +331,12 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         uint256 amountToRepay = decoded.amount + flashloanFeeOriginal;
 
         if (decoded.fromAsset != decoded.toAsset) {
+            // Only swap the amount needed for flashloan repayment, keep protocolFeeAmount reserved
+            uint256 amountToSwap = amountInMax + flashloanFee;
             swapByParaswap(
                 decoded.toAsset,
                 decoded.fromAsset,
-                amountTotal,
+                amountToSwap,
                 amountToRepay,
                 decoded.paraswapParams.swapData
             );

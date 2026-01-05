@@ -455,6 +455,33 @@ describe("Safe wallet should debtSwap", function () {
             await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
         });
 
+        it("cross-asset debt swap from Aave USDC to USDbC with protocol fee", async function () {
+            const signers = await ethers.getSigners();
+            const contractByOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
+
+            // Set protocol fee to 0.1% (10 basis points)
+            const setTx = await contractByOwner.setProtocolFee(10);
+            await setTx.wait();
+
+            const setFeeBeneficiaryTx = await contractByOwner.setFeeBeneficiary(TEST_FEE_BENEFICIARY_ADDRESS);
+            await setFeeBeneficiaryTx.wait();
+
+            const usdBcContract = new ethers.Contract(USDbC_ADDRESS, ERC20_ABI, signer);
+
+            const beneficiaryBalanceBefore = await usdBcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+
+            await supplyAndBorrow(Protocols.AAVE_V3);
+
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
+
+            const beneficiaryBalanceAfter = await usdBcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+            const feeReceived = beneficiaryBalanceAfter - beneficiaryBalanceBefore;
+
+            console.log("Protocol fee received (USDbC):", ethers.formatUnits(feeReceived, 6));
+
+            expect(feeReceived).to.be.gt(0);
+        });
+
         it("from Compound to Aave", async function () {
             await supplyAndBorrow(Protocols.COMPOUND);
             await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.COMPOUND, Protocols.AAVE_V3);
