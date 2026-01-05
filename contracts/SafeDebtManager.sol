@@ -216,6 +216,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
         if (_amount == type(uint256).max) {
             debtAmount = IProtocolHandler(fromHandler).getDebtAmount(_fromDebtAsset, _onBehalfOf, _extraData[0]);
+            require(debtAmount >= 10000, "Debt amount below minimum threshold");
         }
 
         uint256 amount0 = _fromDebtAsset == token0 ? debtAmount : 0;
