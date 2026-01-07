@@ -192,10 +192,7 @@ contract MoonwellHandler is BaseProtocolHandler {
 
 
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(onBehalfOf);
-            require(
-                currentBalance * 100 < collateralAssets[i].amount * 101,
-                "Current balance is more than collateral amount + buffer"
-            );
+            require(currentBalance > 0, "No collateral balance available");
 
             bool successTransfer = ISafe(onBehalfOf).execTransactionFromModule(
                 collateralAssets[i].asset,
@@ -227,10 +224,7 @@ contract MoonwellHandler is BaseProtocolHandler {
             address collateralContract = getMContract(collateralAssets[i].asset);
             // use balanceOf() because collateral amount is slightly decreased when switching from Fluid
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(address(this));
-            require(
-                currentBalance * 100 < collateralAssets[i].amount * 101,
-                "Current balance is more than collateral amount + buffer"
-            );
+            require(currentBalance > 0, "No collateral balance available");
 
             IERC20(collateralAssets[i].asset).transfer(onBehalfOf, currentBalance);
 

@@ -456,6 +456,88 @@ describe("Safe wallet exit function tests", function () {
             });
         });
 
+        it("Should revert when invalid comet address is passed for Compound withdraw", async function () {
+            const compoundHelper = new CompoundHelper(signer);
+
+            await time.increaseTo((await time.latest()) + 3600);
+            await fundSignerWithETH(operator.address, "0.01");
+
+            // Setup a position on Compound
+            await supplyAndBorrow(Protocols.COMPOUND);
+            await compoundAllowTxBySafe(USDC_ADDRESS);
+
+            const debtBefore = await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+            expect(debtBefore).to.be.gt(0);
+
+            // Send debt tokens to Safe
+            const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+            const repayAmount = debtBefore + ethers.parseUnits("1", 6);
+            await debtContract.transfer(safeAddress, repayAmount);
+
+            const collateralAmount = await compoundHelper.getCollateralAmount(
+                USDC_COMET_ADDRESS,
+                cbETH_ADDRESS,
+                safeAddress,
+            );
+
+            const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
+
+            // Test 1: Pass a random EOA address as comet - should revert
+            const randomAddress = ethers.Wallet.createRandom().address;
+            const invalidExtraData1 = ethers.AbiCoder.defaultAbiCoder().encode(["address"], [randomAddress]);
+
+            await expect(
+                moduleContract.exit(
+                    Protocols.COMPOUND,
+                    USDC_ADDRESS,
+                    debtBefore,
+                    [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                    safeAddress,
+                    invalidExtraData1,
+                    true,
+                    { gasLimit: "2000000" },
+                ),
+            ).to.be.reverted;
+            console.log("Test 1 passed: Random EOA address correctly reverted");
+
+            // Test 2: Pass a different valid comet (WETH comet) where user has no position - should revert
+            const wrongCometExtraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address"],
+                ["0x46e6b214b524310239732D51387075E0e70970bf"], // WETH Comet address
+            );
+
+            await expect(
+                moduleContract.exit(
+                    Protocols.COMPOUND,
+                    USDC_ADDRESS,
+                    debtBefore,
+                    [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                    safeAddress,
+                    wrongCometExtraData,
+                    true,
+                    { gasLimit: "2000000" },
+                ),
+            ).to.be.reverted;
+            console.log("Test 2 passed: Wrong comet (no position) correctly reverted");
+
+            // Test 3: Verify the correct comet address works
+            const validExtraData = compoundHelper.encodeExtraData(USDC_COMET_ADDRESS);
+            await moduleContract.exit(
+                Protocols.COMPOUND,
+                USDC_ADDRESS,
+                debtBefore,
+                [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                safeAddress,
+                validExtraData,
+                true,
+                { gasLimit: "2000000" },
+            );
+
+            const debtAfter = await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+            expect(debtAfter).to.equal(0);
+            console.log("Test 3 passed: Valid comet address works correctly");
+        });
+
         it("Should exit an Aave position successfully", async function () {
             const aaveHelper = new AaveV3Helper(signer);
 
@@ -597,6 +679,155 @@ describe("Safe wallet exit function tests", function () {
             ).to.be.revertedWith("Insufficient balance");
 
             console.log("Transaction correctly reverted with 'Insufficient balance'");
+        });
+
+        it("Should withdraw collateral only on Aave with debtAmount=0 after debt is fully repaid", async function () {
+            const aaveHelper = new AaveV3Helper(signer);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            // Fund the operator with ETH for gas
+            await fundSignerWithETH(operator.address, "0.01");
+
+            // Step 1: Create a position (supply collateral and borrow)
+            await supplyAndBorrow(Protocols.AAVE_V3);
+
+            // Approve aToken for SafeDebtManager to withdraw collateral
+            const aTokenAddress = await aaveHelper.getATokenAddress(cbETH_ADDRESS);
+            const aToken = new ethers.Contract(aTokenAddress, ERC20_ABI, signer);
+
+            const approveTransactionData: MetaTransactionData = {
+                to: aTokenAddress,
+                value: "0",
+                data: aToken.interface.encodeFunctionData("approve", [safeModuleAddress, ethers.parseEther("1")]),
+                operation: OperationType.Call,
+            };
+
+            const safeApproveTransaction = await safeWallet.createTransaction({
+                transactions: [approveTransactionData],
+            });
+
+            await safeWallet.executeTransaction(safeApproveTransaction);
+            console.log("Safe transaction: Aave aToken approved");
+
+            // Step 2: Get current debt amount
+            const debtBefore = await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+            console.log("Debt before repayment:", ethers.formatUnits(debtBefore, 6));
+            expect(debtBefore).to.be.gt(0);
+
+            // Step 3: Send debt tokens to Safe to cover the repayment
+            const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+            const repayAmount = debtBefore + ethers.parseUnits("1", 6); // Add buffer for interest
+            const transferTx = await debtContract.transfer(safeAddress, repayAmount);
+            await transferTx.wait();
+
+            // Step 4: Repay debt without withdrawing collateral
+            const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
+            const collateralAmount = await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+
+            const exitTx = await moduleContract.exit(
+                Protocols.AAVE_V3,
+                USDC_ADDRESS,
+                ethers.MaxUint256,
+                [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                safeAddress,
+                "0x",
+                false, // withdrawCollateral = false (only repay debt)
+                { gasLimit: "2000000" },
+            );
+            await exitTx.wait();
+            console.log("Debt repaid without withdrawing collateral");
+
+            // Step 5: Verify debt is now 0
+            const debtAfter = await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+            console.log("Debt after repayment:", ethers.formatUnits(debtAfter, 6));
+            expect(debtAfter).to.equal(0);
+
+            // Step 6: Verify collateral is still in protocol
+            const collateralInProtocol = await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+            console.log("Collateral still in protocol:", ethers.formatUnits(collateralInProtocol, 18));
+            expect(collateralInProtocol).to.be.gt(0);
+
+            // Step 7: Get collateral balance before withdrawal
+            const collateralContract = new ethers.Contract(cbETH_ADDRESS, ERC20_ABI, signer);
+            const collateralBalanceBefore = await collateralContract.balanceOf(safeAddress);
+
+            // Step 8: Call exit with debtAmount=0 and withdrawCollateral=true (collateral-only withdrawal)
+            // This should work on Aave V3 because we skip the repay path entirely
+            const withdrawTx = await moduleContract.exit(
+                Protocols.AAVE_V3,
+                USDC_ADDRESS,
+                0n, // debtAmount = 0 (collateral-only withdrawal)
+                [{ asset: cbETH_ADDRESS, amount: collateralInProtocol }],
+                safeAddress,
+                "0x",
+                true, // withdrawCollateral = true
+                { gasLimit: "2000000" },
+            );
+            const receipt = await withdrawTx.wait();
+            console.log("Collateral-only withdrawal on Aave completed successfully");
+
+            // Verify DebtPositionExited event was emitted
+            const exitEvent = receipt!.logs.find((log: any) => {
+                try {
+                    const parsed = moduleContract.interface.parseLog({
+                        topics: [...log.topics],
+                        data: log.data,
+                    });
+                    return parsed?.name === "DebtPositionExited";
+                } catch {
+                    return false;
+                }
+            });
+            expect(exitEvent).to.not.be.undefined;
+
+            // Step 9: Verify collateral was withdrawn to Safe
+            const collateralBalanceAfter = await collateralContract.balanceOf(safeAddress);
+            console.log("Collateral balance after withdrawal:", ethers.formatUnits(collateralBalanceAfter, 18));
+            expect(collateralBalanceAfter).to.be.gt(collateralBalanceBefore);
+
+            // Collateral in protocol should be 0 or very close to 0
+            const collateralInProtocolAfter = await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+            console.log("Collateral in protocol after withdrawal:", ethers.formatUnits(collateralInProtocolAfter, 18));
+            expect(collateralInProtocolAfter).to.be.closeTo(0n, ethers.parseEther("0.0001"));
+        });
+
+        it("Should revert exit with debtAmount=0 when withdrawCollateral=false", async function () {
+            const vaultAddress = FLUID_cbETH_USDC_VAULT;
+            const fluidHelper = new FluidHelper(signer);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            // Fund the operator with ETH for gas
+            await fundSignerWithETH(operator.address, "0.01");
+
+            // Step 1: Create a position
+            await supplyAndBorrowOnFluid();
+
+            const collateralAmount = await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+            const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
+            const extraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address", "uint256", "bool"],
+                [vaultAddress, nftId, true],
+            );
+
+            const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
+
+            // debtAmount=0 with withdrawCollateral=false should revert
+            await expect(
+                moduleContract.exit(
+                    Protocols.FLUID,
+                    USDC_ADDRESS,
+                    0n, // debtAmount = 0
+                    [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                    safeAddress,
+                    extraData,
+                    false, // withdrawCollateral = false
+                    { gasLimit: "2000000" },
+                ),
+            ).to.be.revertedWith("Debt amount below minimum threshold");
+
+            console.log("Transaction correctly reverted with 'Debt amount below minimum threshold'");
         });
     });
 });

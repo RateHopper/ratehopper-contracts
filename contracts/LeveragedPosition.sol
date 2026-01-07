@@ -174,7 +174,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         require(_collateralAsset != address(0), "Invalid collateral asset address");
         require(_debtAsset != address(0), "Invalid debt asset address");
 
-        IERC20(_collateralAsset).transferFrom(_onBehalfOf, address(this), _principleCollateralAmount);
+        IERC20(_collateralAsset).safeTransferFrom(_onBehalfOf, address(this), _principleCollateralAmount);
 
         IUniswapV3Pool pool = IUniswapV3Pool(_flashloanPool);
 

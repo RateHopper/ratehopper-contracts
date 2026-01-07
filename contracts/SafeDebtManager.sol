@@ -281,7 +281,12 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
             amountInToAssetDecimals = decoded.amount * (10 ** uint256(-decimalDifference));
         }
 
-        uint256 protocolFeeAmount = (amountInToAssetDecimals * protocolFee) / 10000;
+        // Use ceiling division for fee calculation to prevent fee abuse through transaction splitting
+        uint256 protocolFeeAmount = 0;
+        if (protocolFee > 0) {
+            uint256 numerator = amountInToAssetDecimals * protocolFee;
+            protocolFeeAmount = (numerator + 9999) / 10000; // Ceiling division
+        }
         uint256 amountInMax = decoded.paraswapParams.srcAmount == 0 ? amountInToAssetDecimals : decoded.paraswapParams.srcAmount;
         uint256 amountTotal = amountInMax + flashloanFee + protocolFeeAmount;
 
@@ -417,7 +422,8 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         bool _withdrawCollateral
     ) external nonReentrant onlyOwnerOrOperator(_onBehalfOf) whenNotPaused {
         require(_debtAsset != address(0), "Invalid debt asset address");
-        require(_debtAmount >= 10000, "Debt amount below minimum threshold");
+        // Allow _debtAmount == 0 only when withdrawing collateral (collateral-only withdrawal)
+        require(_debtAmount >= 10000 || (_debtAmount == 0 && _withdrawCollateral), "Debt amount below minimum threshold");
         if (_withdrawCollateral) {
             require(_collateralAssets.length > 0, "Must withdraw at least one collateral asset");
         }
@@ -425,32 +431,33 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         address handler = protocolHandlers[_protocol];
         require(handler != address(0), "Invalid protocol handler");
 
-        // Determine repay amount - if max, get actual debt from handler
-        uint256 repayAmount = _debtAmount;
-        if (_debtAmount == type(uint256).max) {
-            uint256 debtAmount = IProtocolHandler(handler).getDebtAmount(_debtAsset, _onBehalfOf, _extraData);
-            uint256 safeBalance = IERC20(_debtAsset).balanceOf(_onBehalfOf);
-            require(safeBalance >= debtAmount, "Insufficient balance");
-            repayAmount = debtAmount;
+        // Skip debt repayment if _debtAmount is 0 (collateral-only withdrawal)
+        if (_debtAmount > 0) {
+            // Determine repay amount - if max, get actual debt from handler
+            uint256 repayAmount = _debtAmount;
+            if (_debtAmount == type(uint256).max) {
+                uint256 debtAmount = IProtocolHandler(handler).getDebtAmount(_debtAsset, _onBehalfOf, _extraData);
+                uint256 safeBalance = IERC20(_debtAsset).balanceOf(_onBehalfOf);
+                require(safeBalance >= debtAmount, "Insufficient balance");
+                repayAmount = debtAmount;
+            }
+
+            bool transferSuccess = ISafe(_onBehalfOf).execTransactionFromModule(
+                _debtAsset,
+                0,
+                abi.encodeCall(IERC20.transfer, (address(this), repayAmount)),
+                ISafe.Operation.Call
+            );
+            require(transferSuccess, "Transfer debt tokens to contract failed");
+
+            (bool repaySuccess, ) = handler.delegatecall(
+                abi.encodeCall(
+                    IProtocolHandler.repay,
+                    (_debtAsset, repayAmount, _onBehalfOf, _extraData)
+                )
+            );
+            require(repaySuccess, "Repay failed");
         }
-
-        // Transfer debt tokens from Safe to this contract
-        bool transferSuccess = ISafe(_onBehalfOf).execTransactionFromModule(
-            _debtAsset,
-            0,
-            abi.encodeCall(IERC20.transfer, (address(this), repayAmount)),
-            ISafe.Operation.Call
-        );
-        require(transferSuccess, "Transfer debt tokens to contract failed");
-
-        // Repay debt
-        (bool repaySuccess, ) = handler.delegatecall(
-            abi.encodeCall(
-                IProtocolHandler.repay,
-                (_debtAsset, repayAmount, _onBehalfOf, _extraData)
-            )
-        );
-        require(repaySuccess, "Repay failed");
 
         if (_withdrawCollateral) {
             // Withdraw collateral assets
