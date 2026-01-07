@@ -19,6 +19,7 @@
         "deploy:all": "npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base --reset && npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base",
         "deploy:safe-debt-manager": "npx hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base",
         "deploy:leveraged-position": "npx hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base",
+        "deploy:safe-exec-wrapper": "npx hardhat ignition deploy ignition/modules/SafeExecTransactionWrapper.ts --network base",
         "deploy:zodiac-roles-proxy": "npx hardhat run ignition/deployRolesProxy.ts --network base",
         "deploy:timelock": "npx hardhat run ignition/deployTimelock.ts --network base",
         "verify:safe-debt-manager": "npx hardhat run scripts/verifySafeDebtManager.ts --network base",
