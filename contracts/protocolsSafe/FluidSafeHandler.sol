@@ -131,10 +131,6 @@ contract FluidSafeHandler is BaseProtocolHandler {
 
         // use balanceOf() because collateral amount is slightly decreased when switching from Fluid
         uint256 currentBalance = IERC20(collateralAssets[0].asset).balanceOf(address(this));
-        require(
-                currentBalance < (collateralAssets[0].amount * 101) / 100,
-                "Current balance is more than collateral amount + buffer"
-            );
 
         bytes memory returnData = _supplyCollateral(vaultAddress, nftId, collateralAssets[0].asset, currentBalance, onBehalfOf);
 

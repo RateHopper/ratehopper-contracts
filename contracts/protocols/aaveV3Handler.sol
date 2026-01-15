@@ -101,11 +101,6 @@ contract AaveV3Handler is BaseProtocolHandler {
 
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(address(this));
             require(currentBalance > 0, "No collateral balance available");
-            require(
-                currentBalance * 100 < collateralAssets[i].amount * 105,
-                "Current balance is more than collateral amount + buffer"
-            );
-
 
             IERC20(collateralAssets[i].asset).forceApprove(address(aaveV3Pool), currentBalance);
             aaveV3Pool.supply(collateralAssets[i].asset, currentBalance, onBehalfOf, 0);

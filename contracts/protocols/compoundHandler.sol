@@ -87,10 +87,6 @@ contract CompoundHandler is BaseProtocolHandler {
         for (uint256 i = 0; i < collateralAssets.length; i++) {
             require(registry.isWhitelisted(collateralAssets[i].asset), "Collateral asset is not whitelisted");
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(address(this));
-            require(
-                currentBalance * 100 < collateralAssets[i].amount * 101,
-                "Current balance is more than collateral amount + buffer"
-            );
             IERC20(collateralAssets[i].asset).forceApprove(address(cContract), currentBalance);
 
             // supply collateral
