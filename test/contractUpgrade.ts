@@ -16,20 +16,20 @@ describe.skip("Upgrade contract", function () {
     let deployedContractAddress: string;
 
     this.beforeEach(async () => {
-        const SafeModuleDebtSwap = await ethers.getContractFactory("SafeModuleDebtSwapUpgradeable");
+        const SafeDebtManager = await ethers.getContractFactory("SafeDebtManagerUpgradeable");
 
         // Prepare constructor arguments for initialize
         const protocols = [Protocols.AAVE_V3];
         const handlers = ["0x123"];
 
         // Deploy as upgradeable using UUPS proxy
-        const safeModuleDebtSwap = await upgrades.deployProxy(SafeModuleDebtSwap, [protocols, handlers], {
+        const safeDebtManager = await upgrades.deployProxy(SafeDebtManager, [protocols, handlers], {
             kind: "uups",
             initializer: "initialize",
         });
 
-        await safeModuleDebtSwap.deployed();
-        console.log("SafeModuleDebtSwap deployed to:", safeModuleDebtSwap.address);
+        await safeDebtManager.deployed();
+        console.log("SafeDebtManager deployed to:", safeDebtManager.address);
     });
 
     it("deploy contract", async function () {

@@ -30,28 +30,10 @@ const config: HardhatUserConfig = {
         ],
     },
     etherscan: {
-        apiKey: {
-            base: process.env.EXPLORER_KEY!,
-            baseSepolia: process.env.EXPLORER_KEY!,
-        },
-        customChains: [
-            {
-                network: "base",
-                chainId: 8453,
-                urls: {
-                    apiURL: "https://api.etherscan.io/v2/api?chainid=8453",
-                    browserURL: "https://basescan.org",
-                },
-            },
-            {
-                network: "baseSepolia",
-                chainId: 84532,
-                urls: {
-                    apiURL: "https://api.etherscan.io/v2/api?chainid=84532",
-                    browserURL: "https://sepolia.basescan.org",
-                },
-            },
-        ],
+        apiKey: process.env.EXPLORER_KEY!,
+    },
+    sourcify: {
+        enabled: true,
     },
     mocha: {
         timeout: 300000, // 5 minutes for memory-intensive tests
@@ -67,19 +49,19 @@ const config: HardhatUserConfig = {
             url: baseUrl,
             chainId: 8453,
             timeout: 10_000_000,
-            accounts: [process.env.PRIVATE_KEY!],
+            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
             gasPrice: "auto",
             gasMultiplier: 1.2,
         },
         baseSepolia: {
             url: "https://sepolia.base.org",
             chainId: 84532,
-            accounts: [process.env.PRIVATE_KEY!],
+            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
         },
         sepolia: {
             url: "https://eth-sepolia.public.blastapi.io",
             chainId: 11155111,
-            accounts: [process.env.PRIVATE_KEY!],
+            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
         },
         localhost: {
             url: "http://localhost:8545",

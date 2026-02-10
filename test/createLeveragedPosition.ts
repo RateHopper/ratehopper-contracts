@@ -7,20 +7,21 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { LeveragedPosition } from "../typechain-types";
 import morphoAbi from "../externalAbi/morpho/morpho.json";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { approve, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
+import { approve, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
 
 import {
     USDC_ADDRESS,
     USDbC_ADDRESS,
     cbETH_ADDRESS,
     TEST_ADDRESS,
+    TEST_FEE_BENEFICIARY_ADDRESS,
     Protocols,
     WETH_ADDRESS,
     DEFAULT_SUPPLY_AMOUNT,
     cbETH_ETH_POOL,
     cbBTC_ADDRESS,
     cbBTC_USDC_POOL,
-    USDC_hyUSD_POOL,
+    ETH_USDC_POOL,
 } from "./constants";
 
 import { AaveV3Helper } from "./protocols/aaveV3";
@@ -32,6 +33,7 @@ import {
     morphoMarket4Id,
     morphoMarket5Id,
     morphoMarket6Id,
+    morphoMarket7Id,
 } from "./protocols/morpho";
 import { deployLeveragedPositionContractFixture } from "./deployUtils";
 
@@ -49,6 +51,10 @@ describe("Create leveraged position", function () {
 
     this.beforeEach(async () => {
         impersonatedSigner = await ethers.getImpersonatedSigner(TEST_ADDRESS);
+
+        // Fund the impersonated account with ETH for gas fees
+        await fundSignerWithETH(TEST_ADDRESS);
+
         aaveV3Helper = new AaveV3Helper(impersonatedSigner);
         compoundHelper = new CompoundHelper(impersonatedSigner);
         morphoHelper = new MorphoHelper(impersonatedSigner);
@@ -77,6 +83,14 @@ describe("Create leveraged position", function () {
 
         const collateralDecimals = await getDecimals(collateralAddress);
         const debtDecimals = await getDecimals(debtAsset);
+
+        // Check debt token balance in contract before creating position
+        const debtToken = new ethers.Contract(debtAsset, ERC20_ABI, impersonatedSigner);
+        const debtBalanceBefore = await debtToken.balanceOf(deployedContractAddress);
+        console.log(
+            "Debt token balance in contract before creating position: ",
+            ethers.formatUnits(debtBalanceBefore, debtDecimals),
+        );
 
         switch (protocol) {
             case Protocols.AAVE_V3:
@@ -115,6 +129,7 @@ describe("Create leveraged position", function () {
             ethers.parseUnits(principleAmount.toString(), collateralDecimals),
             parsedTargetAmount,
             debtAsset,
+            impersonatedSigner.address, // _onBehalfOf parameter
             extraData,
             paraswapData,
         );
@@ -152,14 +167,242 @@ describe("Create leveraged position", function () {
         const collateralRemainingBalance = await collateralToken.balanceOf(deployedContractAddress);
         expect(Number(collateralRemainingBalance)).to.be.equal(0);
 
-        const debtToken = new ethers.Contract(debtAsset, ERC20_ABI, impersonatedSigner);
         const debtRemainingBalance = await debtToken.balanceOf(deployedContractAddress);
         expect(Number(debtRemainingBalance)).to.be.equal(0);
     }
 
+    async function deleveragePosition(
+        flashloanPool: string,
+        protocol: Protocols,
+        collateralAddress = cbETH_ADDRESS,
+        debtTokenAddress = USDC_ADDRESS,
+        morphoMarketId?: string,
+        partialClosePercentage: number = 100, // 100 = full close, 50 = half close, etc.
+    ) {
+        const Helper = protocolHelperMap.get(protocol)!;
+        const protocolHelper = new Helper(impersonatedSigner);
+
+        const debtAsset = debtTokenAddress || USDC_ADDRESS;
+
+        const collateralDecimals = await getDecimals(collateralAddress);
+        const debtDecimals = await getDecimals(debtAsset);
+
+        // Get current debt amount before closing
+        const debtAmountParameter = protocol === Protocols.MORPHO ? morphoMarketId! : debtAsset;
+        const debtAmountFull = await protocolHelper.getDebtAmount(debtAmountParameter);
+        console.log("Debt amount before closing: ", ethers.formatUnits(debtAmountFull, debtDecimals));
+
+        // Get current collateral amount before closing
+        let collateralAmountFull: bigint;
+        switch (protocol) {
+            case Protocols.AAVE_V3:
+                collateralAmountFull = await aaveV3Helper.getCollateralAmount(collateralAddress);
+
+                // Approve aToken to the contract for withdrawal
+                const aTokenAddress = await aaveV3Helper.getATokenAddress(collateralAddress);
+                await approve(aTokenAddress, deployedContractAddress, impersonatedSigner);
+                break;
+            case Protocols.COMPOUND:
+                collateralAmountFull = await compoundHelper.getCollateralAmount(
+                    cometAddressMap.get(debtAsset)!,
+                    collateralAddress,
+                );
+                break;
+            case Protocols.MORPHO:
+                collateralAmountFull = await morphoHelper.getCollateralAmount(morphoMarketId!);
+                break;
+            default:
+                throw new Error("Unsupported protocol");
+        }
+        console.log("Collateral amount before closing: ", ethers.formatUnits(collateralAmountFull, collateralDecimals));
+
+        // Calculate amounts based on partial close percentage
+        const debtAmountBefore = (debtAmountFull * BigInt(partialClosePercentage)) / 100n;
+        const collateralAmountBefore = (collateralAmountFull * BigInt(partialClosePercentage)) / 100n;
+
+        if (partialClosePercentage < 100) {
+            console.log(`Partial close (${partialClosePercentage}%):`);
+            console.log("  Debt to repay:", ethers.formatUnits(debtAmountBefore, debtDecimals));
+            console.log("  Collateral to withdraw:", ethers.formatUnits(collateralAmountBefore, collateralDecimals));
+        }
+
+        let extraData = "0x";
+        switch (protocol) {
+            case Protocols.COMPOUND:
+                extraData = compoundHelper.encodeExtraData(cometAddressMap.get(debtAsset)!);
+                break;
+            case Protocols.MORPHO:
+                // Fetch borrowShares for full repayment
+                const borrowShares = await morphoHelper.getBorrowShares(morphoMarketId!);
+                console.log("Morpho borrowShares for repayment:", borrowShares.toString());
+                extraData = morphoHelper.encodeExtraData(morphoMarketId!, borrowShares);
+                break;
+        }
+
+        // Add 1% buffer to debt amount to account for interest accrual
+        const debtAmountToPass = (debtAmountBefore * 101n) / 100n;
+
+        // Get paraswap data to swap collateral to debt asset
+        const paraswapData = await getParaswapData(
+            debtAsset,
+            collateralAddress,
+            deployedContractAddress,
+            debtAmountToPass,
+        );
+
+        // Get user's collateral token balance before closing
+        const collateralToken = new ethers.Contract(collateralAddress, ERC20_ABI, impersonatedSigner);
+        const userCollateralBalanceBefore = await collateralToken.balanceOf(impersonatedSigner.address);
+
+        // Log all parameters before calling deleveragePosition
+        console.log("=== deleveragePosition Parameters ===");
+        console.log("flashloanPool:", flashloanPool);
+        console.log("protocol:", protocol);
+        console.log("collateralAddress:", collateralAddress);
+        console.log("collateralAmountBefore:", ethers.formatUnits(collateralAmountBefore, collateralDecimals));
+        console.log("debtAsset:", debtAsset);
+        console.log("extraData:", extraData);
+        console.log("paraswapData.srcAmount:", paraswapData.srcAmount.toString());
+        console.log("paraswapData.swapData length:", paraswapData.swapData.length);
+        console.log("=========================================");
+
+        console.log("Original debt amount:", ethers.formatUnits(debtAmountBefore, debtDecimals));
+        console.log("Debt amount with 1% buffer:", ethers.formatUnits(debtAmountToPass, debtDecimals));
+
+        const debtAmountWithInterestBuffer = (debtAmountBefore * 102n) / 100n;
+
+        await myContract.deleveragePosition(
+            flashloanPool,
+            protocol,
+            collateralAddress,
+            collateralAmountBefore,
+            debtAsset,
+            debtAmountWithInterestBuffer,
+            impersonatedSigner.address,
+            extraData,
+            paraswapData,
+        );
+
+        // Verify debt and collateral amounts after closing
+        const debtAmountAfter = await protocolHelper.getDebtAmount(debtAmountParameter);
+        console.log("Debt amount after closing: ", ethers.formatUnits(debtAmountAfter, debtDecimals));
+
+        let collateralAmountAfter: bigint;
+        switch (protocol) {
+            case Protocols.AAVE_V3:
+                collateralAmountAfter = await aaveV3Helper.getCollateralAmount(collateralAddress);
+                break;
+            case Protocols.COMPOUND:
+                collateralAmountAfter = await compoundHelper.getCollateralAmount(
+                    cometAddressMap.get(debtAsset)!,
+                    collateralAddress,
+                );
+                break;
+            case Protocols.MORPHO:
+                collateralAmountAfter = await morphoHelper.getCollateralAmount(morphoMarketId!);
+                break;
+            default:
+                throw new Error("Unsupported protocol");
+        }
+        console.log("Collateral amount after closing: ", ethers.formatUnits(collateralAmountAfter, collateralDecimals));
+
+        if (partialClosePercentage === 100) {
+            // For full close, expect debt to be 0
+            expect(debtAmountAfter).to.equal(0);
+
+            // For full close, allow for dust amount in collateral
+            const dustTolerance = ethers.parseUnits("0.00001", collateralDecimals);
+            expect(collateralAmountAfter).to.be.lte(dustTolerance);
+        } else {
+            // For partial close, verify remaining amounts
+            const remainingPercentage = 100 - partialClosePercentage;
+            const expectedRemainingDebt = (debtAmountFull * BigInt(remainingPercentage)) / 100n;
+            const expectedRemainingCollateral = (collateralAmountFull * BigInt(remainingPercentage)) / 100n;
+
+            // Allow 5% tolerance for interest accrual and swap slippage
+            const debtTolerance = expectedRemainingDebt / 20n; // 5%
+            const collateralTolerance = expectedRemainingCollateral / 20n; // 5%
+
+            console.log("Expected remaining debt:", ethers.formatUnits(expectedRemainingDebt, debtDecimals));
+            console.log(
+                "Expected remaining collateral:",
+                ethers.formatUnits(expectedRemainingCollateral, collateralDecimals),
+            );
+
+            expect(debtAmountAfter).to.be.closeTo(expectedRemainingDebt, debtTolerance);
+            expect(collateralAmountAfter).to.be.closeTo(expectedRemainingCollateral, collateralTolerance);
+        }
+
+        // Verify user received collateral back
+        const userCollateralBalanceAfter = await collateralToken.balanceOf(impersonatedSigner.address);
+        const collateralReturned = userCollateralBalanceAfter - userCollateralBalanceBefore;
+        console.log("Collateral returned to user: ", ethers.formatUnits(collateralReturned, collateralDecimals));
+        expect(collateralReturned).to.be.gt(0);
+
+        // Verify no tokens left in contract
+        const collateralRemainingBalance = await collateralToken.balanceOf(deployedContractAddress);
+        expect(Number(collateralRemainingBalance)).to.be.equal(0);
+
+        const debtToken = new ethers.Contract(debtAsset, ERC20_ABI, impersonatedSigner);
+        const debtRemainingBalance = await debtToken.balanceOf(deployedContractAddress);
+        console.log("Debt remaining balance in contract: ", ethers.formatUnits(debtRemainingBalance, debtDecimals));
+        expect(Number(debtRemainingBalance)).to.be.equal(0);
+    }
+
     describe("on Aave", function () {
-        it("with cbETH collateral", async function () {
+        it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3);
+        });
+
+        it("create position with cbETH collateral and protocol fee", async function () {
+            // Set protocol fee
+            const signers = await ethers.getSigners();
+            const contractByOwner = await ethers.getContractAt(
+                "LeveragedPosition",
+                deployedContractAddress,
+                signers[0],
+            );
+            await contractByOwner.setProtocolFee(50); // 0.5%
+            await contractByOwner.setFeeBeneficiary(TEST_FEE_BENEFICIARY_ADDRESS);
+
+            // Get USDC contract for balance checks
+            const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, impersonatedSigner);
+
+            // Record fee beneficiary's USDC balance before
+            const beneficiaryUsdcBalanceBefore = await usdcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+
+            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
+
+            // Check fee beneficiary's USDC balance after
+            const beneficiaryUsdcBalanceAfter = await usdcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+
+            const feeReceived = beneficiaryUsdcBalanceAfter - beneficiaryUsdcBalanceBefore;
+
+            console.log("Protocol fee received (USDC):", ethers.formatUnits(feeReceived, 6));
+
+            // The fee should be greater than 0
+            expect(feeReceived).to.be.gt(0);
+        });
+
+        it("create and close position with WETH collateral", async function () {
+            await createLeveragedPosition(ETH_USDC_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
+        });
+
+        it("partial close position with cbETH collateral", async function () {
+            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            // Partially close 50% of the position
+            await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3, cbETH_ADDRESS, USDC_ADDRESS, undefined, 50);
         });
 
         it("with cbETH collateral and USDbC debt", async function () {
@@ -194,8 +437,12 @@ describe("Create leveraged position", function () {
     });
 
     describe("on Compoud", function () {
-        it("with cbETH collateral", async function () {
+        it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(cbETH_ETH_POOL, Protocols.COMPOUND);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await deleveragePosition(ETH_USDC_POOL, Protocols.COMPOUND);
         });
 
         // USDbC is no longer available in Compound
@@ -214,10 +461,18 @@ describe("Create leveraged position", function () {
                 targetAmount,
             );
         });
+
+        it("close position with WETH collateral", async function () {
+            await createLeveragedPosition(ETH_USDC_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await deleveragePosition(ETH_USDC_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
+        });
     });
 
     describe("on Morpho", function () {
-        it("with cbETH collateral", async function () {
+        it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(
                 cbETH_ETH_POOL,
                 Protocols.MORPHO,
@@ -227,6 +482,10 @@ describe("Create leveraged position", function () {
                 undefined,
                 morphoMarket1Id,
             );
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await deleveragePosition(ETH_USDC_POOL, Protocols.MORPHO, cbETH_ADDRESS, USDC_ADDRESS, morphoMarket1Id);
         });
 
         it("with cbETH collateral and protocol fee", async function () {
@@ -282,12 +541,12 @@ describe("Create leveraged position", function () {
 
         it("with USDC collateral and WETH debt", async function () {
             await createLeveragedPosition(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 Protocols.MORPHO,
                 USDC_ADDRESS,
                 WETH_ADDRESS,
-                1,
-                2,
+                10, // Increased from 1 to 10 USDC to avoid Paraswap edge case with small amounts
+                20, // Increased from 2 to 20 USDC
                 morphoMarket6Id,
             );
         });
@@ -311,12 +570,12 @@ describe("Create leveraged position", function () {
 
             // Create leveraged position with USDC collateral (6 decimals) and WETH debt (18 decimals)
             await createLeveragedPosition(
-                USDC_hyUSD_POOL,
+                ETH_USDC_POOL,
                 Protocols.MORPHO,
                 USDC_ADDRESS,
                 WETH_ADDRESS,
-                1,
-                2,
+                10,
+                20,
                 morphoMarket6Id,
             );
 
@@ -331,6 +590,22 @@ describe("Create leveraged position", function () {
 
             // Verify fee is reasonable (not too small due to decimal mismatch)
             expect(feeReceived).to.be.gt(ethers.parseUnits("0.000002", 18)); // At least 0.000002 WETH
+        });
+
+        it("close position with WETH collateral", async function () {
+            await createLeveragedPosition(
+                ETH_USDC_POOL,
+                Protocols.MORPHO,
+                WETH_ADDRESS,
+                USDC_ADDRESS,
+                undefined,
+                undefined,
+                morphoMarket7Id,
+            );
+
+            await time.increaseTo((await time.latest()) + 3600); // 1 hour
+
+            await deleveragePosition(ETH_USDC_POOL, Protocols.MORPHO, WETH_ADDRESS, USDC_ADDRESS, morphoMarket7Id);
         });
     });
 
