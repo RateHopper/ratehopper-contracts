@@ -374,19 +374,19 @@ struct ParaswapParams {
 1. Install dependencies:
 
 ```bash
-npm install
+yarn install
 ```
 
 2. Compile contracts:
 
 ```bash
-npm run compile
+yarn run compile
 ```
 
 3. Run tests:
 
 ```bash
-npm run test
+yarn test
 ```
 
 The project uses:
@@ -410,8 +410,112 @@ Comprehensive tests are available in the `/test` directory covering:
 Run tests with:
 
 ```bash
-npm run test
+yarn test
 ```
+
+## Deployment
+
+Make sure you complete the sections Environment Variables and Setup and Development and make sure all tests pass before deploying.
+
+### Hardhat Ignition
+
+We use [Hardhat Ignition](https://hardhat.org/ignition) as our deployment framework. All deployment logic lives in a single Ignition module at `ignition/modules/DeployAll.ts`.
+
+**Why Ignition over `hardhat run` scripts:**
+
+- **Automatic verification** — pass `--verify` to verify all contracts on the block explorer during deployment
+- **State tracking** — deployment state is persisted in `ignition/deployments/`. If a deployment fails midway, re-running the same command resumes from where it left off
+- **Resumability** — Ignition analyzes the dependency graph and can resume from any point if a deployment is interrupted
+- **Declarative** — contracts and their configuration calls are defined as a dependency graph, not imperative sequential code
+- **Reset support** — pass `--reset` to clear previous state and redeploy from scratch
+
+### Contract Dependency Graph
+
+The module deploys 9 contracts and runs 8 post-deployment configuration transactions. The dependency order is:
+
+```
+ProtocolRegistry (constructor: WETH_ADDRESS)
+├── batchSetTokenMContracts  (16 Moonwell token → mToken mappings)
+├── batchSetTokenCContracts  (5 Compound token → cToken mappings)
+├── setFluidVaultResolver    (Fluid vault resolver address)
+└── addToWhitelistBatch      (20 whitelisted tokens)
+    └── AaveV3Handler     (pool, dataProvider, uniswapFactory, registry)
+        └── CompoundHandler   (registry, uniswapFactory)
+            └── MorphoHandler     (morpho, uniswapFactory, registry)
+                └── FluidSafeHandler  (uniswapFactory, registry)
+                    └── MoonwellHandler   (comptroller, uniswapFactory, registry)
+                        └── DebtSwap              (uniswapFactory, protocols[], handlers[])
+                            ├── setParaswapAddresses
+                            └── SafeModuleDebtSwap    (uniswapFactory, protocols[], handlers[], pauser)
+                                ├── setParaswapAddresses
+                                ├── setoperator
+                                └── LeveragedPosition     (uniswapFactory, protocols[], handlers[])
+                                    └── setParaswapAddresses
+```
+
+**Key points:**
+- All deployments are chained sequentially to avoid nonce race conditions
+- All 5 handlers depend on the registry being fully configured (token mappings + whitelist set)
+- DebtSwap, SafeModuleDebtSwap, and LeveragedPosition each receive all 5 handler addresses
+- Post-deploy config calls (`setParaswapAddresses`, `setoperator`) are tracked by Ignition and won't re-run on resume
+
+### Deploy All Contracts
+
+Deploy everything in one command:
+
+```bash
+yarn hardhat ignition deploy ignition/modules/DeployAll.ts --network base --verify --reset
+```
+
+**Useful flags:**
+
+- `--verify` — automatically verify all contracts on Basescan after deployment
+- `--reset` — clear previous deployment state and redeploy from scratch
+- `--deployment-id <name>` — use a custom deployment ID (default: `chain-<chainId>`)
+
+### Verify Contracts
+
+The `--verify` flag may fail due to a known `hardhat-verify` v2.x bug with Etherscan's V2 API. Use the standalone verification script instead:
+
+```bash
+yarn hardhat run scripts/verifyAll.ts --network base
+```
+
+This script reads deployed addresses from `ignition/deployments/chain-<chainId>/deployed_addresses.json`, checks each contract's verification status via the Etherscan V2 API, and submits any unverified contracts. It handles the V2 API correctly and won't fail on already-verified contracts.
+
+### Deployment Output
+
+After a successful deployment, Ignition saves the deployed addresses and artifacts to:
+
+```
+ignition/deployments/<deployment-id>/
+├── deployed_addresses.json    # All contract addresses
+├── journal.jsonl              # Full deployment log
+└── artifacts/                 # Contract ABIs and build info
+```
+
+You can inspect deployed addresses with:
+
+```bash
+cat ignition/deployments/chain-8453/deployed_addresses.json
+```
+
+### Timelock Operations
+
+For critical operations (updating Paraswap address):
+
+```bash
+# Schedule operation (requires proposer role)
+TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
+yarn hardhat run scripts/timelock-update-paraswap.ts --network base
+
+# Wait 2 days, then execute
+EXECUTE=true TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
+yarn hardhat run scripts/timelock-update-paraswap.ts --network base
+```
+
+> **Note**: Updating the operator address (`setOperator`) also requires the timelock. Create a similar script based on `timelock-update-paraswap.ts` if needed.
+
 
 ## Security Features
 
