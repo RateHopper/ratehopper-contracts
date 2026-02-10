@@ -13,8 +13,9 @@ const AAVE_V3_DATA_PROVIDER_ADDRESS = "0xd82a47fdebB5bf5329b09441C3DaB4b5df2153A
 const MORPHO_ADDRESS = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
 const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
 
-const PAUSER_ADDRESS = "0x9E073c36F63BF1c611026fdA1fF6007A81932231";
-const OPERATOR_ADDRESS = "0xE549DE35b4D370B76c0A777653aD85Aef6eb8Fa4";
+const PAUSER_ADDRESS = process.env.PAUSER_ADDRESS!;
+const OPERATOR_ADDRESS = process.env.SAFE_OPERATOR_ADDRESS!;
+const ADMIN_ADDRESS = process.env.ADMIN_ADDRESS!;
 
 // Protocol enum values (must match contracts/Types.sol)
 const AAVE_V3 = 0;
@@ -187,12 +188,30 @@ export default buildModule("DeployAll", (m) => {
         allProtocols,
         allHandlers,
     ], { after: [safeModuleOperator] });
-    m.call(
+    const leveragedPositionParaswap = m.call(
         leveragedPosition,
         "setParaswapAddresses",
         [PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS],
         { id: "leveragedPosition_setParaswap" },
     );
+
+    // 7. Transfer ownership of all Ownable contracts to ADMIN_ADDRESS
+    const transferRegistry = m.call(registry, "transferOwnership", [ADMIN_ADDRESS], {
+        id: "registry_transferOwnership",
+        after: [leveragedPositionParaswap],
+    });
+    const transferDebtSwap = m.call(debtSwap, "transferOwnership", [ADMIN_ADDRESS], {
+        id: "debtSwap_transferOwnership",
+        after: [transferRegistry],
+    });
+    const transferSafeModule = m.call(safeModuleDebtSwap, "transferOwnership", [ADMIN_ADDRESS], {
+        id: "safeModule_transferOwnership",
+        after: [transferDebtSwap],
+    });
+    m.call(leveragedPosition, "transferOwnership", [ADMIN_ADDRESS], {
+        id: "leveragedPosition_transferOwnership",
+        after: [transferSafeModule],
+    });
 
     return {
         registry,

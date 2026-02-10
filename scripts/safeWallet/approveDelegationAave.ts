@@ -14,13 +14,13 @@ const tokenAddress = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 async function main() {
     const safeWallet = await Safe.init({
         provider: "https://base.llamarpc.com",
-        signer: process.env.MY_SAFE_OWNER_KEY!,
+        signer: process.env.SAFE_OWNER_PRIVATE_KEY!,
         safeAddress,
     });
 
     // Create provider and connect signer to it
     const provider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
-    const signer = new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY!, provider);
+    const signer = new ethers.Wallet(process.env.SAFE_OWNER_PRIVATE_KEY!, provider);
 
     const aaveV3ProtocolDataProvider = "0xd82a47fdebB5bf5329b09441C3DaB4b5df2153Ad";
     const protocolDataProvider = new ethers.Contract(aaveV3ProtocolDataProvider, aaveProtocolDataProviderAbi, signer);

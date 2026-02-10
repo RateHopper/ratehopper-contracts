@@ -926,7 +926,7 @@ describe("DebtSwap should switch", function () {
     });
 
     it.skip("test with real position", async function () {
-        const signer = new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY!, ethers.provider);
+        const signer = new ethers.Wallet(process.env.SAFE_OWNER_PRIVATE_KEY!, ethers.provider);
 
         const morphoContract = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, signer);
         await morphoContract.setAuthorization(deployedContractAddress, true);

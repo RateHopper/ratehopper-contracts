@@ -451,6 +451,10 @@ ProtocolRegistry (constructor: WETH_ADDRESS)
                                 ├── setoperator
                                 └── LeveragedPosition     (uniswapFactory, protocols[], handlers[])
                                     └── setParaswapAddresses
+                                        └── transferOwnership (ProtocolRegistry → ADMIN_ADDRESS)
+                                            └── transferOwnership (DebtSwap → ADMIN_ADDRESS)
+                                                └── transferOwnership (SafeModuleDebtSwap → ADMIN_ADDRESS)
+                                                    └── transferOwnership (LeveragedPosition → ADMIN_ADDRESS)
 ```
 
 **Key points:**
@@ -458,6 +462,8 @@ ProtocolRegistry (constructor: WETH_ADDRESS)
 - All 5 handlers depend on the registry being fully configured (token mappings + whitelist set)
 - DebtSwap, SafeModuleDebtSwap, and LeveragedPosition each receive all 5 handler addresses
 - Post-deploy config calls (`setParaswapAddresses`, `setoperator`) are tracked by Ignition and won't re-run on resume
+- Ownership of all 4 Ownable contracts is transferred to `ADMIN_ADDRESS` as the final step
+- `PAUSER_ADDRESS`, `SAFE_OPERATOR_ADDRESS`, and `ADMIN_ADDRESS` are read from `.env`
 
 ### Deploy All Contracts
 

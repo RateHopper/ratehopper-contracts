@@ -2,7 +2,7 @@ import { ethers, MaxUint256 } from "ethers";
 import dotenv from "dotenv";
 dotenv.config();
 const provider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
-const signer = new ethers.Wallet(process.env.MY_SAFE_OWNER_KEY!, provider);
+const signer = new ethers.Wallet(process.env.SAFE_OWNER_PRIVATE_KEY!, provider);
 import aaveProtocolDataProviderAbi from "../externalAbi/aaveV3/aaveProtocolDataProvider.json";
 import aaveDebtTokenJson from "../externalAbi/aaveV3/aaveDebtToken.json";
 import { cbETH_ADDRESS, cbETH_ETH_POOL, DEFAULT_SUPPLY_AMOUNT, Protocols, USDC_ADDRESS } from "../test/constants";

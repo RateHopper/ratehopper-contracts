@@ -23,7 +23,7 @@ async function main() {
         provider: base.rpcUrls.default.http[0],
         // provider: hardhat.rpcUrls.default.http[0],
         // signer: process.env.PRIVATE_KEY,
-        signer: process.env.MY_SAFE_OWNER_KEY!,
+        signer: process.env.SAFE_OWNER_PRIVATE_KEY!,
         predictedSafe,
     });
 
