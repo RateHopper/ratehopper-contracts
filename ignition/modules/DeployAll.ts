@@ -1,227 +1,211 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
+import {
+    getCTokenMappingArrays,
+    getMTokenMappingArrays,
+    UNISWAP_V3_FACTORY_ADDRESS,
+    FLUID_VAULT_RESOLVER,
+    AAVE_V3_POOL_ADDRESS,
+    AAVE_V3_DATA_PROVIDER_ADDRESS,
+    MORPHO_ADDRESS,
+    COMPTROLLER_ADDRESS,
+    PARASWAP_V6_CONTRACT_ADDRESS,
+    Protocol,
+    WETH_ADDRESS,
+    USDC_ADDRESS,
+    USDbC_ADDRESS,
+    cbETH_ADDRESS,
+    cbBTC_ADDRESS,
+    eUSD_ADDRESS,
+    MAI_ADDRESS,
+    DAI_ADDRESS,
+    sUSDS_ADDRESS,
+    AERO_ADDRESS,
+    wstETH_ADDRESS,
+    rETH_ADDRESS,
+    weETH_ADDRESS,
+    EURC_ADDRESS,
+    wrsETH_ADDRESS,
+    WELL_ADDRESS,
+    USDS_ADDRESS,
+    tBTC_ADDRESS,
+    LBTC_ADDRESS,
+    VIRTUAL_ADDRESS,
+} from "../../contractAddresses";
 
-// ============================================================
-// Constants
-// ============================================================
-const UNISWAP_V3_FACTORY_ADDRESS = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD";
-const WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
-const PARASWAP_V6_CONTRACT_ADDRESS = "0x6a000f20005980200259b80c5102003040001068";
-const FLUID_VAULT_RESOLVER = "0x1500d70d8551b828f8fb56fa739c977d113444df";
-
-const AAVE_V3_POOL_ADDRESS = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5";
-const AAVE_V3_DATA_PROVIDER_ADDRESS = "0xd82a47fdebB5bf5329b09441C3DaB4b5df2153Ad";
-const MORPHO_ADDRESS = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
-const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
-
-const PAUSER_ADDRESS = process.env.PAUSER_ADDRESS!;
-const OPERATOR_ADDRESS = process.env.SAFE_OPERATOR_ADDRESS!;
-const ADMIN_ADDRESS = process.env.ADMIN_ADDRESS!;
-
-// Protocol enum values (must match contracts/Types.sol)
-const AAVE_V3 = 0;
-const COMPOUND = 1;
-const MORPHO = 2;
-const FLUID = 3;
-const MOONWELL = 4;
-
-// ============================================================
-// Moonwell token mappings
-// ============================================================
-const mTokenAddresses = [
-    "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC
-    "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", // DAI
-    "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22", // cbETH
-    "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", // cbBTC
-    "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452", // wstETH
-    "0xB6fe221Fe9EeF5aBa221c348bA20A1Bf5e73624c", // rETH
-    "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A", // weETH
-    "0x940181a94a35a4569e4529a3cdfb74e38fd98631", // AERO
-    "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42", // EURC
-    "0xedfa23602d0ec14714057867a78d01e94176bea0", // wrsETH
-    "0xA88594D404727625A9437C3f886C7643872296AE", // WELL
-    "0x820c137fa70c8691f0e44dc420a5e53c168921dc", // USDS
-    "0x236aa50979d5f3de3bd1eeb40e81137f22ab794b", // tBTC
-    "0xecAc9C5F704e954931349Da37F60E39f515c11c1", // LBTC
-    "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", // VIRTUAL
-    "0x4200000000000000000000000000000000000006", // WETH
-];
-const mContractAddresses = [
-    "0xedc817a28e8b93b03976fbd4a3ddbc9f7d176c22", // mUSDC
-    "0x73b06d8d18de422e269645eace15400de7462417", // mDAI
-    "0x3bf93770f2d4a794c3d9ebefbaebae2a8f09a5e5", // mcbETH
-    "0xf877acafa28c19b96727966690b2f44d35ad5976", // mcbBTC
-    "0x627Fe393Bc6EdDA28e99AE648fD6fF362514304b", // mwstETH
-    "0xcb1dacd30638ae38f2b94ea64f066045b7d45f44", // mrETH
-    "0xb8051464C8c92209C92F3a4CD9C73746C4c3CFb3", // mWeETH
-    "0x73902f619CEB9B31FD8EFecf435CbDf89E369Ba6", // mAERO
-    "0xb682c840B5F4FC58B20769E691A6fa1305A501a2", // mEURC
-    "0xfC41B49d064Ac646015b459C522820DB9472F4B5", // mwrsETH
-    "0xdC7810B47eAAb250De623F0eE07764afa5F71ED1", // mWELL
-    "0xb6419c6C2e60c4025D6D06eE4F913ce89425a357", // mUSDS
-    "0x9A858ebfF1bEb0D3495BB0e2897c1528eD84A218", // mtBTC
-    "0x10fF57877b79e9bd949B3815220eC87B9fc5D2ee", // mLBTC
-    "0xdE8Df9d942D78edE3Ca06e60712582F79CFfFC64", // mVIRTUAL
-    "0x628ff693426583D9a7FB391E54366292F509D457", // mWETH
-];
-
-// ============================================================
-// Compound token mappings
-// ============================================================
-const cTokenAddresses = [
-    "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC
-    "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", // USDbC
-    "0x4200000000000000000000000000000000000006", // WETH
-    "0x940181a94a35a4569e4529a3cdfb74e38fd98631", // AERO
-    "0x820c137fa70c8691f0e44dc420a5e53c168921dc", // USDS
-];
-const cContractAddresses = [
-    "0xb125E6687d4313864e53df431d5425969c15Eb2F", // USDC Comet
-    "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf", // USDbC Comet
-    "0x46e6b214b524310239732D51387075E0e70970bf", // WETH Comet
-    "0x784efeB622244d2348d4F2522f8860B96fbEcE89", // AERO Comet
-    "0x2c776041CCFe903071AF44aa147368a9c8EEA518", // USDS Comet
-];
-
-// ============================================================
-// Whitelist tokens
-// ============================================================
-const whitelistTokens = [
-    "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC
-    "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22", // cbETH
-    "0x4200000000000000000000000000000000000006", // WETH
-    "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", // USDbC
-    "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", // cbBTC
-    "0xCfA3Ef56d303AE4fAabA0592388F19d7C3399FB4", // eUSD
-    "0xbf1aeA8670D2528E08334083616dD9C5F3B087aE", // MAI
-    "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", // DAI
-    "0x5875eee11cf8398102fdad704c9e96607675467a", // sUSDS
-    "0x940181a94a35a4569e4529a3cdfb74e38fd98631", // AERO
-    "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452", // wstETH
-    "0xB6fe221Fe9EeF5aBa221c348bA20A1Bf5e73624c", // rETH
-    "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A", // weETH
-    "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42", // EURC
-    "0xedfa23602d0ec14714057867a78d01e94176bea0", // wrsETH
-    "0xA88594D404727625A9437C3f886C7643872296AE", // WELL
-    "0x820c137fa70c8691f0e44dc420a5e53c168921dc", // USDS
-    "0x236aa50979d5f3de3bd1eeb40e81137f22ab794b", // tBTC
-    "0xecAc9C5F704e954931349Da37F60E39f515c11c1", // LBTC
-    "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", // VIRTUAL
-];
-
-// ============================================================
-// Module
-// ============================================================
+/**
+ * Single unified deployment module that deploys ALL contracts in one command.
+ *
+ * All steps are chained sequentially via `after` to avoid nonce race conditions.
+ *
+ * Deployment order:
+ *  1. TimelockController (2-day delay)
+ *  2. ProtocolRegistry (with timelock, operator, paraswap set in constructor)
+ *  3. Handlers: AaveV3 → Compound → Morpho → FluidSafe → Moonwell
+ *  4. Registry config: Moonwell mappings → Compound mappings → Fluid resolver → Whitelist
+ *  5. Registry admin transfer: grant ADMIN_ADDRESS → revoke deployer
+ *  6. SafeDebtManager → transferOwnership to ADMIN_ADDRESS
+ *  7. LeveragedPosition → transferOwnership to ADMIN_ADDRESS
+ *  8. SafeExecTransactionWrapper
+ *
+ * Environment Variables Required:
+ *  - ADMIN_ADDRESS:          Admin / timelock proposer+executor / final owner
+ *  - SAFE_OPERATOR_ADDRESS:  Operator address stored in ProtocolRegistry
+ *  - PAUSER_ADDRESS:         Can pause/unpause SafeDebtManager and LeveragedPosition
+ *  - DEPLOYER_PRIVATE_KEY:   Deployer private key (in hardhat.config.ts)
+ *
+ * Usage:
+ *  npx hardhat ignition deploy ignition/modules/DeployAll.ts --network base --verify --reset
+ */
 export default buildModule("DeployAll", (m) => {
-    // 1. Deploy ProtocolRegistry
-    const registry = m.contract("ProtocolRegistry", [WETH_ADDRESS]);
+    // ── Validate env vars ──────────────────────────────────────────────
+    const adminAddress = process.env.ADMIN_ADDRESS;
+    if (!adminAddress) {
+        throw new Error("Please set ADMIN_ADDRESS environment variable");
+    }
+    const operatorAddress = process.env.SAFE_OPERATOR_ADDRESS;
+    if (!operatorAddress) {
+        throw new Error("Please set SAFE_OPERATOR_ADDRESS environment variable");
+    }
+    const pauserAddress = process.env.PAUSER_ADDRESS;
+    if (!pauserAddress) {
+        throw new Error("Please set PAUSER_ADDRESS environment variable");
+    }
 
-    // 2. Configure ProtocolRegistry
-    const setMoonwell = m.call(registry, "batchSetTokenMContracts", [mTokenAddresses, mContractAddresses], {
+    const deployer = m.getAccount(0);
+    const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+    const DEFAULT_ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+    // ── 1. TimelockController ──────────────────────────────────────────
+    const MIN_DELAY = 2 * 24 * 60 * 60; // 2 days
+    const timelock = m.contract("TimelockController", [
+        MIN_DELAY,
+        [adminAddress], // proposers
+        [adminAddress], // executors
+        ZERO_ADDRESS, // no admin
+    ]);
+
+    // ── 2. ProtocolRegistry ────────────────────────────────────────────
+    const registry = m.contract(
+        "ProtocolRegistry",
+        [WETH_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, deployer, timelock, operatorAddress, PARASWAP_V6_CONTRACT_ADDRESS],
+        { after: [timelock] },
+    );
+
+    // ── 3. Handlers (sequential) ──────────────────────────────────────
+    const aaveV3Handler = m.contract(
+        "AaveV3Handler",
+        [AAVE_V3_POOL_ADDRESS, AAVE_V3_DATA_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry],
+        { after: [registry] },
+    );
+
+    const compoundHandler = m.contract("CompoundHandler", [registry, UNISWAP_V3_FACTORY_ADDRESS], {
+        after: [aaveV3Handler],
+    });
+
+    const morphoHandler = m.contract("MorphoHandler", [MORPHO_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry], {
+        after: [compoundHandler],
+    });
+
+    const fluidSafeHandler = m.contract("FluidSafeHandler", [UNISWAP_V3_FACTORY_ADDRESS, registry], {
+        after: [morphoHandler],
+    });
+
+    const moonwellHandler = m.contract("MoonwellHandler", [COMPTROLLER_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry], {
+        after: [fluidSafeHandler],
+    });
+
+    // ── 4. Registry configuration ─────────────────────────────────────
+    const [mTokens, mContracts] = getMTokenMappingArrays();
+    const setMoonwellMappings = m.call(registry, "batchSetTokenMContracts", [mTokens, mContracts], {
         id: "registry_setMoonwellMappings",
+        after: [moonwellHandler],
     });
-    const setCompound = m.call(registry, "batchSetTokenCContracts", [cTokenAddresses, cContractAddresses], {
+
+    const [cTokens, cContracts] = getCTokenMappingArrays();
+    const setCompoundMappings = m.call(registry, "batchSetTokenCContracts", [cTokens, cContracts], {
         id: "registry_setCompoundMappings",
-        after: [setMoonwell],
+        after: [setMoonwellMappings],
     });
+
     const setFluidResolver = m.call(registry, "setFluidVaultResolver", [FLUID_VAULT_RESOLVER], {
         id: "registry_setFluidVaultResolver",
-        after: [setCompound],
+        after: [setCompoundMappings],
     });
-    const setWhitelist = m.call(registry, "addToWhitelistBatch", [whitelistTokens], {
+
+    const whitelistTokens = [
+        USDC_ADDRESS,
+        cbETH_ADDRESS,
+        WETH_ADDRESS,
+        USDbC_ADDRESS,
+        cbBTC_ADDRESS,
+        eUSD_ADDRESS,
+        MAI_ADDRESS,
+        DAI_ADDRESS,
+        sUSDS_ADDRESS,
+        AERO_ADDRESS,
+        wstETH_ADDRESS,
+        rETH_ADDRESS,
+        weETH_ADDRESS,
+        EURC_ADDRESS,
+        wrsETH_ADDRESS,
+        WELL_ADDRESS,
+        USDS_ADDRESS,
+        tBTC_ADDRESS,
+        LBTC_ADDRESS,
+        VIRTUAL_ADDRESS,
+    ];
+    const addToWhitelist = m.call(registry, "addToWhitelistBatch", [whitelistTokens], {
         id: "registry_addToWhitelistBatch",
         after: [setFluidResolver],
     });
 
-    // 3. Deploy Handlers (chained sequentially to avoid nonce race conditions)
-    const aaveV3Handler = m.contract(
-        "AaveV3Handler",
-        [AAVE_V3_POOL_ADDRESS, AAVE_V3_DATA_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry],
-        { after: [setWhitelist] },
-    );
-    const compoundHandler = m.contract("CompoundHandler", [registry, UNISWAP_V3_FACTORY_ADDRESS], {
-        after: [aaveV3Handler],
-    });
-    const morphoHandler = m.contract("MorphoHandler", [MORPHO_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry], {
-        after: [compoundHandler],
-    });
-    const fluidSafeHandler = m.contract("FluidSafeHandler", [UNISWAP_V3_FACTORY_ADDRESS, registry], {
-        after: [morphoHandler],
-    });
-    const moonwellHandler = m.contract(
-        "MoonwellHandler",
-        [COMPTROLLER_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry],
-        { after: [fluidSafeHandler] },
-    );
-
-    const allProtocols = [AAVE_V3, COMPOUND, MORPHO, FLUID, MOONWELL];
-    const allHandlers = [aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler];
-
-    // 4. Deploy DebtSwap
-    const debtSwap = m.contract("DebtSwap", [UNISWAP_V3_FACTORY_ADDRESS, allProtocols, allHandlers], {
-        after: [moonwellHandler],
-    });
-    const debtSwapParaswap = m.call(debtSwap, "setParaswapAddresses", [PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS], {
-        id: "debtSwap_setParaswap",
+    // ── 5. Transfer registry admin role ────────────────────────────────
+    const grantAdminRole = m.call(registry, "grantRole", [DEFAULT_ADMIN_ROLE, adminAddress], {
+        id: "registry_grantAdminToFinalAdmin",
+        after: [addToWhitelist],
     });
 
-    // 5. Deploy SafeModuleDebtSwap
-    const safeModuleDebtSwap = m.contract("SafeModuleDebtSwap", [
-        UNISWAP_V3_FACTORY_ADDRESS,
-        allProtocols,
-        allHandlers,
-        PAUSER_ADDRESS,
-    ], { after: [debtSwapParaswap] });
-    const safeModuleParaswap = m.call(
-        safeModuleDebtSwap,
-        "setParaswapAddresses",
-        [PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS],
-        { id: "safeModule_setParaswap" },
-    );
-    const safeModuleOperator = m.call(safeModuleDebtSwap, "setoperator", [OPERATOR_ADDRESS], {
-        id: "safeModule_setOperator",
-        after: [safeModuleParaswap],
+    const revokeDeployerRole = m.call(registry, "revokeRole", [DEFAULT_ADMIN_ROLE, deployer], {
+        id: "registry_revokeAdminFromDeployer",
+        after: [grantAdminRole],
     });
 
-    // 6. Deploy LeveragedPosition
-    const leveragedPosition = m.contract("LeveragedPosition", [
-        UNISWAP_V3_FACTORY_ADDRESS,
-        allProtocols,
-        allHandlers,
-    ], { after: [safeModuleOperator] });
-    const leveragedPositionParaswap = m.call(
-        leveragedPosition,
-        "setParaswapAddresses",
-        [PARASWAP_V6_CONTRACT_ADDRESS, PARASWAP_V6_CONTRACT_ADDRESS],
-        { id: "leveragedPosition_setParaswap" },
-    );
+    // ── 6. SafeDebtManager ─────────────────────────────────────────────
+    const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
+    const handlers = [aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler];
 
-    // 7. Transfer ownership of all Ownable contracts to ADMIN_ADDRESS
-    const transferRegistry = m.call(registry, "transferOwnership", [ADMIN_ADDRESS], {
-        id: "registry_transferOwnership",
-        after: [leveragedPositionParaswap],
+    const safeDebtManager = m.contract("SafeDebtManager", [registry, protocols, handlers, pauserAddress], {
+        after: [revokeDeployerRole],
     });
-    const transferDebtSwap = m.call(debtSwap, "transferOwnership", [ADMIN_ADDRESS], {
-        id: "debtSwap_transferOwnership",
-        after: [transferRegistry],
+
+    const safeDebtManagerTransfer = m.call(safeDebtManager, "transferOwnership", [adminAddress], {
+        id: "safeDebtManager_transferOwnership",
     });
-    const transferSafeModule = m.call(safeModuleDebtSwap, "transferOwnership", [ADMIN_ADDRESS], {
-        id: "safeModule_transferOwnership",
-        after: [transferDebtSwap],
+
+    // ── 7. LeveragedPosition ───────────────────────────────────────────
+    const leveragedPosition = m.contract("LeveragedPosition", [registry, protocols, handlers, pauserAddress], {
+        after: [safeDebtManagerTransfer],
     });
-    m.call(leveragedPosition, "transferOwnership", [ADMIN_ADDRESS], {
+
+    const leveragedPositionTransfer = m.call(leveragedPosition, "transferOwnership", [adminAddress], {
         id: "leveragedPosition_transferOwnership",
-        after: [transferSafeModule],
+    });
+
+    // ── 8. SafeExecTransactionWrapper ──────────────────────────────────
+    const safeExecTransactionWrapper = m.contract("SafeExecTransactionWrapper", [], {
+        after: [leveragedPositionTransfer],
     });
 
     return {
+        timelock,
         registry,
         aaveV3Handler,
         compoundHandler,
         morphoHandler,
         fluidSafeHandler,
         moonwellHandler,
-        debtSwap,
-        safeModuleDebtSwap,
+        safeDebtManager,
         leveragedPosition,
+        safeExecTransactionWrapper,
     };
 });

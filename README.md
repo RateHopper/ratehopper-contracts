@@ -218,52 +218,75 @@ yarn test
 
 ## Deployment
 
-The contracts use Hardhat Ignition for declarative deployments. Make sure you complete the sections Environment Variables and Setup and Development and make sure all tests pass before deploying.
+The contracts use [Hardhat Ignition](https://hardhat.org/ignition) for declarative deployments. Make sure you complete the sections Environment Variables and Setup and Development and make sure all tests pass before deploying.
 
-### 1. Deploy Full Infrastructure (Recommended)
+### How Hardhat Ignition Works
+
+Hardhat Ignition is a declarative deployment framework. Instead of writing imperative scripts that send transactions one by one, you define a **module** that describes _what_ to deploy and the dependencies between steps. Ignition then:
+
+- **Resolves the dependency graph** and executes steps in the correct order
+- **Tracks state** in `ignition/deployments/chain-<chainId>/` so deployments can be resumed if interrupted
+- **Records constructor args** in `journal.jsonl` for reproducibility and verification
+- **Supports `--verify`** to automatically submit contracts to Etherscan after deployment
+- **Supports `--reset`** to wipe previous state and redeploy from scratch
+
+All contracts are defined in a single module at `ignition/modules/DeployAll.ts`. Every step is chained sequentially via `after` dependencies to avoid nonce race conditions.
+
+### Deploy All Contracts
 
 Deploy everything in one command:
 
 ```bash
-yarn hardhat ignition deploy ignition/modules/SharedInfrastructure.ts --network base --verify --reset
+yarn deploy
+# or equivalently:
+npx hardhat ignition deploy ignition/modules/DeployAll.ts --network base --verify --reset
 ```
 
-This deploys:
+This deploys all contracts sequentially in a single transaction chain:
 
-- TimelockController (2-day delay)
-- ProtocolRegistry (with timelock configured)
-- All protocol handlers (Aave, Compound, Morpho, Fluid, Moonwell)
-- Token mappings and whitelists
+1. **TimelockController** (2-day delay)
+2. **ProtocolRegistry** (with timelock, operator, paraswap configured)
+3. **Handlers**: AaveV3 → Compound → Morpho → FluidSafe → Moonwell
+4. **Registry config**: token mappings, Fluid resolver, whitelist
+5. **Admin transfer**: grant `ADMIN_ADDRESS` admin role, revoke deployer
+6. **SafeDebtManager** → `transferOwnership` to `ADMIN_ADDRESS`
+7. **LeveragedPosition** → `transferOwnership` to `ADMIN_ADDRESS`
+8. **SafeExecTransactionWrapper**
 
-### 2. Deploy Additional Modules
+### Deployment Output
 
-After infrastructure is deployed, deploy the Safe modules:
+After deployment, Ignition saves state to:
+
+```
+ignition/deployments/<deployment-id>/
+├── deployed_addresses.json    # All contract addresses
+├── journal.jsonl              # Full deployment log (includes constructor args)
+└── artifacts/                 # Contract ABIs and build info
+```
+
+Inspect deployed addresses:
 
 ```bash
-# Deploy SafeDebtManager
-yarn hardhat ignition deploy ignition/modules/SafeDebtManager.ts --network base --verify
-
-# Deploy LeveragedPosition
-yarn hardhat ignition deploy ignition/modules/LeveragedPosition.ts --network base --verify
+cat ignition/deployments/chain-8453/deployed_addresses.json
 ```
 
-### Verification Scripts
+### Contract Verification
 
-Verify individual contracts on block explorers:
+The `--verify` flag on `yarn deploy` may fail due to a known `hardhat-verify` v2.x bug with Etherscan's V2 API (the plugin's GET requests strip the `chainid` parameter). Use the standalone verification script instead:
 
 ```bash
-# Verify TimelockController
-TIMELOCK_ADDRESS=0x... yarn hardhat run scripts/verifyTimelock.ts --network base
-
-# Verify ProtocolRegistry
-yarn hardhat run scripts/verifyProtocolRegistry.ts --network base
-
-# Verify SafeDebtManager
-yarn hardhat run scripts/verifySafeDebtManager.ts --network base
-
-# Verify LeveragedPosition
-yarn hardhat run scripts/verifyLeveragedPosition.ts --network base
+yarn verify
+# or equivalently:
+npx hardhat run scripts/verifyAll.ts --network base
 ```
+
+This script:
+
+1. **Reads** deployed addresses from `ignition/deployments/chain-<chainId>/deployed_addresses.json`
+2. **Reads** constructor args from `journal.jsonl` (no hardcoding needed)
+3. **Checks** each contract via the Etherscan V2 API (skips already-verified)
+4. **Submits** unverified contracts via `hardhat verify`
+5. **Polls** the V2 API with retries (5 attempts, 10s apart) to confirm verification despite the plugin bug
 
 ### Timelock Operations
 
