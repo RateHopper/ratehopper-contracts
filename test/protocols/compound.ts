@@ -32,7 +32,7 @@ export const cometAddressMap = new Map<string, string>([
 ]);
 
 export class CompoundHelper {
-    constructor(private signer: HardhatEthersSigner) {}
+    constructor(private signer: HardhatEthersSigner | any) {}
 
     async getDebtAmount(tokenAddress: string, userAddress?: string): Promise<bigint> {
         const comet = new ethers.Contract(cometAddressMap.get(tokenAddress)!, cometAbi, this.signer);
@@ -83,7 +83,11 @@ export class CompoundHelper {
         return ethers.AbiCoder.defaultAbiCoder().encode(["address"], [cometAddress]);
     }
 
-    async getSupplyAndBorrowTxdata(debtTokenAddress): Promise<MetaTransactionData[]> {
+    async getSupplyAndBorrowTxdata(
+        debtTokenAddress,
+        collateralTokenAddress = cbETH_ADDRESS,
+        customBorrowAmount?: bigint,
+    ): Promise<MetaTransactionData[]> {
         const cbETHContract = new ethers.Contract(cbETH_ADDRESS, ERC20_ABI, defaultProvider);
         const approveTransactionData: MetaTransactionData = {
             to: cbETH_ADDRESS,

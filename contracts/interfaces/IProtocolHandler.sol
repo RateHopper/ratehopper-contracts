@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
 import "../Types.sol";
@@ -38,4 +38,6 @@ interface IProtocolHandler {
     function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external;
 
     function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external;
+
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external;
 }

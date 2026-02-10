@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {IERC20} from "./dependencies/IERC20.sol";
-import {GPv2SafeERC20} from "./dependencies/GPv2SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
 import "./Types.sol";
@@ -15,7 +16,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 
 contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUPSUpgradeable {
-    using GPv2SafeERC20 for IERC20;
+    using SafeERC20 for IERC20;
     uint8 public protocolFee;
     address public feeBeneficiary;
     address public operator;
@@ -162,8 +163,8 @@ contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUP
 
         // suppose either of fee0 or fee1 is 0
         uint flashloanFeeOriginal = fee0 + fee1;
-        uint8 fromAssetDecimals = IERC20(decoded.fromAsset).decimals();
-        uint8 toAssetDecimals = IERC20(decoded.toAsset).decimals();
+        uint8 fromAssetDecimals = IERC20Metadata(decoded.fromAsset).decimals();
+        uint8 toAssetDecimals = IERC20Metadata(decoded.toAsset).decimals();
         uint8 conversionFactor = (fromAssetDecimals > toAssetDecimals) ? (fromAssetDecimals - toAssetDecimals) : 0;
         uint flashloanFee = flashloanFeeOriginal / (10 ** conversionFactor);
 

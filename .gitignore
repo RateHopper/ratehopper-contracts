@@ -2,6 +2,11 @@ node_modules
 .env
 .idea/*
 
+# Yarn
+.yarn/install-state.gz
+.yarn/cache
+.pnp.*
+
 # Hardhat files
 /cache
 /artifacts
@@ -18,3 +23,5 @@ node_modules
 ignition/deployments/chain-*
 /.vscode
 yarn-error.log
+eth-sdk/abis/*
+.claude

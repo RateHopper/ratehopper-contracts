@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
 import "../interfaces/safe/ISafe.sol";
 import "../Types.sol";
-import {GPv2SafeERC20} from "../dependencies/GPv2SafeERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IPoolV3} from "../interfaces/aaveV3/IPoolV3.sol";
-import {IERC20} from "../dependencies/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {DataTypes} from "../interfaces/aaveV3/DataTypes.sol";
 import "../interfaces/fluid/IFluidVault.sol";
 import "../interfaces/fluid/IFluidVaultResolver.sol";
@@ -13,40 +13,52 @@ import "../interfaces/IProtocolHandler.sol";
 import {Structs} from "../dependencies/fluid/structs.sol";
 import "../protocols/BaseProtocolHandler.sol";
 import "../ProtocolRegistry.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../interfaces/IWETH9.sol";
 
-contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
-    using GPv2SafeERC20 for IERC20;
+contract FluidSafeHandler is BaseProtocolHandler {
+    using SafeERC20 for IERC20;
 
-    // The registry contract holds configuration data including the Fluid vault resolver address and WETH address
+    // Note: The registry contract holds configuration data including the Fluid vault resolver address and WETH address
     // This design allows the resolver to be updated without redeploying handlers
     // and works correctly with delegatecall since registry is immutable
-    ProtocolRegistry public immutable registry;
 
-    constructor(address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY) {
-        registry = ProtocolRegistry(_REGISTRY_ADDRESS);
+    constructor(address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
     }
 
     function getDebtAmount(
-        address asset,
+        address /* asset */,
         address onBehalfOf,
         bytes calldata fromExtraData
     ) public view returns (uint256) {
-        (address vaultAddress, ) = abi.decode(fromExtraData, (address, uint256));
+        (address vaultAddress, uint256 nftId) = abi.decode(fromExtraData, (address, uint256));
 
         IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+        uint256 debtAmount;
 
-        (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
-            .positionsByUser(onBehalfOf);
-        for (uint256 i = 0; i < vaultsData_.length; i++) {
-            if (vaultsData_[i].vault == vaultAddress) {
-                uint256 debtAmount = userPositions_[i].borrow;
-                // add tiny amount buffer to avoid repay amount is slightly increased and revert
-                return (debtAmount * 100001) / 100000;
+        // If nftId is provided, use positionByNftId for more efficient lookup
+        if (nftId > 0) {
+            (Structs.UserPosition memory userPosition, ) = resolver.positionByNftId(nftId);
+            debtAmount = userPosition.borrow;
+        } else {
+            // Fallback to positionsByUser if nftId is not provided
+            (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
+                .positionsByUser(onBehalfOf);
+
+            bool vaultFound = false;
+            for (uint256 i = 0; i < vaultsData_.length; i++) {
+                if (vaultsData_[i].vault == vaultAddress) {
+                    debtAmount = userPositions_[i].borrow;
+                    vaultFound = true;
+                    break;
+                }
             }
+            require(vaultFound, "Vault not found");
         }
-        revert("Vault not found");
+
+        // Add tiny amount buffer to avoid repay amount slightly increasing and causing revert
+        uint256 bufferAmount = (debtAmount * 10005) / 10000;  // 0.05% buffer
+        uint256 fixedBuffer = 1000;  // Fixed 1000 wei buffer
+        return bufferAmount + fixedBuffer;
     }
 
     function switchIn(
@@ -58,7 +70,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         CollateralAsset[] memory collateralAssets,
         bytes calldata fromExtraData,
         bytes calldata toExtraData
-    ) external override onlyUniswapV3Pool nonReentrant {        
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         switchFrom(fromAsset, amount, onBehalfOf, collateralAssets, fromExtraData);
         switchTo(toAsset, amountTotal, onBehalfOf, collateralAssets, toExtraData);
     }
@@ -69,14 +81,14 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
-    ) public override onlyUniswapV3Pool {
+    ) public override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
         _validateCollateralAssets(collateralAssets);
         for (uint256 i = 0; i < collateralAssets.length; i++) {
             require(registry.isWhitelisted(collateralAssets[i].asset), "Collateral asset is not whitelisted");
         }
 
-        (address vaultAddress, uint256 nftId) = abi.decode(extraData, (address, uint256));
+        (address vaultAddress, uint256 nftId, ) = abi.decode(extraData, (address, uint256, bool));
 
         IERC20(fromAsset).transfer(onBehalfOf, amount);
 
@@ -97,14 +109,7 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         );
         require(successRepay, "Fluid repay failed");
 
-        bool successWithdraw = ISafe(onBehalfOf).execTransactionFromModule(
-            vaultAddress,
-            0,
-            // Support only full withdraw on Fluid to avoid error
-            abi.encodeCall(IFluidVault.operate, (nftId, type(int).min, 0, address(this))),
-            ISafe.Operation.Call
-        );
-        require(successWithdraw, "Fluid withdraw failed");
+        _withdraw(collateralAssets[0].asset, collateralAssets[0].amount, onBehalfOf, extraData);
     }
 
     function switchTo(
@@ -113,72 +118,27 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata extraData
-    ) public override onlyUniswapV3Pool {
+    ) public override onlyAuthorizedCaller(onBehalfOf) {
+        require(collateralAssets.length == 1, "Fluid only supports one collateral asset");
+
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
         _validateCollateralAssets(collateralAssets);
         for (uint256 i = 0; i < collateralAssets.length; i++) {
             require(registry.isWhitelisted(collateralAssets[i].asset), "Collateral asset is not whitelisted");
         }
 
-        (address vaultAddress, uint256 nftId) = abi.decode(extraData, (address, uint256));
+        (address vaultAddress, uint256 nftId, ) = abi.decode(extraData, (address, uint256, bool));
 
         // use balanceOf() because collateral amount is slightly decreased when switching from Fluid
         uint256 currentBalance = IERC20(collateralAssets[0].asset).balanceOf(address(this));
-        require(
-                currentBalance < (collateralAssets[0].amount * 101) / 100,
-                "Current balance is more than collateral amount + buffer"
-            );
 
-        bytes memory returnData;
-        // Check if collateral asset is WETH
-        if (collateralAssets[0].asset == registry.WETH_ADDRESS()) {
-            // Transfer WETH to onBehalfOf first
-            IERC20(collateralAssets[0].asset).transfer(onBehalfOf, currentBalance);
-            
-            // Unwrap WETH to ETH in the Safe
-            bool successUnwrap = ISafe(onBehalfOf).execTransactionFromModule(
-                collateralAssets[0].asset,
-                0,
-                abi.encodeCall(IWETH9.withdraw, (currentBalance)),
-                ISafe.Operation.Call
-            );
-            require(successUnwrap, "WETH unwrap failed");
-            
-            // For WETH, send ETH as msg.value
-            bool successSupply;
-            (successSupply, returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
-                vaultAddress,
-                currentBalance, // Send ETH as msg.value
-                abi.encodeCall(IFluidVault.operate, (nftId, int256(currentBalance), 0, onBehalfOf)),
-                ISafe.Operation.Call
-            );
-            require(successSupply, "Fluid supply failed");
-        } else {
-            // For other assets, use the standard approve and transfer flow
-            IERC20(collateralAssets[0].asset).transfer(onBehalfOf, currentBalance);
-
-            bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
-                collateralAssets[0].asset,
-                0,
-                abi.encodeCall(IERC20.approve, (address(vaultAddress), currentBalance)),
-                ISafe.Operation.Call
-            );
-            require(successApprove, "Approval failed");
-
-            bool successSupply;
-            (successSupply, returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
-                vaultAddress,
-                0,
-                abi.encodeCall(IFluidVault.operate, (nftId, int256(currentBalance), 0, onBehalfOf)),
-                ISafe.Operation.Call
-            );
-            require(successSupply, "Fluid supply failed");
-        }
+        bytes memory returnData = _supplyCollateral(vaultAddress, nftId, collateralAssets[0].asset, currentBalance, onBehalfOf);
 
         // If nftId is 0, extract new ID from return data, otherwise use the provided ID
         uint256 positionNftId;
         if (nftId == 0) {
             (positionNftId, , ) = abi.decode(returnData, (uint256, int256, int256));
+            require(positionNftId > 0, "Invalid NFT ID returned");
         } else {
             positionNftId = nftId;
         }
@@ -192,38 +152,59 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         require(successBorrow, "Fluid borrow failed");
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public override onlyUniswapV3Pool nonReentrant {
+    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-        
-        (address vaultAddress, ) = abi.decode(extraData, (address, uint256));
+
+        (address vaultAddress, , bool isFullRepay) = abi.decode(extraData, (address, uint256, bool));
+
+        // Determine repay amount based on isFullRepay flag from extraData
+        int256 repayAmount;
+        uint256 approvalAmount;
+
+        if (isFullRepay) {
+            // Use actual balance for transfer when full repayment is requested
+            amount = IERC20(asset).balanceOf(address(this));
+            // For Fluid full repayment, use type(int).min
+            repayAmount = type(int).min;
+
+            // For full repayment, approve a bit more to account for accrued interest
+            approvalAmount = (amount * 10005) / 10000;  // 0.05% buffer
+        } else {
+            repayAmount = -int256(amount);
+
+            // To avoid FluidVaultError(ErrorTypes.Vault__InvalidOperateAmount) error, skip repayment if amount is very small
+            // https://github.com/Instadapp/fluid-contracts-public/blob/main/contracts/protocols/vault/vaultT1/coreModule/main.sol
+            if (repayAmount > -10000) {
+                return;
+            }
+            approvalAmount = amount;
+        }
 
         IERC20(asset).transfer(onBehalfOf, amount);
-
-        int256 repayAmount = -int256(amount);
-
-        // To avoid FluidVaultError(ErrorTypes.Vault__InvalidOperateAmount) error, skip repayment if amount is very small
-        // https://github.com/Instadapp/fluid-contracts-public/blob/main/contracts/protocols/vault/vaultT1/coreModule/main.sol
-        if (repayAmount > -10000) {
-            return;
-        }
 
         bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
             asset,
             0,
-            abi.encodeCall(IERC20.approve, (address(vaultAddress), amount)),
+            abi.encodeCall(IERC20.approve, (address(vaultAddress), approvalAmount)),
             ISafe.Operation.Call
         );
         require(successApprove, "Approval failed");
 
-        IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+        // Extract nftId from extraData - if not provided (0), we'll fetch it
+        (, uint256 nftIdFromExtra, ) = abi.decode(extraData, (address, uint256, bool));
 
-        // get nftId
-        uint256 nftId = 0;
-        (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
-            .positionsByUser(onBehalfOf);
-        for (uint256 i = 0; i < vaultsData_.length; i++) {
-            if (vaultsData_[i].vault == vaultAddress) {
-                nftId = userPositions_[i].nftId;
+        uint256 nftId = nftIdFromExtra;
+
+        // If nftId not provided in extraData, fetch it using positionsByUser
+        if (nftId == 0) {
+            IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+            (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
+                .positionsByUser(onBehalfOf);
+            for (uint256 i = 0; i < vaultsData_.length; i++) {
+                if (vaultsData_[i].vault == vaultAddress) {
+                    nftId = userPositions_[i].nftId;
+                    break;
+                }
             }
         }
 
@@ -237,16 +218,13 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
         require(successRepay, "Repay failed");
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyUniswapV3Pool nonReentrant {
-        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-        
-        (address vaultAddress, ) = abi.decode(extraData, (address, uint256));
-    
+    function _supplyCollateral(address vaultAddress, uint256 nftId, address asset, uint256 amount, address onBehalfOf) internal returns (bytes memory) {
+        bytes memory returnData;
         // Check if asset is WETH
         if (asset == registry.WETH_ADDRESS()) {
             // Transfer WETH to onBehalfOf first
             IERC20(asset).transfer(onBehalfOf, amount);
-            
+
             // Unwrap WETH to ETH in the Safe
             bool successUnwrap = ISafe(onBehalfOf).execTransactionFromModule(
                 asset,
@@ -255,12 +233,13 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
                 ISafe.Operation.Call
             );
             require(successUnwrap, "WETH unwrap failed");
-            
+
             // For WETH, send ETH as msg.value
-            (bool successSupply, bytes memory returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
+            bool successSupply;
+            (successSupply, returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
                 vaultAddress,
                 amount, // Send ETH as msg.value
-                abi.encodeCall(IFluidVault.operate, (0, int256(amount), 0, onBehalfOf)),
+                abi.encodeCall(IFluidVault.operate, (nftId, int256(amount), 0, onBehalfOf)),
                 ISafe.Operation.Call
             );
             require(successSupply, "Fluid supply failed");
@@ -276,30 +255,44 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
 
             IERC20(asset).transfer(onBehalfOf, amount);
 
-            (bool successSupply, bytes memory returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
+            bool successSupply;
+            (successSupply, returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(
                 vaultAddress,
                 0,
-                abi.encodeCall(IFluidVault.operate, (0, int256(amount), 0, onBehalfOf)),
+                abi.encodeCall(IFluidVault.operate, (nftId, int256(amount), 0, onBehalfOf)),
                 ISafe.Operation.Call
             );
             require(successSupply, "Fluid supply failed");
         }
+
+        return returnData;
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyUniswapV3Pool nonReentrant {
+    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-        
-        (address vaultAddress, ) = abi.decode(extraData, (address, uint256));
 
-        IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+        (address vaultAddress, uint256 nftId, ) = abi.decode(extraData, (address, uint256, bool));
 
-        // get nftId
-        uint256 nftId = 0;
-        (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
-            .positionsByUser(onBehalfOf);
-        for (uint256 i = 0; i < vaultsData_.length; i++) {
-            if (vaultsData_[i].vault == vaultAddress) {
-                nftId = userPositions_[i].nftId;
+        _supplyCollateral(vaultAddress, nftId, asset, amount, onBehalfOf);
+    }
+
+    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyAuthorizedCaller(onBehalfOf) {
+        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
+
+        (address vaultAddress, uint256 nftIdFromExtra, ) = abi.decode(extraData, (address, uint256, bool));
+
+        uint256 nftId = nftIdFromExtra;
+
+        // If nftId not provided in extraData, fetch it using positionsByUser
+        if (nftId == 0) {
+            IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+            (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_) = resolver
+                .positionsByUser(onBehalfOf);
+            for (uint256 i = 0; i < vaultsData_.length; i++) {
+                if (vaultsData_[i].vault == vaultAddress) {
+                    nftId = userPositions_[i].nftId;
+                    break;
+                }
             }
         }
 
@@ -310,5 +303,34 @@ contract FluidSafeHandler is BaseProtocolHandler, ReentrancyGuard {
             ISafe.Operation.Call
         );
         require(successBorrow, "Fluid borrow failed");
+    }
+
+    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public override onlyAuthorizedCaller(onBehalfOf) {
+        _withdraw(asset, amount, onBehalfOf, extraData);
+    }
+
+    function _withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) internal {
+        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
+
+        (address vaultAddress, uint256 nftId, bool isFullWithdraw) = abi.decode(extraData, (address, uint256, bool));
+
+        // Determine withdraw amount: full withdraw uses type(int).min, partial uses negative amount
+        int256 withdrawAmount = isFullWithdraw ? type(int).min : -int256(amount);
+
+        bool successWithdraw = ISafe(onBehalfOf).execTransactionFromModule(
+            vaultAddress,
+            0,
+            abi.encodeCall(IFluidVault.operate, (nftId, withdrawAmount, 0, address(this))),
+            ISafe.Operation.Call
+        );
+        require(successWithdraw, "Fluid withdraw failed");
+
+        // Handle WETH wrapping if needed - Fluid send ETH instead of WETH
+        if (asset == registry.WETH_ADDRESS()) {
+            uint256 ethBalance = address(this).balance;
+            if (ethBalance > 0) {
+                IWETH9(registry.WETH_ADDRESS()).deposit{value: ethBalance}();
+            }
+        }
     }
 }

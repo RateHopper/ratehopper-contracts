@@ -2,10 +2,10 @@ import { ethers } from "hardhat";
 import { expect } from "chai";
 import { deploySafeContractFixture } from "./deployUtils";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { Protocols, USDC_ADDRESS, DAI_ADDRESS, USDC_hyUSD_POOL } from "./constants";
-import { SafeModuleDebtSwap } from "../typechain-types";
+import { Protocols, USDC_ADDRESS, DAI_ADDRESS, ETH_USDC_POOL } from "./constants";
+import { SafeDebtManager } from "../typechain-types";
 
-describe("SafeModuleDebtSwap Pausable", function () {
+describe("SafeDebtManager Pausable", function () {
     let safeModuleContract: any;
     let owner: any;
     let user: any;
@@ -13,11 +13,10 @@ describe("SafeModuleDebtSwap Pausable", function () {
     let pauser: any;
 
     beforeEach(async function () {
-        safeModuleContract = await loadFixture(deploySafeContractFixture);
+        const { safeModule } = await loadFixture(deploySafeContractFixture);
+        safeModuleContract = safeModule;
 
         [owner, user, operator, pauser] = await ethers.getSigners();
-
-        await safeModuleContract.setoperator(operator.address);
     });
 
     describe("Pause functionality", function () {
@@ -74,7 +73,7 @@ describe("SafeModuleDebtSwap Pausable", function () {
                 safeModuleContract
                     .connect(operator)
                     .executeDebtSwap(
-                        USDC_hyUSD_POOL,
+                        ETH_USDC_POOL,
                         Protocols.AAVE_V3,
                         Protocols.AAVE_V3,
                         USDC_ADDRESS,
