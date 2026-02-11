@@ -16,7 +16,8 @@
         "size": "npx hardhat size-contracts",
         "coverage": "node --max-old-space-size=12288 ./node_modules/.bin/hardhat coverage",
         "clean": "npx hardhat clean",
-        "deploy": "npx hardhat ignition deploy ignition/modules/DeployAll.ts --network base --verify --reset",
+        "deploy": "npx hardhat ignition deploy ignition/modules/DeployAll.ts --network base --verify",
+        "deploy:reset": "npx hardhat ignition deploy ignition/modules/DeployAll.ts --network base --verify --reset",
         "verify": "npx hardhat run scripts/verifyAll.ts --network base",
         "wipe": "npx hardhat ignition wipe chain-8453"
     },
