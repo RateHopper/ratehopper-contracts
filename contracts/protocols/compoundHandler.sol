@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
-import {IComet} from "../interfaces/compound/IComet.sol";
+import {IComet, AssetInfo} from "../interfaces/compound/IComet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ProtocolRegistry} from "../ProtocolRegistry.sol";
@@ -65,7 +65,14 @@ contract CompoundHandler is BaseProtocolHandler {
         _validateCollateralAssets(collateralAssets);
         for (uint256 i = 0; i < collateralAssets.length; i++) {
             require(registry.isWhitelisted(collateralAssets[i].asset), "Collateral asset is not whitelisted");
-            fromComet.withdrawFrom(onBehalfOf, address(this), collateralAssets[i].asset, collateralAssets[i].amount);
+
+            uint256 withdrawAmount = collateralAssets[i].amount;
+            if (withdrawAmount == type(uint256).max) {
+                withdrawAmount = fromComet.collateralBalanceOf(onBehalfOf, collateralAssets[i].asset);
+                require(withdrawAmount > 0, "No collateral available to withdraw");
+            }
+
+            fromComet.withdrawFrom(onBehalfOf, address(this), collateralAssets[i].asset, withdrawAmount);
         }
     }
 
@@ -159,8 +166,45 @@ contract CompoundHandler is BaseProtocolHandler {
         address cContract = abi.decode(extraData, (address));
         require(cContract != address(0), "Invalid comet address");
 
-        // Withdraw collateral from user's position to this contract
         IComet comet = IComet(cContract);
-        comet.withdrawFrom(onBehalfOf, address(this), asset, amount);
+
+        uint256 withdrawAmount = amount;
+        if (amount == type(uint256).max) {
+            withdrawAmount = _calculateMaxWithdrawAmount(comet, asset, onBehalfOf);
+            require(withdrawAmount > 0, "No collateral available to withdraw");
+        }
+
+        // Withdraw collateral from user's position to this contract
+        comet.withdrawFrom(onBehalfOf, address(this), asset, withdrawAmount);
+    }
+
+    function _calculateMaxWithdrawAmount(IComet comet, address asset, address user) internal view returns (uint256) {
+        uint128 collateralBalance = comet.collateralBalanceOf(user, asset);
+        uint256 borrowBalance = comet.borrowBalanceOf(user);
+
+        if (borrowBalance == 0) {
+            return collateralBalance;
+        }
+
+        AssetInfo memory assetInfo = comet.getAssetInfoByAddress(asset);
+        uint256 basePrice = comet.getPrice(comet.baseTokenPriceFeed());
+        uint256 collateralPrice = comet.getPrice(assetInfo.priceFeed);
+        uint256 baseScaleVal = comet.baseScale();
+
+        if (collateralPrice == 0 || assetInfo.borrowCollateralFactor == 0) return 0;
+
+        // minCollateral = borrowBalance * basePrice / baseScale * 1e18 / borrowCollateralFactor * scale / collateralPrice
+        uint256 borrowValueBase = (borrowBalance * basePrice + baseScaleVal - 1) / baseScaleVal;
+        uint256 minCollateralValue = (borrowValueBase * 1e18 + uint256(assetInfo.borrowCollateralFactor) - 1) / uint256(assetInfo.borrowCollateralFactor);
+        uint256 minCollateral = (minCollateralValue * uint256(assetInfo.scale) + collateralPrice - 1) / collateralPrice;
+
+        if (collateralBalance <= minCollateral) {
+            return 0;
+        }
+
+        uint256 maxWithdraw = uint256(collateralBalance) - minCollateral;
+        // Apply 0.1% safety margin
+        maxWithdraw = (maxWithdraw * 999) / 1000;
+        return maxWithdraw;
     }
 }
