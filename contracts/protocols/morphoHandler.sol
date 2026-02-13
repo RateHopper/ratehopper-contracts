@@ -5,6 +5,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {DataTypes} from "../interfaces/aaveV3/DataTypes.sol";
 import "../interfaces/morpho/IMorpho.sol";
+import {IMorphoOracle} from "../interfaces/morpho/IMorphoOracle.sol";
 import {MarketParamsLib} from "../dependencies/morpho/MarketParamsLib.sol";
 import {SharesMathLib} from "../dependencies/morpho/SharesMathLib.sol";
 import "./BaseProtocolHandler.sol";
@@ -65,7 +66,16 @@ contract MorphoHandler is BaseProtocolHandler {
 
         IERC20(fromAsset).forceApprove(address(morpho), amount);
         morpho.repay(marketParams, 0, borrowShares, onBehalfOf, "");
-        morpho.withdrawCollateral(marketParams, collateralAssets[0].amount, onBehalfOf, address(this));
+
+        uint256 withdrawAmount = collateralAssets[0].amount;
+        if (withdrawAmount == type(uint256).max) {
+            Id marketId = marketParams.id();
+            Position memory pos = morpho.position(marketId, onBehalfOf);
+            withdrawAmount = uint256(pos.collateral);
+            require(withdrawAmount > 0, "No collateral available to withdraw");
+        }
+
+        morpho.withdrawCollateral(marketParams, withdrawAmount, onBehalfOf, address(this));
         IERC20(fromAsset).forceApprove(address(morpho), 0);
     }
 
@@ -148,7 +158,46 @@ contract MorphoHandler is BaseProtocolHandler {
         // Decode market parameters from extraData
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
 
+        uint256 withdrawAmount = amount;
+        if (amount == type(uint256).max) {
+            withdrawAmount = _calculateMaxWithdrawAmount(marketParams, onBehalfOf);
+            require(withdrawAmount > 0, "No collateral available to withdraw");
+        }
+
         // Withdraw collateral from user's position to this contract
-        morpho.withdrawCollateral(marketParams, amount, onBehalfOf, address(this));
+        morpho.withdrawCollateral(marketParams, withdrawAmount, onBehalfOf, address(this));
+    }
+
+    function _calculateMaxWithdrawAmount(
+        MarketParams memory marketParams,
+        address user
+    ) internal view returns (uint256) {
+        Id marketId = marketParams.id();
+        Position memory pos = morpho.position(marketId, user);
+        uint256 collateral = uint256(pos.collateral);
+
+        if (collateral == 0) return 0;
+
+        Market memory m = morpho.market(marketId);
+        uint256 borrowed = uint256(pos.borrowShares).toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares);
+
+        if (borrowed == 0) return collateral;
+
+        uint256 oraclePrice = IMorphoOracle(marketParams.oracle).price();
+        uint256 lltv = marketParams.lltv;
+
+        if (oraclePrice == 0 || lltv == 0) return 0;
+
+        // Morpho health: collateral * oraclePrice / 1e36 * lltv / 1e18 >= borrowed
+        // Split calculation to avoid overflow
+        uint256 step1 = (borrowed * 1e36 + oraclePrice - 1) / oraclePrice;
+        uint256 minCollateral = (step1 * 1e18 + lltv - 1) / lltv;
+
+        if (collateral <= minCollateral) return 0;
+
+        uint256 maxWithdraw = collateral - minCollateral;
+        // Apply 0.1% safety margin
+        maxWithdraw = (maxWithdraw * 999) / 1000;
+        return maxWithdraw;
     }
 }
