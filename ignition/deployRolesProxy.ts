@@ -143,7 +143,7 @@ async function main() {
 
     try {
         const safeWallet = await Safe.init({
-            provider: "https://base.llamarpc.com",
+            provider: process.env.BASE_RPC_URL || "https://mainnet.base.org",
             signer: process.env.TESTING_SAFE_OWNER_KEY,
             safeAddress: safeAddress,
         });

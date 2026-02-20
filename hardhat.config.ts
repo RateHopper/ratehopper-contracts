@@ -1,4 +1,3 @@
-import { base } from "./node_modules/acorn-walk/dist/walk.d";
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 import "hardhat-contract-sizer";
@@ -8,8 +7,7 @@ dotenv.config();
 require("hardhat-tracer");
 require("@openzeppelin/hardhat-upgrades");
 
-// const baseUrl = "https://base.llamarpc.com";
-const baseUrl = "https://mainnet.base.org";
+const baseUrl = process.env.BASE_RPC_URL || "https://mainnet.base.org";
 
 const config: HardhatUserConfig = {
     solidity: {

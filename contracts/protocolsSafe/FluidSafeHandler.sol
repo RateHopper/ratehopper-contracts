@@ -314,8 +314,16 @@ contract FluidSafeHandler is BaseProtocolHandler {
 
         (address vaultAddress, uint256 nftId, bool isFullWithdraw) = abi.decode(extraData, (address, uint256, bool));
 
-        // Determine withdraw amount: full withdraw uses type(int).min, partial uses negative amount
-        int256 withdrawAmount = isFullWithdraw ? type(int).min : -int256(amount);
+        int256 withdrawAmount;
+        if (isFullWithdraw) {
+            withdrawAmount = type(int).min;
+        } else if (amount == type(uint256).max) {
+            uint256 maxWithdraw = _calculateMaxWithdrawAmount(nftId);
+            require(maxWithdraw > 0, "No collateral available to withdraw");
+            withdrawAmount = -int256(maxWithdraw);
+        } else {
+            withdrawAmount = -int256(amount);
+        }
 
         bool successWithdraw = ISafe(onBehalfOf).execTransactionFromModule(
             vaultAddress,
@@ -332,5 +340,29 @@ contract FluidSafeHandler is BaseProtocolHandler {
                 IWETH9(registry.WETH_ADDRESS()).deposit{value: ethBalance}();
             }
         }
+    }
+
+    function _calculateMaxWithdrawAmount(uint256 nftId) internal view returns (uint256) {
+        IFluidVaultResolver resolver = IFluidVaultResolver(registry.fluidVaultResolver());
+        (Structs.UserPosition memory pos, Structs.VaultEntireData memory vaultData) = resolver.positionByNftId(nftId);
+
+        if (pos.supply == 0) return 0;
+        if (pos.borrow == 0) return pos.supply;
+
+        uint256 oraclePrice = vaultData.configs.oraclePriceOperate;
+        uint256 cf = uint256(vaultData.configs.collateralFactor);
+
+        if (oraclePrice == 0 || cf == 0) return 0;
+
+        // Health: supply * oraclePrice * cf / (1e27 * 10000) >= borrow
+        // minSupply = ceil(borrow * 1e31 / (oraclePrice * cf))
+        uint256 minSupply = (pos.borrow * 1e31 + oraclePrice * cf - 1) / (oraclePrice * cf);
+
+        if (pos.supply <= minSupply) return 0;
+
+        uint256 maxWithdraw = pos.supply - minSupply;
+        // Apply 0.1% safety margin
+        maxWithdraw = (maxWithdraw * 999) / 1000;
+        return maxWithdraw;
     }
 }

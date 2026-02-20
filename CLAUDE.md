@@ -66,3 +66,23 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 - **Uniswap V3**: Flash loans
 - **Paraswap V6**: Token swaps
 - **Gnosis Safe**: Module integration via `execTransactionFromModule`
+
+## Bug Fixing
+
+- When fixing a bug, always check that the fix doesn't introduce regressions — especially verify loading states, null/undefined propagation, and UI state consistency before considering the task complete.
+
+## Response Guidelines
+
+- When the user asks a question or requests an explanation, respond with information only — do NOT create new files, utilities, hooks, or implementations unless explicitly asked to write code.
+
+## Solidity / Smart Contracts
+
+- When making struct or storage optimizations in Solidity, make minimal targeted changes. Do not refactor adjacent code or optimize beyond what was explicitly requested. If unsure of scope, ask first.
+
+## Workflow
+
+- Before editing code, check if the function/feature already exists in the codebase. Use Grep/Read to verify before creating or modifying anything.
+
+## Code Review
+
+- When reviewing PRs or branches, always confirm the correct branch/remote first. Do not attempt to review uncommitted local changes unless explicitly asked.

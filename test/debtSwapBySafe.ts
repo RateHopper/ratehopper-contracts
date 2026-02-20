@@ -441,6 +441,113 @@ describe("Safe wallet should debtSwap", function () {
             await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
         });
 
+        describe("with type(uint256).max collateral amount", function () {
+            it("from Aave to Compound", async function () {
+                await supplyAndBorrow(Protocols.AAVE_V3);
+
+                const collateralBefore = await aaveV3Helper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+                expect(collateralBefore).to.be.gt(0);
+
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    Protocols.AAVE_V3,
+                    Protocols.COMPOUND,
+                    cbETH_ADDRESS,
+                    {
+                        useMaxCollateral: true,
+                    },
+                );
+
+                const collateralAfter = await aaveV3Helper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+                expect(collateralAfter).to.equal(0);
+            });
+
+            it("from Compound to Aave", async function () {
+                await supplyAndBorrow(Protocols.COMPOUND);
+
+                const cometAddr = cometAddressMap.get(USDC_ADDRESS)!;
+                const collateralBefore = await compoundHelper.getCollateralAmount(
+                    cometAddr,
+                    cbETH_ADDRESS,
+                    safeAddress,
+                );
+                expect(collateralBefore).to.be.gt(0);
+
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    Protocols.COMPOUND,
+                    Protocols.AAVE_V3,
+                    cbETH_ADDRESS,
+                    {
+                        useMaxCollateral: true,
+                    },
+                );
+
+                const collateralAfter = await compoundHelper.getCollateralAmount(cometAddr, cbETH_ADDRESS, safeAddress);
+                expect(collateralAfter).to.equal(0);
+            });
+
+            it("from Morpho to Compound", async function () {
+                await supplyAndBorrow(Protocols.MORPHO);
+
+                const collateralBefore = await morphoHelper.getCollateralAmount(morphoMarket1Id, safeAddress);
+                expect(collateralBefore).to.be.gt(0);
+
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    Protocols.MORPHO,
+                    Protocols.COMPOUND,
+                    cbETH_ADDRESS,
+                    {
+                        morphoFromMarketId: morphoMarket1Id,
+                        useMaxCollateral: true,
+                    },
+                );
+
+                const collateralAfter = await morphoHelper.getCollateralAmount(morphoMarket1Id, safeAddress);
+                expect(collateralAfter).to.equal(0);
+            });
+
+            it("from Fluid to Aave", async function () {
+                await supplyAndBorrowOnFluid();
+
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    Protocols.FLUID,
+                    Protocols.AAVE_V3,
+                    cbETH_ADDRESS,
+                    {
+                        fromFluidVaultAddress: FLUID_cbETH_USDC_VAULT,
+                        useMaxCollateral: true,
+                    },
+                );
+            });
+
+            it("from Moonwell to Compound", async function () {
+                await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS, WETH_ADDRESS);
+
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    Protocols.MOONWELL,
+                    Protocols.COMPOUND,
+                    WETH_ADDRESS,
+                    {
+                        useMaxCollateral: true,
+                    },
+                );
+            });
+        });
+
         it("from Aave to Compound with protocol fee", async function () {
             // set protocol fee
             const signers = await ethers.getSigners();
@@ -493,21 +600,45 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("from Compound to Moonwell", async function () {
-            await supplyAndBorrow(Protocols.COMPOUND);
-            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.COMPOUND, Protocols.MOONWELL);
+            await supplyAndBorrow(Protocols.COMPOUND, USDC_ADDRESS, WETH_ADDRESS);
+            await executeDebtSwap(
+                ETH_USDC_POOL,
+                USDC_ADDRESS,
+                USDC_ADDRESS,
+                Protocols.COMPOUND,
+                Protocols.MOONWELL,
+                WETH_ADDRESS,
+            );
         });
 
         it("from Moonwell to Compound", async function () {
-            await supplyAndBorrow(Protocols.MOONWELL);
-            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.COMPOUND);
+            await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS, WETH_ADDRESS);
+            await executeDebtSwap(
+                ETH_USDC_POOL,
+                USDC_ADDRESS,
+                USDC_ADDRESS,
+                Protocols.MOONWELL,
+                Protocols.COMPOUND,
+                WETH_ADDRESS,
+            );
         });
 
         it("from Fluid to Moonwell", async function () {
-            await supplyAndBorrowOnFluid();
+            await supplyAndBorrowOnFluid(FLUID_WETH_USDC_VAULT, WETH_ADDRESS);
 
             await time.increaseTo((await time.latest()) + 86400); // 1 day
 
-            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.FLUID, Protocols.MOONWELL);
+            await executeDebtSwap(
+                ETH_USDC_POOL,
+                USDC_ADDRESS,
+                USDC_ADDRESS,
+                Protocols.FLUID,
+                Protocols.MOONWELL,
+                WETH_ADDRESS,
+                {
+                    fromFluidVaultAddress: FLUID_WETH_USDC_VAULT,
+                },
+            );
         });
 
         it("from Fluid to Aave", async function () {
@@ -552,12 +683,6 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("from Moonwell to Fluid", async function () {
-            await supplyAndBorrow(Protocols.MOONWELL);
-
-            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.FLUID);
-        });
-
-        it("from Moonwell to Fluid with WETH collateral", async function () {
             await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS, WETH_ADDRESS);
 
             await executeDebtSwap(
@@ -595,14 +720,28 @@ describe("Safe wallet should debtSwap", function () {
         });
 
         it("from Moonwell to Aave", async function () {
-            await supplyAndBorrow(Protocols.MOONWELL);
-            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.MOONWELL, Protocols.AAVE_V3);
+            await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS, WETH_ADDRESS);
+            await executeDebtSwap(
+                ETH_USDC_POOL,
+                USDC_ADDRESS,
+                USDC_ADDRESS,
+                Protocols.MOONWELL,
+                Protocols.AAVE_V3,
+                WETH_ADDRESS,
+            );
         });
 
         it("from Aave to Moonwell", async function () {
-            await supplyAndBorrow(Protocols.AAVE_V3);
+            await supplyAndBorrow(Protocols.AAVE_V3, USDC_ADDRESS, WETH_ADDRESS);
 
-            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.MOONWELL);
+            await executeDebtSwap(
+                ETH_USDC_POOL,
+                USDC_ADDRESS,
+                USDC_ADDRESS,
+                Protocols.AAVE_V3,
+                Protocols.MOONWELL,
+                WETH_ADDRESS,
+            );
         });
 
         it("from Aave to Moonwell with protocol fee", async function () {
@@ -615,9 +754,16 @@ describe("Safe wallet should debtSwap", function () {
             const setFeeBeneficiaryTx = await contractByOwner.setFeeBeneficiary(TEST_FEE_BENEFICIARY_ADDRESS);
             await setFeeBeneficiaryTx.wait();
 
-            await supplyAndBorrow(Protocols.AAVE_V3);
+            await supplyAndBorrow(Protocols.AAVE_V3, USDC_ADDRESS, WETH_ADDRESS);
 
-            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.MOONWELL);
+            await executeDebtSwap(
+                ETH_USDC_POOL,
+                USDC_ADDRESS,
+                USDC_ADDRESS,
+                Protocols.AAVE_V3,
+                Protocols.MOONWELL,
+                WETH_ADDRESS,
+            );
         });
 
         // TODO: Fix this test
@@ -1486,6 +1632,7 @@ describe("Safe wallet should debtSwap", function () {
             fromFluidVaultAddress?: string;
             tofluidVaultAddress?: string;
             randomizeDebtAmount?: boolean;
+            useMaxCollateral?: boolean;
         } = {
             useMaxAmount: true,
             fromFluidVaultAddress: FLUID_cbETH_USDC_VAULT,
@@ -1711,15 +1858,16 @@ describe("Safe wallet should debtSwap", function () {
         }
 
         // Build collateralArray (supports multiple collaterals)
+        const finalCollateralAmount = options.useMaxCollateral ? MaxUint256 : collateralAmount;
         const collateralArray = options.anotherCollateralTokenAddress
             ? [
-                  { asset: collateralTokenAddress, amount: collateralAmount },
+                  { asset: collateralTokenAddress, amount: finalCollateralAmount },
                   {
                       asset: options.anotherCollateralTokenAddress,
                       amount: ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
                   },
               ]
-            : [{ asset: collateralTokenAddress, amount: collateralAmount }];
+            : [{ asset: collateralTokenAddress, amount: finalCollateralAmount }];
 
         // simulate waiting for user's confirmation
         await time.increaseTo((await time.latest()) + 60);

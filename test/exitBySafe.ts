@@ -11,28 +11,26 @@ import { FLUID_cbETH_USDC_VAULT, FLUID_WETH_USDC_VAULT, FluidHelper } from "./pr
 import { CompoundHelper, USDC_COMET_ADDRESS } from "./protocols/compound";
 import { morphoMarket1Id, MorphoHelper } from "./protocols/morpho";
 import { AaveV3Helper } from "./protocols/aaveV3";
+import { MoonwellHelper } from "./protocols/moonwell";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect } from "chai";
 import { deploySafeContractFixture } from "./deployUtils";
 import { safeAddress, createSafeTestHelpers } from "./debtSwapBySafe";
 
 describe("Safe wallet exit function tests", function () {
-    // Increase timeout for memory-intensive operations
-    this.timeout(300000); // 5 minutes
+    this.timeout(300000);
 
     const signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
     let operator: HardhatEthersSigner;
-    let safeWallet;
-    let safeModuleContract;
-    let safeModuleAddress;
+    let safeWallet: Awaited<ReturnType<typeof Safe.init>>;
+    let safeModuleContract: any;
+    let safeModuleAddress: string;
     let helpers: ReturnType<typeof createSafeTestHelpers>;
 
     this.beforeEach(async () => {
-        // Get the operator (third signer)
         const signers = await ethers.getSigners();
         operator = signers[2];
 
-        // Fund the signer wallet (TESTING_SAFE_OWNER_KEY) with ETH for gas fees
         await fundSignerWithETH(signer.address);
 
         safeWallet = await Safe.init({
@@ -45,7 +43,6 @@ describe("Safe wallet exit function tests", function () {
         safeModuleContract = safeModule;
         safeModuleAddress = await safeModuleContract.getAddress();
 
-        // Initialize helpers with the context
         helpers = createSafeTestHelpers({ signer, safeWallet, safeModuleAddress });
 
         await fundETH(safeAddress);
@@ -54,22 +51,16 @@ describe("Safe wallet exit function tests", function () {
 
     async function enableSafeModule() {
         const enableModuleTx = await safeWallet.createEnableModuleTx(safeModuleAddress);
-        const safeTxHash = await safeWallet.executeTransaction(enableModuleTx);
-        console.log("Safe enable module transaction");
-
-        console.log("Modules:", await safeWallet.getModules());
+        await safeWallet.executeTransaction(enableModuleTx);
     }
 
     this.afterEach(async () => {
-        // Force garbage collection to free memory
         if (global.gc) {
             global.gc();
         }
-
         await new Promise((resolve) => setTimeout(resolve, 100));
     });
 
-    // Use helper functions from debtSwapBySafe.ts
     const supplyAndBorrow = (...args: Parameters<ReturnType<typeof createSafeTestHelpers>["supplyAndBorrow"]>) =>
         helpers.supplyAndBorrow(...args);
     const supplyAndBorrowOnFluid = (
@@ -78,9 +69,163 @@ describe("Safe wallet exit function tests", function () {
     const morphoAuthorizeTxBySafe = () => helpers.morphoAuthorizeTxBySafe();
     const compoundAllowTxBySafe = (tokenAddress: string) => helpers.compoundAllowTxBySafe(tokenAddress);
 
-    /**
-     * Helper function to test exit functionality for different protocols (DRY principle)
-     */
+    // ─── Shared helpers ───
+
+    async function approveAaveAToken(approvalAmount: bigint) {
+        const aaveHelper = new AaveV3Helper(signer);
+        const aTokenAddress = await aaveHelper.getATokenAddress(cbETH_ADDRESS);
+        const token = new ethers.Contract(aTokenAddress, ERC20_ABI, signer);
+
+        const approveTransactionData: MetaTransactionData = {
+            to: aTokenAddress,
+            value: "0",
+            data: token.interface.encodeFunctionData("approve", [safeModuleAddress, approvalAmount]),
+            operation: OperationType.Call,
+        };
+
+        const safeApproveTransaction = await safeWallet.createTransaction({
+            transactions: [approveTransactionData],
+        });
+        await safeWallet.executeTransaction(safeApproveTransaction);
+    }
+
+    // ─── Protocol config factories ───
+
+    function getFluidExitConfig(opts?: { vaultAddress?: string; collateralAsset?: string; partialRepay?: boolean }) {
+        const vault = opts?.vaultAddress ?? FLUID_cbETH_USDC_VAULT;
+        const collateral = opts?.collateralAsset ?? cbETH_ADDRESS;
+        const fluidHelper = new FluidHelper(signer);
+
+        return {
+            protocol: Protocols.FLUID,
+            debtAsset: USDC_ADDRESS,
+            debtDecimals: 6,
+            collateralAsset: collateral,
+            collateralDecimals: 18,
+            setupPosition: async () => {
+                if (vault === FLUID_WETH_USDC_VAULT) {
+                    await supplyAndBorrowOnFluid(FLUID_WETH_USDC_VAULT, WETH_ADDRESS);
+                } else {
+                    await supplyAndBorrowOnFluid();
+                }
+            },
+            getDebtAmount: () => fluidHelper.getDebtAmount(vault, safeAddress),
+            getCollateralAmount: () => fluidHelper.getCollateralAmount(collateral, safeAddress),
+            getExtraData: async () => {
+                const nftId = await fluidHelper.getNftId(vault, safeAddress);
+                return ethers.AbiCoder.defaultAbiCoder().encode(
+                    ["address", "uint256", "bool"],
+                    [vault, nftId, !opts?.partialRepay],
+                );
+            },
+            validateDebtRepaid: async () => {
+                const debtAfter = await fluidHelper.getDebtAmount(vault, safeAddress);
+                expect(debtAfter).to.equal(0);
+            },
+        };
+    }
+
+    function getAaveExitConfig(opts?: { approvalAmount?: bigint }) {
+        const aaveHelper = new AaveV3Helper(signer);
+
+        return {
+            protocol: Protocols.AAVE_V3,
+            debtAsset: USDC_ADDRESS,
+            debtDecimals: 6,
+            collateralAsset: cbETH_ADDRESS,
+            collateralDecimals: 18,
+            setupPosition: async () => {
+                await supplyAndBorrow(Protocols.AAVE_V3);
+                await approveAaveAToken(opts?.approvalAmount ?? ethers.parseEther("1"));
+            },
+            getDebtAmount: () => aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress),
+            getCollateralAmount: () => aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress),
+            getExtraData: async () => "0x",
+            validateDebtRepaid: async () => {
+                const debtAfter = await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+                expect(debtAfter).to.equal(0);
+            },
+        };
+    }
+
+    function getMorphoExitConfig(opts?: { partialRepay?: boolean }) {
+        const marketId = morphoMarket1Id;
+        const morphoHelper = new MorphoHelper(signer);
+
+        return {
+            protocol: Protocols.MORPHO,
+            debtAsset: USDC_ADDRESS,
+            debtDecimals: 6,
+            collateralAsset: cbETH_ADDRESS,
+            collateralDecimals: 18,
+            setupPosition: async () => {
+                await supplyAndBorrow(Protocols.MORPHO);
+                await morphoAuthorizeTxBySafe();
+            },
+            getDebtAmount: () => morphoHelper.getDebtAmount(marketId, safeAddress),
+            getCollateralAmount: () => morphoHelper.getCollateralAmount(marketId, safeAddress),
+            getExtraData: async () => {
+                if (opts?.partialRepay) {
+                    return morphoHelper.encodeExtraData(marketId, 0n);
+                }
+                const borrowShares = await morphoHelper.getBorrowShares(marketId, safeAddress);
+                return morphoHelper.encodeExtraData(marketId, borrowShares);
+            },
+            validateDebtRepaid: async () => {
+                const debtAfter = await morphoHelper.getDebtAmount(marketId, safeAddress);
+                expect(debtAfter).to.equal(0);
+            },
+        };
+    }
+
+    function getCompoundExitConfig() {
+        const cometAddress = USDC_COMET_ADDRESS;
+        const compoundHelper = new CompoundHelper(signer);
+
+        return {
+            protocol: Protocols.COMPOUND,
+            debtAsset: USDC_ADDRESS,
+            debtDecimals: 6,
+            collateralAsset: cbETH_ADDRESS,
+            collateralDecimals: 18,
+            setupPosition: async () => {
+                await supplyAndBorrow(Protocols.COMPOUND);
+                await compoundAllowTxBySafe(USDC_ADDRESS);
+            },
+            getDebtAmount: () => compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress),
+            getCollateralAmount: () => compoundHelper.getCollateralAmount(cometAddress, cbETH_ADDRESS, safeAddress),
+            getExtraData: () => Promise.resolve(compoundHelper.encodeExtraData(cometAddress)),
+            validateDebtRepaid: async () => {
+                const debtAfter = await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+                expect(debtAfter).to.equal(0);
+            },
+        };
+    }
+
+    function getMoonwellExitConfig() {
+        const moonwellHelper = new MoonwellHelper(signer);
+
+        return {
+            protocol: Protocols.MOONWELL,
+            debtAsset: USDC_ADDRESS,
+            debtDecimals: 6,
+            collateralAsset: WETH_ADDRESS,
+            collateralDecimals: 18,
+            setupPosition: async () => {
+                await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS, WETH_ADDRESS);
+            },
+            getDebtAmount: () => moonwellHelper.getDebtAmount(USDC_ADDRESS, safeAddress),
+            getCollateralAmount: () => moonwellHelper.getCollateralAmount(WETH_ADDRESS, safeAddress),
+            getExtraData: async () => "0x",
+            validateDebtRepaid: async () => {
+                const debtAfter = await moonwellHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+                expect(debtAfter).to.equal(0);
+            },
+        };
+    }
+
+    // ─── Main test helper ───
+
     async function testExitPosition(options: {
         protocol: Protocols;
         debtAsset: string;
@@ -94,7 +239,9 @@ describe("Safe wallet exit function tests", function () {
         validateDebtRepaid: () => Promise<void>;
         withdrawCollateral?: boolean;
         debtAmountOverride?: bigint;
+        collateralAmountOverride?: bigint;
         callViaSafe?: boolean;
+        partialDebtRepay?: boolean;
     }) {
         const {
             protocol,
@@ -109,51 +256,59 @@ describe("Safe wallet exit function tests", function () {
             validateDebtRepaid,
             withdrawCollateral = true,
             debtAmountOverride,
+            collateralAmountOverride,
             callViaSafe = false,
+            partialDebtRepay = false,
         } = options;
 
-        await time.increaseTo((await time.latest()) + 3600); // 1 hour
+        await time.increaseTo((await time.latest()) + 3600);
 
-        // Step 0: Fund the operator with ETH for gas (only if not calling via Safe)
         if (!callViaSafe) {
             await fundSignerWithETH(operator.address, "0.01");
         }
 
-        // Step 1: Create a position (supply collateral and borrow)
         await setupPosition();
 
-        // Step 2: Get current debt amount
         const debtBefore = await getDebtAmount();
-        console.log("Debt before exit:", ethers.formatUnits(debtBefore, debtDecimals));
         expect(debtBefore).to.be.gt(0);
 
-        // Step 3: Send debt tokens to Safe to cover the repayment (including any accrued interest)
         const debtContract = new ethers.Contract(debtAsset, ERC20_ABI, signer);
-        const repayAmount = debtBefore + ethers.parseUnits("1", debtDecimals); // Add buffer for interest
-        const transferTx = await debtContract.transfer(safeAddress, repayAmount);
-        await transferTx.wait();
-        console.log("Debt tokens transferred to Safe");
+        if (partialDebtRepay) {
+            await debtContract.transfer(safeAddress, debtBefore / 2n + ethers.parseUnits("0.1", debtDecimals));
+        } else {
+            const transferTx = await debtContract.transfer(
+                safeAddress,
+                debtBefore + ethers.parseUnits("1", debtDecimals),
+            );
+            await transferTx.wait();
+        }
 
-        // Step 4: Get collateral amount
         const collateralAmount = await getCollateralAmount();
-        console.log("Collateral amount:", ethers.formatUnits(collateralAmount, collateralDecimals));
-
-        // Step 5: Get collateral balance before exit
         const collateralContract = new ethers.Contract(collateralAsset, ERC20_ABI, signer);
         const collateralBalanceBefore = await collateralContract.balanceOf(safeAddress);
-        console.log("Collateral balance before exit:", ethers.formatUnits(collateralBalanceBefore, collateralDecimals));
-        // Step 7: Get extra data for protocol-specific parameters
+
         const extraData = await getExtraData();
 
-        // Use override amount if provided, otherwise use actual debt amount with 1% buffer
-        const debtAmountToUse = debtAmountOverride !== undefined ? debtAmountOverride : (debtBefore * 101n) / 100n;
+        let debtAmountToUse: bigint;
+        if (partialDebtRepay) {
+            debtAmountToUse = debtBefore / 2n;
+        } else if (debtAmountOverride !== undefined) {
+            debtAmountToUse = debtAmountOverride;
+        } else {
+            debtAmountToUse = (debtBefore * 101n) / 100n;
+        }
 
-        // Step 8: Call exit function
+        const collateralAmountToUse =
+            collateralAmountOverride !== undefined
+                ? collateralAmountOverride
+                : partialDebtRepay
+                  ? ethers.MaxUint256
+                  : collateralAmount;
+
+        // Execute exit
         let receipt;
         if (callViaSafe) {
-            // Call exit via Safe transaction
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress);
-
             const exitCallData: MetaTransactionData = {
                 to: safeModuleAddress,
                 value: "0",
@@ -161,51 +316,36 @@ describe("Safe wallet exit function tests", function () {
                     protocol,
                     debtAsset,
                     debtAmountToUse,
-                    [{ asset: collateralAsset, amount: collateralAmount }],
+                    [{ asset: collateralAsset, amount: collateralAmountToUse }],
                     safeAddress,
                     extraData,
                     withdrawCollateral,
                 ]),
                 operation: OperationType.Call,
             };
-
-            const safeTransaction = await safeWallet.createTransaction({
-                transactions: [exitCallData],
-            });
-
+            const safeTransaction = await safeWallet.createTransaction({ transactions: [exitCallData] });
             await safeWallet.executeTransaction(safeTransaction);
-            console.log(`Exit transaction completed via Safe with withdrawCollateral=${withdrawCollateral}`);
-            // Note: We can't easily get the receipt for Safe transactions, so we'll skip event verification for Safe calls
         } else {
-            // Call exit via operator
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
-
             const exitTx = await moduleContract.exit(
                 protocol,
                 debtAsset,
                 debtAmountToUse,
-                [{ asset: collateralAsset, amount: collateralAmount }],
+                [{ asset: collateralAsset, amount: collateralAmountToUse }],
                 safeAddress,
                 extraData,
                 withdrawCollateral,
-                {
-                    gasLimit: "2000000",
-                },
+                { gasLimit: "2000000" },
             );
-
             receipt = await exitTx.wait();
-            console.log(`Exit transaction completed with withdrawCollateral=${withdrawCollateral}`);
         }
 
-        // Verify DebtPositionExited event was emitted (only for operator calls)
+        // Verify event (operator calls only)
         if (!callViaSafe && receipt) {
             const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress);
             const exitEvent = receipt.logs.find((log: any) => {
                 try {
-                    const parsed = moduleContract.interface.parseLog({
-                        topics: [...log.topics],
-                        data: log.data,
-                    });
+                    const parsed = moduleContract.interface.parseLog({ topics: [...log.topics], data: log.data });
                     return parsed?.name === "DebtPositionExited";
                 } catch {
                     return false;
@@ -214,620 +354,362 @@ describe("Safe wallet exit function tests", function () {
             expect(exitEvent).to.not.be.undefined;
         }
 
-        // Step 9: Verify debt is repaid
-        await validateDebtRepaid();
+        // Validation
+        if (partialDebtRepay) {
+            const debtAfter = await getDebtAmount();
+            expect(debtAfter).to.be.gt(0);
+            expect(debtAfter).to.be.lt(debtBefore);
 
-        // Step 10: Verify collateral is withdrawn from protocol
-        const collateralInProtocolAfter = await getCollateralAmount();
-        console.log(
-            "Collateral in protocol after exit:",
-            ethers.formatUnits(collateralInProtocolAfter, collateralDecimals),
-        );
+            const collateralAfter = await getCollateralAmount();
+            expect(BigInt(collateralAfter)).to.be.gt(0n);
+            expect(BigInt(collateralAfter)).to.be.lt(BigInt(collateralAmount));
 
-        // Step 11: Verify collateral withdrawal behavior based on withdrawCollateral parameter
-        const collateralBalanceAfter = await collateralContract.balanceOf(safeAddress);
-        console.log("Collateral balance after exit:", ethers.formatUnits(collateralBalanceAfter, collateralDecimals));
+            const collateralBalanceAfter = await collateralContract.balanceOf(safeAddress);
+            const withdrawn = collateralBalanceAfter - collateralBalanceBefore;
+            console.log(`Collateral withdrawn: ${ethers.formatUnits(withdrawn, collateralDecimals)} (${withdrawn})`);
+            expect(withdrawn).to.be.gt(0);
 
-        if (withdrawCollateral) {
-            // When withdrawCollateral=true, balance should increase
-            expect(collateralBalanceAfter).to.be.gt(collateralBalanceBefore);
-
-            // The withdrawn collateral should approximately equal the collateral amount
-            const withdrawnAmount = collateralBalanceAfter - collateralBalanceBefore;
-            console.log("Withdrawn collateral:", ethers.formatUnits(withdrawnAmount, collateralDecimals));
+            const totalAfter = BigInt(withdrawn) + BigInt(collateralAfter);
             const tolerance =
                 collateralDecimals === 18 ? ethers.parseEther("0.001") : ethers.parseUnits("0.001", collateralDecimals);
-            expect(withdrawnAmount).to.be.closeTo(collateralAmount, tolerance);
-
-            // Collateral should be 0 or very close to 0 (allowing small rounding errors)
-            const collateralTolerance =
-                collateralDecimals === 18
-                    ? ethers.parseEther("0.0001")
-                    : ethers.parseUnits("0.0001", collateralDecimals);
-            expect(collateralInProtocolAfter).to.be.closeTo(0n, collateralTolerance);
+            expect(totalAfter).to.be.closeTo(collateralAmount, tolerance);
+            expect(BigInt(withdrawn)).to.be.gte((BigInt(collateralAmount) * 30n) / 100n);
         } else {
-            // When withdrawCollateral=false, balance should remain unchanged
-            expect(collateralBalanceAfter).to.equal(collateralBalanceBefore);
-            console.log("Collateral not withdrawn (as expected with withdrawCollateral=false)");
+            await validateDebtRepaid();
+
+            const collateralInProtocolAfter = await getCollateralAmount();
+            const collateralBalanceAfter = await collateralContract.balanceOf(safeAddress);
+
+            if (withdrawCollateral) {
+                expect(collateralBalanceAfter).to.be.gt(collateralBalanceBefore);
+
+                const withdrawnAmount = collateralBalanceAfter - collateralBalanceBefore;
+                const tolerance =
+                    collateralDecimals === 18
+                        ? ethers.parseEther("0.001")
+                        : ethers.parseUnits("0.001", collateralDecimals);
+                expect(withdrawnAmount).to.be.closeTo(collateralAmount, tolerance);
+
+                const collateralTolerance =
+                    collateralDecimals === 18
+                        ? ethers.parseEther("0.0001")
+                        : ethers.parseUnits("0.0001", collateralDecimals);
+                expect(collateralInProtocolAfter).to.be.closeTo(0n, collateralTolerance);
+            } else {
+                expect(collateralBalanceAfter).to.equal(collateralBalanceBefore);
+            }
         }
     }
 
+    // ─── Tests ───
+
     describe("exit function", function () {
-        it("Should exit a Fluid position successfully with cbETH", async function () {
-            const vaultAddress = FLUID_cbETH_USDC_VAULT;
-            const fluidHelper = new FluidHelper(signer);
+        describe("full exit", function () {
+            it("Should exit a Fluid position successfully with cbETH", async function () {
+                await testExitPosition(getFluidExitConfig());
+            });
 
-            await testExitPosition({
-                protocol: Protocols.FLUID,
-                debtAsset: USDC_ADDRESS,
-                debtDecimals: 6,
-                collateralAsset: cbETH_ADDRESS,
-                collateralDecimals: 18,
-                setupPosition: async () => {
-                    await supplyAndBorrowOnFluid();
-                },
-                getDebtAmount: async () => {
-                    return await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                },
-                getCollateralAmount: async () => {
-                    return await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-                },
-                getExtraData: async () => {
-                    const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-                    return ethers.AbiCoder.defaultAbiCoder().encode(
-                        ["address", "uint256", "bool"],
-                        [vaultAddress, nftId, true], // isFullRepay = true
-                    );
-                },
-                validateDebtRepaid: async () => {
-                    const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
-                    expect(debtAfter).to.equal(0);
-                },
+            it("Should exit a Fluid position successfully with WETH", async function () {
+                await testExitPosition(
+                    getFluidExitConfig({ vaultAddress: FLUID_WETH_USDC_VAULT, collateralAsset: WETH_ADDRESS }),
+                );
+            });
+
+            it("Should exit a Fluid position successfully - Safe owner call via Safe transaction", async function () {
+                await testExitPosition({ ...getFluidExitConfig(), callViaSafe: true });
+            });
+
+            it("Should exit a Fluid position with withdrawCollateral=false - debt repaid, collateral remains", async function () {
+                await testExitPosition({ ...getFluidExitConfig(), withdrawCollateral: false });
+            });
+
+            it("Should exit a Morpho position successfully", async function () {
+                await testExitPosition(getMorphoExitConfig());
+            });
+
+            it("Should exit a Compound position successfully", async function () {
+                await testExitPosition(getCompoundExitConfig());
+            });
+
+            it("Should exit an Aave position successfully", async function () {
+                await testExitPosition(getAaveExitConfig());
             });
         });
 
-        it("Should exit a Fluid position successfully with WETH", async function () {
-            const vaultAddress = FLUID_WETH_USDC_VAULT;
-            const fluidHelper = new FluidHelper(signer);
+        describe("max collateral (type(uint256).max) with full debt repayment", function () {
+            it("Should exit an Aave position with type(uint256).max collateral amount", async function () {
+                await testExitPosition({
+                    ...getAaveExitConfig({ approvalAmount: ethers.MaxUint256 }),
+                    collateralAmountOverride: ethers.MaxUint256,
+                });
+            });
 
-            await testExitPosition({
-                protocol: Protocols.FLUID,
-                debtAsset: USDC_ADDRESS,
-                debtDecimals: 6,
-                collateralAsset: WETH_ADDRESS,
-                collateralDecimals: 18,
-                setupPosition: async () => {
-                    await supplyAndBorrowOnFluid(FLUID_WETH_USDC_VAULT, WETH_ADDRESS);
-                },
-                getDebtAmount: async () => {
-                    return await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                },
-                getCollateralAmount: async () => {
-                    return await fluidHelper.getCollateralAmount(WETH_ADDRESS, safeAddress);
-                },
-                getExtraData: async () => {
-                    const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-                    return ethers.AbiCoder.defaultAbiCoder().encode(
-                        ["address", "uint256", "bool"],
-                        [vaultAddress, nftId, true], // isFullRepay = true
-                    );
-                },
-                validateDebtRepaid: async () => {
-                    const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
-                    expect(debtAfter).to.equal(0);
-                },
+            it("Should exit a Compound position with type(uint256).max collateral amount", async function () {
+                await testExitPosition({ ...getCompoundExitConfig(), collateralAmountOverride: ethers.MaxUint256 });
+            });
+
+            it("Should exit a Morpho position with type(uint256).max collateral amount", async function () {
+                await testExitPosition({ ...getMorphoExitConfig(), collateralAmountOverride: ethers.MaxUint256 });
+            });
+
+            it("Should exit a Fluid position with type(uint256).max collateral amount", async function () {
+                await testExitPosition({ ...getFluidExitConfig(), collateralAmountOverride: ethers.MaxUint256 });
+            });
+
+            it("Should exit a Moonwell position with type(uint256).max collateral amount", async function () {
+                await testExitPosition({ ...getMoonwellExitConfig(), collateralAmountOverride: ethers.MaxUint256 });
             });
         });
 
-        it("Should exit a Fluid position successfully - Safe owner call via Safe transaction", async function () {
-            const vaultAddress = FLUID_cbETH_USDC_VAULT;
-            const fluidHelper = new FluidHelper(signer);
+        describe("partial debt repayment + max collateral withdrawal", function () {
+            it("Should exit an Aave position with type(uint256).max collateral and partial debt repayment", async function () {
+                await testExitPosition({
+                    ...getAaveExitConfig({ approvalAmount: ethers.MaxUint256 }),
+                    partialDebtRepay: true,
+                });
+            });
 
-            await testExitPosition({
-                protocol: Protocols.FLUID,
-                debtAsset: USDC_ADDRESS,
-                debtDecimals: 6,
-                collateralAsset: cbETH_ADDRESS,
-                collateralDecimals: 18,
-                setupPosition: async () => {
-                    await supplyAndBorrowOnFluid();
-                },
-                getDebtAmount: async () => {
-                    return await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                },
-                getCollateralAmount: async () => {
-                    return await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-                },
-                getExtraData: async () => {
-                    const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-                    return ethers.AbiCoder.defaultAbiCoder().encode(
-                        ["address", "uint256", "bool"],
-                        [vaultAddress, nftId, true], // isFullRepay = true
-                    );
-                },
-                validateDebtRepaid: async () => {
-                    const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
-                    expect(debtAfter).to.equal(0);
-                },
-                callViaSafe: true, // Call exit via Safe transaction instead of operator
+            it("Should exit a Compound position with type(uint256).max collateral and partial debt repayment", async function () {
+                await testExitPosition({ ...getCompoundExitConfig(), partialDebtRepay: true });
+            });
+
+            it("Should exit a Morpho position with type(uint256).max collateral and partial debt repayment", async function () {
+                await testExitPosition({ ...getMorphoExitConfig({ partialRepay: true }), partialDebtRepay: true });
+            });
+
+            it("Should exit a Fluid position with type(uint256).max collateral and partial debt repayment", async function () {
+                await testExitPosition({ ...getFluidExitConfig({ partialRepay: true }), partialDebtRepay: true });
+            });
+
+            it("Should exit a Moonwell position with type(uint256).max collateral and partial debt repayment", async function () {
+                await testExitPosition({ ...getMoonwellExitConfig(), partialDebtRepay: true });
             });
         });
 
-        it("Should exit a Fluid position with withdrawCollateral=false - debt repaid, collateral remains", async function () {
-            const vaultAddress = FLUID_cbETH_USDC_VAULT;
-            const fluidHelper = new FluidHelper(signer);
-
-            await testExitPosition({
-                protocol: Protocols.FLUID,
-                debtAsset: USDC_ADDRESS,
-                debtDecimals: 6,
-                collateralAsset: cbETH_ADDRESS,
-                collateralDecimals: 18,
-                setupPosition: async () => {
-                    await supplyAndBorrowOnFluid();
-                },
-                getDebtAmount: async () => {
-                    return await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                },
-                getCollateralAmount: async () => {
-                    return await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-                },
-                getExtraData: async () => {
-                    const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-                    return ethers.AbiCoder.defaultAbiCoder().encode(
-                        ["address", "uint256", "bool"],
-                        [vaultAddress, nftId, true], // isFullRepay = true
-                    );
-                },
-                validateDebtRepaid: async () => {
-                    const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
-                    expect(debtAfter).to.equal(0);
-                },
-                withdrawCollateral: false, // Test with withdrawCollateral=false
+        describe("max debt amount", function () {
+            it("Should exit a Fluid position using type(uint256).max for debt amount", async function () {
+                await testExitPosition({ ...getFluidExitConfig(), debtAmountOverride: ethers.MaxUint256 });
             });
         });
 
-        it("Should exit a Morpho position successfully", async function () {
-            const marketId = morphoMarket1Id;
-            const morphoHelper = new MorphoHelper(signer);
+        describe("revert / edge cases", function () {
+            it("Should revert when invalid comet address is passed for Compound withdraw", async function () {
+                const compoundHelper = new CompoundHelper(signer);
 
-            await testExitPosition({
-                protocol: Protocols.MORPHO,
-                debtAsset: USDC_ADDRESS,
-                debtDecimals: 6,
-                collateralAsset: cbETH_ADDRESS,
-                collateralDecimals: 18,
-                setupPosition: async () => {
-                    await supplyAndBorrow(Protocols.MORPHO);
-                    // Authorize Morpho for exit operations
-                    await morphoAuthorizeTxBySafe();
-                },
-                getDebtAmount: async () => {
-                    return await morphoHelper.getDebtAmount(marketId, safeAddress);
-                },
-                getCollateralAmount: async () => {
-                    return await morphoHelper.getCollateralAmount(marketId, safeAddress);
-                },
-                getExtraData: async () => {
-                    const borrowShares = await morphoHelper.getBorrowShares(marketId, safeAddress);
-                    return morphoHelper.encodeExtraData(marketId, borrowShares);
-                },
-                validateDebtRepaid: async () => {
-                    const debtAfter = await morphoHelper.getDebtAmount(marketId, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
-                    expect(debtAfter).to.equal(0);
-                },
-            });
-        });
+                await time.increaseTo((await time.latest()) + 3600);
+                await fundSignerWithETH(operator.address, "0.01");
 
-        it("Should exit a Compound position successfully", async function () {
-            const cometAddress = USDC_COMET_ADDRESS;
-            const compoundHelper = new CompoundHelper(signer);
+                await supplyAndBorrow(Protocols.COMPOUND);
+                await compoundAllowTxBySafe(USDC_ADDRESS);
 
-            await testExitPosition({
-                protocol: Protocols.COMPOUND,
-                debtAsset: USDC_ADDRESS,
-                debtDecimals: 6,
-                collateralAsset: cbETH_ADDRESS,
-                collateralDecimals: 18,
-                setupPosition: async () => {
-                    await supplyAndBorrow(Protocols.COMPOUND);
-                    // Authorize Compound for exit operations
-                    await compoundAllowTxBySafe(USDC_ADDRESS);
-                },
-                getDebtAmount: async () => {
-                    return await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
-                },
-                getCollateralAmount: async () => {
-                    return await compoundHelper.getCollateralAmount(cometAddress, cbETH_ADDRESS, safeAddress);
-                },
-                getExtraData: async () => {
-                    return compoundHelper.encodeExtraData(cometAddress);
-                },
-                validateDebtRepaid: async () => {
-                    const debtAfter = await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
-                    expect(debtAfter).to.equal(0);
-                },
-            });
-        });
+                const debtBefore = await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+                expect(debtBefore).to.be.gt(0);
 
-        it("Should revert when invalid comet address is passed for Compound withdraw", async function () {
-            const compoundHelper = new CompoundHelper(signer);
+                const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+                await debtContract.transfer(safeAddress, debtBefore + ethers.parseUnits("1", 6));
 
-            await time.increaseTo((await time.latest()) + 3600);
-            await fundSignerWithETH(operator.address, "0.01");
+                const collateralAmount = await compoundHelper.getCollateralAmount(
+                    USDC_COMET_ADDRESS,
+                    cbETH_ADDRESS,
+                    safeAddress,
+                );
 
-            // Setup a position on Compound
-            await supplyAndBorrow(Protocols.COMPOUND);
-            await compoundAllowTxBySafe(USDC_ADDRESS);
+                const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
 
-            const debtBefore = await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
-            expect(debtBefore).to.be.gt(0);
+                const randomAddress = ethers.Wallet.createRandom().address;
+                const invalidExtraData1 = ethers.AbiCoder.defaultAbiCoder().encode(["address"], [randomAddress]);
 
-            // Send debt tokens to Safe
-            const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
-            const repayAmount = debtBefore + ethers.parseUnits("1", 6);
-            await debtContract.transfer(safeAddress, repayAmount);
+                await expect(
+                    moduleContract.exit(
+                        Protocols.COMPOUND,
+                        USDC_ADDRESS,
+                        debtBefore,
+                        [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                        safeAddress,
+                        invalidExtraData1,
+                        true,
+                        { gasLimit: "2000000" },
+                    ),
+                ).to.be.reverted;
 
-            const collateralAmount = await compoundHelper.getCollateralAmount(
-                USDC_COMET_ADDRESS,
-                cbETH_ADDRESS,
-                safeAddress,
-            );
+                const wrongCometExtraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                    ["address"],
+                    ["0x46e6b214b524310239732D51387075E0e70970bf"],
+                );
 
-            const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
+                await expect(
+                    moduleContract.exit(
+                        Protocols.COMPOUND,
+                        USDC_ADDRESS,
+                        debtBefore,
+                        [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                        safeAddress,
+                        wrongCometExtraData,
+                        true,
+                        { gasLimit: "2000000" },
+                    ),
+                ).to.be.reverted;
 
-            // Test 1: Pass a random EOA address as comet - should revert
-            const randomAddress = ethers.Wallet.createRandom().address;
-            const invalidExtraData1 = ethers.AbiCoder.defaultAbiCoder().encode(["address"], [randomAddress]);
-
-            await expect(
-                moduleContract.exit(
+                const validExtraData = compoundHelper.encodeExtraData(USDC_COMET_ADDRESS);
+                await moduleContract.exit(
                     Protocols.COMPOUND,
                     USDC_ADDRESS,
                     debtBefore,
                     [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
                     safeAddress,
-                    invalidExtraData1,
+                    validExtraData,
                     true,
                     { gasLimit: "2000000" },
-                ),
-            ).to.be.reverted;
-            console.log("Test 1 passed: Random EOA address correctly reverted");
+                );
 
-            // Test 2: Pass a different valid comet (WETH comet) where user has no position - should revert
-            const wrongCometExtraData = ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address"],
-                ["0x46e6b214b524310239732D51387075E0e70970bf"], // WETH Comet address
-            );
+                const debtAfter = await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+                expect(debtAfter).to.equal(0);
+            });
 
-            await expect(
-                moduleContract.exit(
-                    Protocols.COMPOUND,
+            it("Should revert exit with type(uint256).max when Safe has insufficient balance", async function () {
+                const vaultAddress = FLUID_cbETH_USDC_VAULT;
+                const fluidHelper = new FluidHelper(signer);
+
+                await time.increaseTo((await time.latest()) + 3600);
+                await fundSignerWithETH(operator.address, "0.01");
+
+                await supplyAndBorrowOnFluid();
+
+                const debtBefore = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
+                expect(debtBefore).to.be.gt(0);
+
+                const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+                const insufficientAmount = debtBefore / 2n;
+                await debtContract.transfer(safeAddress, insufficientAmount);
+
+                const safeBalance = await debtContract.balanceOf(safeAddress);
+                expect(safeBalance).to.be.lt(debtBefore);
+
+                const collateralAmount = await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+                const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
+                const extraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                    ["address", "uint256", "bool"],
+                    [vaultAddress, nftId, true],
+                );
+
+                const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
+
+                await expect(
+                    moduleContract.exit(
+                        Protocols.FLUID,
+                        USDC_ADDRESS,
+                        ethers.MaxUint256,
+                        [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                        safeAddress,
+                        extraData,
+                        true,
+                        { gasLimit: "2000000" },
+                    ),
+                ).to.be.revertedWith("Insufficient balance");
+            });
+
+            it("Should withdraw collateral only on Aave with debtAmount=0 after debt is fully repaid", async function () {
+                const aaveHelper = new AaveV3Helper(signer);
+
+                await time.increaseTo((await time.latest()) + 3600);
+                await fundSignerWithETH(operator.address, "0.01");
+
+                await supplyAndBorrow(Protocols.AAVE_V3);
+                await approveAaveAToken(ethers.parseEther("1"));
+
+                const debtBefore = await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+                expect(debtBefore).to.be.gt(0);
+
+                const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+                await debtContract.transfer(safeAddress, debtBefore + ethers.parseUnits("1", 6));
+
+                const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
+                const collateralAmount = await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+
+                const exitTx = await moduleContract.exit(
+                    Protocols.AAVE_V3,
                     USDC_ADDRESS,
-                    debtBefore,
+                    ethers.MaxUint256,
                     [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
                     safeAddress,
-                    wrongCometExtraData,
+                    "0x",
+                    false,
+                    { gasLimit: "2000000" },
+                );
+                await exitTx.wait();
+
+                const debtAfter = await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
+                expect(debtAfter).to.equal(0);
+
+                const collateralInProtocol = await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+                expect(collateralInProtocol).to.be.gt(0);
+
+                const collateralContract = new ethers.Contract(cbETH_ADDRESS, ERC20_ABI, signer);
+                const collateralBalanceBefore = await collateralContract.balanceOf(safeAddress);
+
+                const withdrawTx = await moduleContract.exit(
+                    Protocols.AAVE_V3,
+                    USDC_ADDRESS,
+                    0n,
+                    [{ asset: cbETH_ADDRESS, amount: collateralInProtocol }],
+                    safeAddress,
+                    "0x",
                     true,
                     { gasLimit: "2000000" },
-                ),
-            ).to.be.reverted;
-            console.log("Test 2 passed: Wrong comet (no position) correctly reverted");
+                );
+                const receipt = await withdrawTx.wait();
 
-            // Test 3: Verify the correct comet address works
-            const validExtraData = compoundHelper.encodeExtraData(USDC_COMET_ADDRESS);
-            await moduleContract.exit(
-                Protocols.COMPOUND,
-                USDC_ADDRESS,
-                debtBefore,
-                [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
-                safeAddress,
-                validExtraData,
-                true,
-                { gasLimit: "2000000" },
-            );
+                const exitEvent = receipt!.logs.find((log: any) => {
+                    try {
+                        const parsed = moduleContract.interface.parseLog({
+                            topics: [...log.topics],
+                            data: log.data,
+                        });
+                        return parsed?.name === "DebtPositionExited";
+                    } catch {
+                        return false;
+                    }
+                });
+                expect(exitEvent).to.not.be.undefined;
 
-            const debtAfter = await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
-            expect(debtAfter).to.equal(0);
-            console.log("Test 3 passed: Valid comet address works correctly");
-        });
+                const collateralBalanceAfter = await collateralContract.balanceOf(safeAddress);
+                expect(collateralBalanceAfter).to.be.gt(collateralBalanceBefore);
 
-        it("Should exit an Aave position successfully", async function () {
-            const aaveHelper = new AaveV3Helper(signer);
-
-            await testExitPosition({
-                protocol: Protocols.AAVE_V3,
-                debtAsset: USDC_ADDRESS,
-                debtDecimals: 6,
-                collateralAsset: cbETH_ADDRESS,
-                collateralDecimals: 18,
-                setupPosition: async () => {
-                    await supplyAndBorrow(Protocols.AAVE_V3);
-
-                    // Approve aToken for SafeDebtManager to withdraw collateral
-                    const aTokenAddress = await aaveHelper.getATokenAddress(cbETH_ADDRESS);
-                    const token = new ethers.Contract(aTokenAddress, ERC20_ABI, signer);
-
-                    const approveTransactionData: MetaTransactionData = {
-                        to: aTokenAddress,
-                        value: "0",
-                        data: token.interface.encodeFunctionData("approve", [
-                            safeModuleAddress,
-                            ethers.parseEther("1"),
-                        ]),
-                        operation: OperationType.Call,
-                    };
-
-                    const safeApproveTransaction = await safeWallet.createTransaction({
-                        transactions: [approveTransactionData],
-                    });
-
-                    await safeWallet.executeTransaction(safeApproveTransaction);
-                    console.log("Safe transaction: Aave aToken approved");
-                },
-                getDebtAmount: async () => {
-                    return await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
-                },
-                getCollateralAmount: async () => {
-                    return await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-                },
-                getExtraData: async () => {
-                    return "0x";
-                },
-                validateDebtRepaid: async () => {
-                    const debtAfter = await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
-                    expect(debtAfter).to.equal(0);
-                },
-            });
-        });
-
-        it("Should exit a Fluid position using type(uint256).max for debt amount", async function () {
-            const vaultAddress = FLUID_cbETH_USDC_VAULT;
-            const fluidHelper = new FluidHelper(signer);
-
-            await testExitPosition({
-                protocol: Protocols.FLUID,
-                debtAsset: USDC_ADDRESS,
-                debtDecimals: 6,
-                collateralAsset: cbETH_ADDRESS,
-                collateralDecimals: 18,
-                setupPosition: async () => {
-                    await supplyAndBorrowOnFluid();
-                },
-                getDebtAmount: async () => {
-                    return await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                },
-                getCollateralAmount: async () => {
-                    return await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-                },
-                getExtraData: async () => {
-                    const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-                    return ethers.AbiCoder.defaultAbiCoder().encode(
-                        ["address", "uint256", "bool"],
-                        [vaultAddress, nftId, true], // isFullRepay = true
-                    );
-                },
-                validateDebtRepaid: async () => {
-                    const debtAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-                    console.log("Debt after exit:", ethers.formatUnits(debtAfter, 6));
-                    expect(debtAfter).to.equal(0);
-                },
-                debtAmountOverride: ethers.MaxUint256, // Use type(uint256).max
-            });
-        });
-
-        it("Should revert exit with type(uint256).max when Safe has insufficient balance", async function () {
-            const vaultAddress = FLUID_cbETH_USDC_VAULT;
-            const fluidHelper = new FluidHelper(signer);
-
-            await time.increaseTo((await time.latest()) + 3600); // 1 hour
-
-            // Fund the operator with ETH for gas
-            await fundSignerWithETH(operator.address, "0.01");
-
-            // Step 1: Create a position (supply collateral and borrow)
-            await supplyAndBorrowOnFluid();
-
-            // Step 2: Get current debt amount
-            const debtBefore = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
-            console.log("Debt before exit:", ethers.formatUnits(debtBefore, 6));
-            expect(debtBefore).to.be.gt(0);
-
-            // Step 3: Send LESS debt tokens to Safe than required (only half the debt)
-            const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
-            const insufficientAmount = debtBefore / 2n; // Only half the debt
-            const transferTx = await debtContract.transfer(safeAddress, insufficientAmount);
-            await transferTx.wait();
-            console.log("Transferred insufficient debt tokens to Safe:", ethers.formatUnits(insufficientAmount, 6));
-
-            // Step 4: Verify Safe balance is less than debt
-            const safeBalance = await debtContract.balanceOf(safeAddress);
-            console.log("Safe balance:", ethers.formatUnits(safeBalance, 6));
-            expect(safeBalance).to.be.lt(debtBefore);
-
-            // Step 5: Get collateral amount and extra data
-            const collateralAmount = await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-            const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-            const extraData = ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "uint256", "bool"],
-                [vaultAddress, nftId, true],
-            );
-
-            // Step 6: Call exit with type(uint256).max - should revert
-            const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
-
-            await expect(
-                moduleContract.exit(
-                    Protocols.FLUID,
-                    USDC_ADDRESS,
-                    ethers.MaxUint256, // type(uint256).max
-                    [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
-                    safeAddress,
-                    extraData,
-                    true, // withdrawCollateral
-                    {
-                        gasLimit: "2000000",
-                    },
-                ),
-            ).to.be.revertedWith("Insufficient balance");
-
-            console.log("Transaction correctly reverted with 'Insufficient balance'");
-        });
-
-        it("Should withdraw collateral only on Aave with debtAmount=0 after debt is fully repaid", async function () {
-            const aaveHelper = new AaveV3Helper(signer);
-
-            await time.increaseTo((await time.latest()) + 3600); // 1 hour
-
-            // Fund the operator with ETH for gas
-            await fundSignerWithETH(operator.address, "0.01");
-
-            // Step 1: Create a position (supply collateral and borrow)
-            await supplyAndBorrow(Protocols.AAVE_V3);
-
-            // Approve aToken for SafeDebtManager to withdraw collateral
-            const aTokenAddress = await aaveHelper.getATokenAddress(cbETH_ADDRESS);
-            const aToken = new ethers.Contract(aTokenAddress, ERC20_ABI, signer);
-
-            const approveTransactionData: MetaTransactionData = {
-                to: aTokenAddress,
-                value: "0",
-                data: aToken.interface.encodeFunctionData("approve", [safeModuleAddress, ethers.parseEther("1")]),
-                operation: OperationType.Call,
-            };
-
-            const safeApproveTransaction = await safeWallet.createTransaction({
-                transactions: [approveTransactionData],
+                const collateralInProtocolAfter = await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+                expect(collateralInProtocolAfter).to.be.closeTo(0n, ethers.parseEther("0.0001"));
             });
 
-            await safeWallet.executeTransaction(safeApproveTransaction);
-            console.log("Safe transaction: Aave aToken approved");
+            it("Should revert exit with debtAmount=0 when withdrawCollateral=false", async function () {
+                const vaultAddress = FLUID_cbETH_USDC_VAULT;
+                const fluidHelper = new FluidHelper(signer);
 
-            // Step 2: Get current debt amount
-            const debtBefore = await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
-            console.log("Debt before repayment:", ethers.formatUnits(debtBefore, 6));
-            expect(debtBefore).to.be.gt(0);
+                await time.increaseTo((await time.latest()) + 3600);
+                await fundSignerWithETH(operator.address, "0.01");
 
-            // Step 3: Send debt tokens to Safe to cover the repayment
-            const debtContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
-            const repayAmount = debtBefore + ethers.parseUnits("1", 6); // Add buffer for interest
-            const transferTx = await debtContract.transfer(safeAddress, repayAmount);
-            await transferTx.wait();
+                await supplyAndBorrowOnFluid();
 
-            // Step 4: Repay debt without withdrawing collateral
-            const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
-            const collateralAmount = await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+                const collateralAmount = await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
+                const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
+                const extraData = ethers.AbiCoder.defaultAbiCoder().encode(
+                    ["address", "uint256", "bool"],
+                    [vaultAddress, nftId, true],
+                );
 
-            const exitTx = await moduleContract.exit(
-                Protocols.AAVE_V3,
-                USDC_ADDRESS,
-                ethers.MaxUint256,
-                [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
-                safeAddress,
-                "0x",
-                false, // withdrawCollateral = false (only repay debt)
-                { gasLimit: "2000000" },
-            );
-            await exitTx.wait();
-            console.log("Debt repaid without withdrawing collateral");
+                const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
 
-            // Step 5: Verify debt is now 0
-            const debtAfter = await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
-            console.log("Debt after repayment:", ethers.formatUnits(debtAfter, 6));
-            expect(debtAfter).to.equal(0);
-
-            // Step 6: Verify collateral is still in protocol
-            const collateralInProtocol = await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-            console.log("Collateral still in protocol:", ethers.formatUnits(collateralInProtocol, 18));
-            expect(collateralInProtocol).to.be.gt(0);
-
-            // Step 7: Get collateral balance before withdrawal
-            const collateralContract = new ethers.Contract(cbETH_ADDRESS, ERC20_ABI, signer);
-            const collateralBalanceBefore = await collateralContract.balanceOf(safeAddress);
-
-            // Step 8: Call exit with debtAmount=0 and withdrawCollateral=true (collateral-only withdrawal)
-            // This should work on Aave V3 because we skip the repay path entirely
-            const withdrawTx = await moduleContract.exit(
-                Protocols.AAVE_V3,
-                USDC_ADDRESS,
-                0n, // debtAmount = 0 (collateral-only withdrawal)
-                [{ asset: cbETH_ADDRESS, amount: collateralInProtocol }],
-                safeAddress,
-                "0x",
-                true, // withdrawCollateral = true
-                { gasLimit: "2000000" },
-            );
-            const receipt = await withdrawTx.wait();
-            console.log("Collateral-only withdrawal on Aave completed successfully");
-
-            // Verify DebtPositionExited event was emitted
-            const exitEvent = receipt!.logs.find((log: any) => {
-                try {
-                    const parsed = moduleContract.interface.parseLog({
-                        topics: [...log.topics],
-                        data: log.data,
-                    });
-                    return parsed?.name === "DebtPositionExited";
-                } catch {
-                    return false;
-                }
+                await expect(
+                    moduleContract.exit(
+                        Protocols.FLUID,
+                        USDC_ADDRESS,
+                        0n,
+                        [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
+                        safeAddress,
+                        extraData,
+                        false,
+                        { gasLimit: "2000000" },
+                    ),
+                ).to.be.revertedWith("Debt amount below minimum threshold");
             });
-            expect(exitEvent).to.not.be.undefined;
-
-            // Step 9: Verify collateral was withdrawn to Safe
-            const collateralBalanceAfter = await collateralContract.balanceOf(safeAddress);
-            console.log("Collateral balance after withdrawal:", ethers.formatUnits(collateralBalanceAfter, 18));
-            expect(collateralBalanceAfter).to.be.gt(collateralBalanceBefore);
-
-            // Collateral in protocol should be 0 or very close to 0
-            const collateralInProtocolAfter = await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-            console.log("Collateral in protocol after withdrawal:", ethers.formatUnits(collateralInProtocolAfter, 18));
-            expect(collateralInProtocolAfter).to.be.closeTo(0n, ethers.parseEther("0.0001"));
-        });
-
-        it("Should revert exit with debtAmount=0 when withdrawCollateral=false", async function () {
-            const vaultAddress = FLUID_cbETH_USDC_VAULT;
-            const fluidHelper = new FluidHelper(signer);
-
-            await time.increaseTo((await time.latest()) + 3600); // 1 hour
-
-            // Fund the operator with ETH for gas
-            await fundSignerWithETH(operator.address, "0.01");
-
-            // Step 1: Create a position
-            await supplyAndBorrowOnFluid();
-
-            const collateralAmount = await fluidHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
-            const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
-            const extraData = ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "uint256", "bool"],
-                [vaultAddress, nftId, true],
-            );
-
-            const moduleContract = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, operator);
-
-            // debtAmount=0 with withdrawCollateral=false should revert
-            await expect(
-                moduleContract.exit(
-                    Protocols.FLUID,
-                    USDC_ADDRESS,
-                    0n, // debtAmount = 0
-                    [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
-                    safeAddress,
-                    extraData,
-                    false, // withdrawCollateral = false
-                    { gasLimit: "2000000" },
-                ),
-            ).to.be.revertedWith("Debt amount below minimum threshold");
-
-            console.log("Transaction correctly reverted with 'Debt amount below minimum threshold'");
         });
     });
 });

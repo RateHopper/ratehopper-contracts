@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import "../interfaces/safe/ISafe.sol";
 import "../interfaces/moonwell/IMToken.sol";
-import {IComptroller} from "../interfaces/moonwell/Comptroller.sol";
+import {IComptroller, IMoonwellOracle} from "../interfaces/moonwell/Comptroller.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../Types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -172,24 +172,40 @@ contract MoonwellHandler is BaseProtocolHandler {
             address mTokenAddress = getMContract(collateralAssets[i].asset);
             if (mTokenAddress == address(0)) revert TokenNotRegistered();
 
-            _executeSafeTransactionWithMoonwellCheck(
-                onBehalfOf,
-                mTokenAddress,
-                abi.encodeCall(IMToken.redeemUnderlying, (collateralAssets[i].amount)),
-                "Redeem transaction failed"
-            );
+            // Track ETH balance before redeem to only wrap ETH received from Moonwell
+            uint256 ethBefore = collateralAssets[i].asset == registry.WETH_ADDRESS() ? address(onBehalfOf).balance : 0;
 
-             // Moonwell sends ETH instead of WETH when withdrawing, so wrap it for compatibility with other protocols.
-             if (collateralAssets[i].asset == registry.WETH_ADDRESS()) {
-                bool successWrap = ISafe(onBehalfOf).execTransactionFromModule(
-                    registry.WETH_ADDRESS(),
-                    collateralAssets[i].amount,
-                    abi.encodeCall(IWETH9.deposit, ()),
-                    ISafe.Operation.Call
+            if (collateralAssets[i].amount == type(uint256).max) {
+                uint256 mTokenBalance = IERC20(mTokenAddress).balanceOf(onBehalfOf);
+                require(mTokenBalance > 0, "No collateral available to withdraw");
+                _executeSafeTransactionWithMoonwellCheck(
+                    onBehalfOf,
+                    mTokenAddress,
+                    abi.encodeCall(IMToken.redeem, (mTokenBalance)),
+                    "Redeem transaction failed"
                 );
-                require(successWrap, "WETH wrap failed");
+            } else {
+                _executeSafeTransactionWithMoonwellCheck(
+                    onBehalfOf,
+                    mTokenAddress,
+                    abi.encodeCall(IMToken.redeemUnderlying, (collateralAssets[i].amount)),
+                    "Redeem transaction failed"
+                );
             }
 
+            // Moonwell sends ETH instead of WETH when withdrawing, so wrap only the ETH received from redemption.
+            if (collateralAssets[i].asset == registry.WETH_ADDRESS()) {
+                uint256 ethReceived = address(onBehalfOf).balance - ethBefore;
+                if (ethReceived > 0) {
+                    bool successWrap = ISafe(onBehalfOf).execTransactionFromModule(
+                        registry.WETH_ADDRESS(),
+                        ethReceived,
+                        abi.encodeCall(IWETH9.deposit, ()),
+                        ISafe.Operation.Call
+                    );
+                    require(successWrap, "WETH wrap failed");
+                }
+            }
 
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(onBehalfOf);
             require(currentBalance > 0, "No collateral balance available");
@@ -353,24 +369,55 @@ contract MoonwellHandler is BaseProtocolHandler {
         address mTokenAddress = getMContract(asset);
         if (mTokenAddress == address(0)) revert TokenNotRegistered();
 
-        // Redeem underlying asset from Moonwell
-        _executeSafeTransactionWithMoonwellCheck(
-            onBehalfOf,
-            mTokenAddress,
-            abi.encodeCall(IMToken.redeemUnderlying, (amount)),
-            "Redeem transaction failed"
-        );
+        // Track ETH balance before redeem to only wrap ETH received from Moonwell
+        uint256 ethBefore = asset == registry.WETH_ADDRESS() ? address(onBehalfOf).balance : 0;
 
-        // Moonwell sends ETH instead of WETH when withdrawing, so wrap it for compatibility with other protocols.
-        if (asset == registry.WETH_ADDRESS()) {
-            uint256 ethBalanceInSafe = address(onBehalfOf).balance;
-            bool successWrap = ISafe(onBehalfOf).execTransactionFromModule(
-                registry.WETH_ADDRESS(),
-                ethBalanceInSafe,
-                abi.encodeCall(IWETH9.deposit, ()),
-                ISafe.Operation.Call
+        // Redeem from Moonwell
+        if (amount == type(uint256).max) {
+            uint256 maxWithdraw = _calculateMaxWithdrawAmount(asset, onBehalfOf);
+            require(maxWithdraw > 0, "No collateral available to withdraw");
+
+            uint256 mTokenBalance = IERC20(mTokenAddress).balanceOf(onBehalfOf);
+            uint256 exchangeRate = IMToken(mTokenAddress).exchangeRateStored();
+            uint256 underlyingBalance = (mTokenBalance * exchangeRate) / 1e18;
+
+            // If max withdrawal >= underlying balance (no debt constraint), redeem all mTokens
+            if (maxWithdraw >= underlyingBalance) {
+                _executeSafeTransactionWithMoonwellCheck(
+                    onBehalfOf,
+                    mTokenAddress,
+                    abi.encodeCall(IMToken.redeem, (mTokenBalance)),
+                    "Redeem transaction failed"
+                );
+            } else {
+                _executeSafeTransactionWithMoonwellCheck(
+                    onBehalfOf,
+                    mTokenAddress,
+                    abi.encodeCall(IMToken.redeemUnderlying, (maxWithdraw)),
+                    "Redeem transaction failed"
+                );
+            }
+        } else {
+            _executeSafeTransactionWithMoonwellCheck(
+                onBehalfOf,
+                mTokenAddress,
+                abi.encodeCall(IMToken.redeemUnderlying, (amount)),
+                "Redeem transaction failed"
             );
-            require(successWrap, "WETH wrap failed");
+        }
+
+        // Moonwell sends ETH instead of WETH when withdrawing, so wrap only the ETH received from redemption.
+        if (asset == registry.WETH_ADDRESS()) {
+            uint256 ethReceived = address(onBehalfOf).balance - ethBefore;
+            if (ethReceived > 0) {
+                bool successWrap = ISafe(onBehalfOf).execTransactionFromModule(
+                    registry.WETH_ADDRESS(),
+                    ethReceived,
+                    abi.encodeCall(IWETH9.deposit, ()),
+                    ISafe.Operation.Call
+                );
+                require(successWrap, "WETH wrap failed");
+            }
         }
 
         // Transfer withdrawn asset from Safe to handler contract
@@ -382,5 +429,39 @@ contract MoonwellHandler is BaseProtocolHandler {
             ISafe.Operation.Call
         );
         require(successTransfer, "Transfer transaction failed");
+    }
+
+    function _calculateMaxWithdrawAmount(address asset, address user) internal view returns (uint256) {
+        address mTokenAddress = getMContract(asset);
+
+        uint256 mTokenBalance = IERC20(mTokenAddress).balanceOf(user);
+        if (mTokenBalance == 0) return 0;
+
+        IComptroller comptroller = IComptroller(COMPTROLLER);
+        (uint256 error, uint256 liquidity, uint256 shortfall) = comptroller.getAccountLiquidity(user);
+        require(error == 0, "Comptroller error");
+
+        if (shortfall > 0) return 0;
+
+        IMoonwellOracle oracle = IMoonwellOracle(comptroller.oracle());
+        uint256 oraclePrice = oracle.getUnderlyingPrice(mTokenAddress);
+        (, uint256 collateralFactor) = comptroller.markets(mTokenAddress);
+
+        if (oraclePrice == 0 || collateralFactor == 0) return 0;
+
+        // maxWithdraw = liquidity * 1e36 / (oraclePrice * collateralFactor)
+        uint256 maxWithdraw = (liquidity * 1e36) / (oraclePrice * collateralFactor);
+
+        uint256 exchangeRate = IMToken(mTokenAddress).exchangeRateStored();
+        uint256 underlyingBalance = (mTokenBalance * exchangeRate) / 1e18;
+
+        // If we can withdraw everything, return full balance
+        if (maxWithdraw >= underlyingBalance) {
+            return underlyingBalance;
+        }
+
+        // Apply 0.1% safety margin when constrained by debt
+        maxWithdraw = (maxWithdraw * 999) / 1000;
+        return maxWithdraw;
     }
 }
