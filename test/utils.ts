@@ -21,7 +21,7 @@ export const protocolHelperMap = new Map<Protocols, any>([
     [Protocols.MOONWELL, MoonwellHelper],
 ]);
 
-export const defaultProvider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
+export const defaultProvider = new ethers.JsonRpcProvider(process.env.BASE_RPC_URL || "https://mainnet.base.org");
 
 export async function approve(tokenAddress: string, spenderAddress: string, signer: any) {
     const token = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
@@ -31,7 +31,7 @@ export async function approve(tokenAddress: string, spenderAddress: string, sign
 }
 
 export async function getDecimals(tokenAddress: string): Promise<number> {
-    const provider = new ethers.JsonRpcProvider("https://base.llamarpc.com");
+    const provider = new ethers.JsonRpcProvider(process.env.BASE_RPC_URL || "https://mainnet.base.org");
 
     const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
     return await tokenContract.decimals();

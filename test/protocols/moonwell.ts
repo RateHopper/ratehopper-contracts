@@ -1,6 +1,6 @@
 import { ethers } from "hardhat";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { cbETH_ADDRESS, DEFAULT_SUPPLY_AMOUNT, TEST_ADDRESS } from "../constants";
+import { DEFAULT_SUPPLY_AMOUNT, TEST_ADDRESS, WETH_ADDRESS } from "../constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { approve, defaultProvider, formatAmount, getDecimals } from "../utils";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
@@ -98,7 +98,7 @@ export class MoonwellHelper {
 
     async getSupplyAndBorrowTxdata(
         debtTokenAddress,
-        collateralAddress = cbETH_ADDRESS,
+        collateralAddress = WETH_ADDRESS,
         customBorrowAmount?: bigint,
     ): Promise<MetaTransactionData[]> {
         const collateralMTokenAddress = mContractAddressMap.get(collateralAddress)!;

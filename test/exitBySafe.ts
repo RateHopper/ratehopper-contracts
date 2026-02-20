@@ -209,13 +209,13 @@ describe("Safe wallet exit function tests", function () {
             protocol: Protocols.MOONWELL,
             debtAsset: USDC_ADDRESS,
             debtDecimals: 6,
-            collateralAsset: cbETH_ADDRESS,
+            collateralAsset: WETH_ADDRESS,
             collateralDecimals: 18,
             setupPosition: async () => {
-                await supplyAndBorrow(Protocols.MOONWELL);
+                await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS, WETH_ADDRESS);
             },
             getDebtAmount: () => moonwellHelper.getDebtAmount(USDC_ADDRESS, safeAddress),
-            getCollateralAmount: () => moonwellHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress),
+            getCollateralAmount: () => moonwellHelper.getCollateralAmount(WETH_ADDRESS, safeAddress),
             getExtraData: async () => "0x",
             validateDebtRepaid: async () => {
                 const debtAfter = await moonwellHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
@@ -461,7 +461,7 @@ describe("Safe wallet exit function tests", function () {
             });
         });
 
-        describe.only("partial debt repayment + max collateral withdrawal", function () {
+        describe("partial debt repayment + max collateral withdrawal", function () {
             it("Should exit an Aave position with type(uint256).max collateral and partial debt repayment", async function () {
                 await testExitPosition({
                     ...getAaveExitConfig({ approvalAmount: ethers.MaxUint256 }),

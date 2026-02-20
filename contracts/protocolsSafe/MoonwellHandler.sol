@@ -172,6 +172,9 @@ contract MoonwellHandler is BaseProtocolHandler {
             address mTokenAddress = getMContract(collateralAssets[i].asset);
             if (mTokenAddress == address(0)) revert TokenNotRegistered();
 
+            // Track ETH balance before redeem to only wrap ETH received from Moonwell
+            uint256 ethBefore = collateralAssets[i].asset == registry.WETH_ADDRESS() ? address(onBehalfOf).balance : 0;
+
             if (collateralAssets[i].amount == type(uint256).max) {
                 uint256 mTokenBalance = IERC20(mTokenAddress).balanceOf(onBehalfOf);
                 require(mTokenBalance > 0, "No collateral available to withdraw");
@@ -190,13 +193,13 @@ contract MoonwellHandler is BaseProtocolHandler {
                 );
             }
 
-            // Moonwell sends ETH instead of WETH when withdrawing, so wrap it for compatibility with other protocols.
+            // Moonwell sends ETH instead of WETH when withdrawing, so wrap only the ETH received from redemption.
             if (collateralAssets[i].asset == registry.WETH_ADDRESS()) {
-                uint256 ethBalance = address(onBehalfOf).balance;
-                if (ethBalance > 0) {
+                uint256 ethReceived = address(onBehalfOf).balance - ethBefore;
+                if (ethReceived > 0) {
                     bool successWrap = ISafe(onBehalfOf).execTransactionFromModule(
                         registry.WETH_ADDRESS(),
-                        ethBalance,
+                        ethReceived,
                         abi.encodeCall(IWETH9.deposit, ()),
                         ISafe.Operation.Call
                     );
@@ -366,6 +369,9 @@ contract MoonwellHandler is BaseProtocolHandler {
         address mTokenAddress = getMContract(asset);
         if (mTokenAddress == address(0)) revert TokenNotRegistered();
 
+        // Track ETH balance before redeem to only wrap ETH received from Moonwell
+        uint256 ethBefore = asset == registry.WETH_ADDRESS() ? address(onBehalfOf).balance : 0;
+
         // Redeem from Moonwell
         if (amount == type(uint256).max) {
             uint256 maxWithdraw = _calculateMaxWithdrawAmount(asset, onBehalfOf);
@@ -400,13 +406,13 @@ contract MoonwellHandler is BaseProtocolHandler {
             );
         }
 
-        // Moonwell sends ETH instead of WETH when withdrawing, so wrap it for compatibility with other protocols.
+        // Moonwell sends ETH instead of WETH when withdrawing, so wrap only the ETH received from redemption.
         if (asset == registry.WETH_ADDRESS()) {
-            uint256 ethBalance = address(onBehalfOf).balance;
-            if (ethBalance > 0) {
+            uint256 ethReceived = address(onBehalfOf).balance - ethBefore;
+            if (ethReceived > 0) {
                 bool successWrap = ISafe(onBehalfOf).execTransactionFromModule(
                     registry.WETH_ADDRESS(),
-                    ethBalance,
+                    ethReceived,
                     abi.encodeCall(IWETH9.deposit, ()),
                     ISafe.Operation.Call
                 );
