@@ -64,7 +64,7 @@ contract MorphoHandler is BaseProtocolHandler {
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(extraData, (MarketParams, uint256));
         require(marketParams.loanToken == fromAsset, "fromAsset mismatch with marketParams in extraData");
 
-        IERC20(fromAsset).forceApprove(address(morpho), amount);
+        IERC20(fromAsset).forceApprove(address(morpho), amount + (amount / 100));
         morpho.repay(marketParams, 0, borrowShares, onBehalfOf, "");
 
         uint256 withdrawAmount = collateralAssets[0].amount;
