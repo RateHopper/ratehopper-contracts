@@ -26,4 +26,8 @@ interface IComet {
     function baseTokenPriceFeed() external view returns (address);
     function getPrice(address priceFeed) external view returns (uint256);
     function baseScale() external view returns (uint256);
+
+    function numAssets() external view returns (uint8);
+    function getAssetInfo(uint8 i) external view returns (AssetInfo memory);
+    function baseToken() external view returns (address);
 }

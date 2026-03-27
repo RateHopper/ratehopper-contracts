@@ -152,11 +152,10 @@ contract MorphoHandler is BaseProtocolHandler {
         IERC20(asset).forceApprove(address(morpho), 0);
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) {
-        require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-
+    function withdraw(address /* asset */, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) {
         // Decode market parameters from extraData
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
+        require(registry.isWhitelisted(marketParams.collateralToken), "Asset is not whitelisted");
 
         uint256 withdrawAmount = amount;
         if (amount == type(uint256).max) {
