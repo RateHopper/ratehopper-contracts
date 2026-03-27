@@ -189,6 +189,7 @@ contract CompoundHandler is BaseProtocolHandler {
         }
 
         uint256 basePrice = comet.getPrice(comet.baseTokenPriceFeed());
+        if (basePrice == 0) return 0;
         uint256 baseScaleVal = comet.baseScale();
 
         // Calculate total collateral value across all assets (in base units), using the same logic as Compound's internal isBorrowCollateralized()

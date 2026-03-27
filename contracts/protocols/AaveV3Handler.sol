@@ -192,6 +192,7 @@ contract AaveV3Handler is BaseProtocolHandler {
         if (currentLiquidationThreshold == 0) return 0;
 
         (, , uint256 assetLT, , , , , , , ) = dataProvider.getReserveConfigurationData(asset);
+        if (assetLT == 0) return 0;
 
         uint256 currentWeightedCollateralBase = (totalCollateralBase * currentLiquidationThreshold) / LIQ_THRESHOLD_PRECISION;
 
