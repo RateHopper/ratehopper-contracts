@@ -191,13 +191,14 @@ contract AaveV3Handler is BaseProtocolHandler {
 
         if (currentLiquidationThreshold == 0) return 0;
 
-        uint256 minCollateralBase = (totalDebtBase * LIQ_THRESHOLD_PRECISION) / currentLiquidationThreshold;
+        (, , uint256 assetLT, , , , , , , ) = dataProvider.getReserveConfigurationData(asset);
+        if (assetLT == 0) return 0;
 
-        if (totalCollateralBase <= minCollateralBase) {
-            return 0;
-        }
+        uint256 currentWeightedCollateralBase = (totalCollateralBase * currentLiquidationThreshold) / LIQ_THRESHOLD_PRECISION;
 
-        uint256 maxWithdrawBase = totalCollateralBase - minCollateralBase;
+        if (currentWeightedCollateralBase <= totalDebtBase) return 0;
+
+        uint256 maxWithdrawBase = ((currentWeightedCollateralBase - totalDebtBase) * LIQ_THRESHOLD_PRECISION) / assetLT;
 
         IPoolAddressesProvider addressProvider = aaveV3Pool.ADDRESSES_PROVIDER();
         IAaveOracle oracle = IAaveOracle(addressProvider.getPriceOracle());

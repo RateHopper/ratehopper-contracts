@@ -90,7 +90,7 @@ contract FluidSafeHandler is BaseProtocolHandler {
 
         (address vaultAddress, uint256 nftId, ) = abi.decode(extraData, (address, uint256, bool));
 
-        IERC20(fromAsset).transfer(onBehalfOf, amount);
+        IERC20(fromAsset).safeTransfer(onBehalfOf, amount);
 
         bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
             fromAsset,
@@ -180,7 +180,7 @@ contract FluidSafeHandler is BaseProtocolHandler {
             approvalAmount = amount;
         }
 
-        IERC20(asset).transfer(onBehalfOf, amount);
+        IERC20(asset).safeTransfer(onBehalfOf, amount);
 
         bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
             asset,
@@ -223,7 +223,7 @@ contract FluidSafeHandler is BaseProtocolHandler {
         // Check if asset is WETH
         if (asset == registry.WETH_ADDRESS()) {
             // Transfer WETH to onBehalfOf first
-            IERC20(asset).transfer(onBehalfOf, amount);
+            IERC20(asset).safeTransfer(onBehalfOf, amount);
 
             // Unwrap WETH to ETH in the Safe
             bool successUnwrap = ISafe(onBehalfOf).execTransactionFromModule(
@@ -253,7 +253,7 @@ contract FluidSafeHandler is BaseProtocolHandler {
             );
             require(successApprove, "Approval failed");
 
-            IERC20(asset).transfer(onBehalfOf, amount);
+            IERC20(asset).safeTransfer(onBehalfOf, amount);
 
             bool successSupply;
             (successSupply, returnData) = ISafe(onBehalfOf).execTransactionFromModuleReturnData(

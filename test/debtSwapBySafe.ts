@@ -9,13 +9,14 @@ import {
     DAI_ADDRESS,
     DAI_USDC_POOL,
     DEFAULT_SUPPLY_AMOUNT,
-    ETH_USDbC_POOL,
     EURC_ADDRESS,
+    EURC_USDC_POOL,
+    GHO_ADDRESS,
+    GHO_USDC_POOL,
     Protocols,
     sUSDS_ADDRESS,
     TEST_ADDRESS,
     TEST_FEE_BENEFICIARY_ADDRESS,
-    USDbC_ADDRESS,
     USDC_ADDRESS,
     ETH_USDC_POOL,
     WETH_ADDRESS,
@@ -312,19 +313,19 @@ describe("Safe wallet should debtSwap", function () {
 
     describe("switch In", function () {
         describe("In Aave", function () {
-            it("from USDC to USDbC", async function () {
+            it("from USDC to EURC", async function () {
                 await supplyAndBorrow(Protocols.AAVE_V3);
 
-                await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
+                await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, EURC_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
             });
 
-            it("from USDC to USDbC with specific amount", async function () {
+            it("from USDC to EURC with specific amount", async function () {
                 await supplyAndBorrow(Protocols.AAVE_V3);
 
                 await executeDebtSwap(
                     ETH_USDC_POOL,
                     USDC_ADDRESS,
-                    USDbC_ADDRESS,
+                    EURC_ADDRESS,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     cbETH_ADDRESS,
@@ -332,37 +333,37 @@ describe("Safe wallet should debtSwap", function () {
                 );
             });
 
-            it("from USDbC to USDC, cbETH Collateral", async function () {
-                await supplyAndBorrow(Protocols.AAVE_V3, USDbC_ADDRESS);
+            it("from EURC to USDC, cbETH Collateral", async function () {
+                await supplyAndBorrow(Protocols.AAVE_V3, EURC_ADDRESS);
 
                 await executeDebtSwap(
-                    ETH_USDbC_POOL,
-                    USDbC_ADDRESS,
+                    EURC_USDC_POOL,
+                    EURC_ADDRESS,
                     USDC_ADDRESS,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                 );
             });
 
-            it("from USDC to USDbC, WETH Collateral", async function () {
+            it("from USDC to EURC, WETH Collateral", async function () {
                 await supplyAndBorrow(Protocols.AAVE_V3, USDC_ADDRESS, WETH_ADDRESS);
 
                 await executeDebtSwap(
                     ETH_USDC_POOL,
                     USDC_ADDRESS,
-                    USDbC_ADDRESS,
+                    EURC_ADDRESS,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
                     WETH_ADDRESS,
                 );
             });
 
-            it("from USDbC to USDC, WETH Collateral", async function () {
-                await supplyAndBorrow(Protocols.AAVE_V3, USDbC_ADDRESS, WETH_ADDRESS);
+            it("from EURC to USDC, WETH Collateral", async function () {
+                await supplyAndBorrow(Protocols.AAVE_V3, EURC_ADDRESS, WETH_ADDRESS);
 
                 await executeDebtSwap(
-                    ETH_USDbC_POOL,
-                    USDbC_ADDRESS,
+                    EURC_USDC_POOL,
+                    EURC_ADDRESS,
                     USDC_ADDRESS,
                     Protocols.AAVE_V3,
                     Protocols.AAVE_V3,
@@ -371,10 +372,24 @@ describe("Safe wallet should debtSwap", function () {
             });
         });
 
-        // USDbC is not available on Compound anymore
+        describe("GHO on Aave", function () {
+            it("from USDC to GHO", async function () {
+                await supplyAndBorrow(Protocols.AAVE_V3);
+
+                await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, GHO_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
+            });
+
+            it("from GHO to USDC", async function () {
+                await supplyAndBorrow(Protocols.AAVE_V3, GHO_ADDRESS);
+
+                await executeDebtSwap(GHO_USDC_POOL, GHO_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
+            });
+        });
+
+        // USDbC is not available on Compound or Aave anymore
         it.skip("Compound from USDC to USDbC", async function () {
             await supplyAndBorrow(Protocols.COMPOUND);
-            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.COMPOUND, Protocols.COMPOUND);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, EURC_ADDRESS, Protocols.COMPOUND, Protocols.COMPOUND);
         });
 
         describe("In Morpho", function () {
@@ -562,7 +577,7 @@ describe("Safe wallet should debtSwap", function () {
             await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
         });
 
-        it("cross-asset debt swap from Aave USDC to USDbC with protocol fee", async function () {
+        it("cross-asset debt swap from Aave USDC to EURC with protocol fee", async function () {
             const signers = await ethers.getSigners();
             const contractByOwner = await ethers.getContractAt("SafeDebtManager", safeModuleAddress, signers[0]);
 
@@ -573,30 +588,40 @@ describe("Safe wallet should debtSwap", function () {
             const setFeeBeneficiaryTx = await contractByOwner.setFeeBeneficiary(TEST_FEE_BENEFICIARY_ADDRESS);
             await setFeeBeneficiaryTx.wait();
 
-            const usdBcContract = new ethers.Contract(USDbC_ADDRESS, ERC20_ABI, signer);
+            const eurcContract = new ethers.Contract(EURC_ADDRESS, ERC20_ABI, signer);
 
-            const beneficiaryBalanceBefore = await usdBcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+            const beneficiaryBalanceBefore = await eurcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
 
             await supplyAndBorrow(Protocols.AAVE_V3);
 
-            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, EURC_ADDRESS, Protocols.AAVE_V3, Protocols.AAVE_V3);
 
-            const beneficiaryBalanceAfter = await usdBcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
+            const beneficiaryBalanceAfter = await eurcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
             const feeReceived = beneficiaryBalanceAfter - beneficiaryBalanceBefore;
 
-            console.log("Protocol fee received (USDbC):", ethers.formatUnits(feeReceived, 6));
+            console.log("Protocol fee received (EURC):", ethers.formatUnits(feeReceived, 6));
 
             expect(feeReceived).to.be.gt(0);
         });
 
-        it("from Compound to Aave", async function () {
+        it("from Compound to Aave EURC", async function () {
             await supplyAndBorrow(Protocols.COMPOUND);
-            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, USDbC_ADDRESS, Protocols.COMPOUND, Protocols.AAVE_V3);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, EURC_ADDRESS, Protocols.COMPOUND, Protocols.AAVE_V3);
         });
 
-        it("USDbC debt on Aave to USDC on Compound", async function () {
-            await supplyAndBorrow(Protocols.AAVE_V3, USDbC_ADDRESS);
-            await executeDebtSwap(ETH_USDbC_POOL, USDbC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
+        it("EURC debt on Aave to USDC on Compound", async function () {
+            await supplyAndBorrow(Protocols.AAVE_V3, EURC_ADDRESS);
+            await executeDebtSwap(EURC_USDC_POOL, EURC_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
+        });
+
+        it("from Compound to Aave GHO", async function () {
+            await supplyAndBorrow(Protocols.COMPOUND);
+            await executeDebtSwap(ETH_USDC_POOL, USDC_ADDRESS, GHO_ADDRESS, Protocols.COMPOUND, Protocols.AAVE_V3);
+        });
+
+        it("GHO debt on Aave to USDC on Compound", async function () {
+            await supplyAndBorrow(Protocols.AAVE_V3, GHO_ADDRESS);
+            await executeDebtSwap(GHO_USDC_POOL, GHO_ADDRESS, USDC_ADDRESS, Protocols.AAVE_V3, Protocols.COMPOUND);
         });
 
         it("from Compound to Moonwell", async function () {
@@ -866,13 +891,13 @@ describe("Safe wallet should debtSwap", function () {
             );
         });
 
-        it("from Morpho to USDbC on Aave", async function () {
+        it("from Morpho to EURC on Aave", async function () {
             await supplyAndBorrow(Protocols.MORPHO);
 
             await executeDebtSwap(
                 ETH_USDC_POOL,
                 USDC_ADDRESS,
-                USDbC_ADDRESS,
+                EURC_ADDRESS,
                 Protocols.MORPHO,
                 Protocols.AAVE_V3,
                 cbETH_ADDRESS,
@@ -1020,7 +1045,7 @@ describe("Safe wallet should debtSwap", function () {
             await executeDebtSwap(
                 ETH_USDC_POOL,
                 USDC_ADDRESS,
-                USDbC_ADDRESS,
+                EURC_ADDRESS,
                 Protocols.COMPOUND,
                 Protocols.AAVE_V3,
                 cbETH_ADDRESS,
@@ -1530,7 +1555,7 @@ describe("Safe wallet should debtSwap", function () {
             await executeDebtSwap(
                 ETH_USDC_POOL,
                 USDC_ADDRESS,
-                USDbC_ADDRESS,
+                EURC_ADDRESS,
                 Protocols.AAVE_V3,
                 Protocols.AAVE_V3,
                 cbETH_ADDRESS,

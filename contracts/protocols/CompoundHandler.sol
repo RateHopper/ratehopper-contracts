@@ -112,9 +112,10 @@ contract CompoundHandler is BaseProtocolHandler {
         bytes calldata extraData
     ) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-        
+
         address cContract = abi.decode(extraData, (address));
         require(cContract != address(0), "Invalid comet address");
+        require(getCContract(IComet(cContract).baseToken()) == cContract, "Comet address mismatch");
 
         IERC20(asset).forceApprove(address(cContract), amount);
         // supply collateral
@@ -165,6 +166,7 @@ contract CompoundHandler is BaseProtocolHandler {
         // Decode the comet address from extraData
         address cContract = abi.decode(extraData, (address));
         require(cContract != address(0), "Invalid comet address");
+        require(getCContract(IComet(cContract).baseToken()) == cContract, "Comet address mismatch");
 
         IComet comet = IComet(cContract);
 
@@ -186,23 +188,44 @@ contract CompoundHandler is BaseProtocolHandler {
             return collateralBalance;
         }
 
-        AssetInfo memory assetInfo = comet.getAssetInfoByAddress(asset);
         uint256 basePrice = comet.getPrice(comet.baseTokenPriceFeed());
-        uint256 collateralPrice = comet.getPrice(assetInfo.priceFeed);
+        if (basePrice == 0) return 0;
         uint256 baseScaleVal = comet.baseScale();
 
-        if (collateralPrice == 0 || assetInfo.borrowCollateralFactor == 0) return 0;
+        // Calculate total collateral value across all assets (in base units), using the same logic as Compound's internal isBorrowCollateralized()
+        uint256 totalCollateralValueBase = 0;
+        uint8 numAssets = comet.numAssets();
+        for (uint8 i = 0; i < numAssets; i++) {
+            AssetInfo memory info = comet.getAssetInfo(i);
+            uint128 bal = comet.collateralBalanceOf(user, info.asset);
+            if (bal > 0) {
+                uint256 price = comet.getPrice(info.priceFeed);
+                totalCollateralValueBase += (uint256(bal) * price * uint256(info.borrowCollateralFactor)) / (uint256(info.scale) * 1e18);
+            }
+        }
 
-        // minCollateral = borrowBalance * basePrice / baseScale * 1e18 / borrowCollateralFactor * scale / collateralPrice
+        // Required collateral value in base units
         uint256 borrowValueBase = (borrowBalance * basePrice + baseScaleVal - 1) / baseScaleVal;
-        uint256 minCollateralValue = (borrowValueBase * 1e18 + uint256(assetInfo.borrowCollateralFactor) - 1) / uint256(assetInfo.borrowCollateralFactor);
-        uint256 minCollateral = (minCollateralValue * uint256(assetInfo.scale) + collateralPrice - 1) / collateralPrice;
 
-        if (collateralBalance <= minCollateral) {
+        if (totalCollateralValueBase <= borrowValueBase) {
             return 0;
         }
 
-        uint256 maxWithdraw = uint256(collateralBalance) - minCollateral;
+        // Surplus collateral value in base units
+        uint256 surplusValueBase = totalCollateralValueBase - borrowValueBase;
+
+        // Convert surplus to target asset amount
+        AssetInfo memory assetInfo = comet.getAssetInfoByAddress(asset);
+        uint256 collateralPrice = comet.getPrice(assetInfo.priceFeed);
+
+        if (collateralPrice == 0 || assetInfo.borrowCollateralFactor == 0) return 0;
+
+        uint256 maxWithdraw = (surplusValueBase * uint256(assetInfo.scale) * 1e18) / (collateralPrice * uint256(assetInfo.borrowCollateralFactor));
+
+        if (maxWithdraw > uint256(collateralBalance)) {
+            maxWithdraw = uint256(collateralBalance);
+        }
+
         // Apply 0.1% safety margin
         maxWithdraw = (maxWithdraw * 999) / 1000;
         return maxWithdraw;

@@ -11,7 +11,7 @@ import { approve, fundSignerWithETH, getDecimals, getParaswapData, protocolHelpe
 
 import {
     USDC_ADDRESS,
-    USDbC_ADDRESS,
+    EURC_ADDRESS,
     cbETH_ADDRESS,
     TEST_ADDRESS,
     TEST_FEE_BENEFICIARY_ADDRESS,
@@ -405,8 +405,8 @@ describe("Create leveraged position", function () {
             await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3, cbETH_ADDRESS, USDC_ADDRESS, undefined, 50);
         });
 
-        it("with cbETH collateral and USDbC debt", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3, cbETH_ADDRESS, USDbC_ADDRESS);
+        it("with cbETH collateral and EURC debt", async function () {
+            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3, cbETH_ADDRESS, EURC_ADDRESS);
         });
 
         it("with cbBTC collateral", async function () {
@@ -446,8 +446,8 @@ describe("Create leveraged position", function () {
         });
 
         // USDbC is no longer available in Compound
-        it.skip("with cbETH collateral and USDbC debt", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.COMPOUND, cbETH_ADDRESS, USDbC_ADDRESS);
+        it.skip("with cbETH collateral and EURC debt", async function () {
+            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.COMPOUND, cbETH_ADDRESS, EURC_ADDRESS);
         });
 
         it("with cbBTC collateral", async function () {

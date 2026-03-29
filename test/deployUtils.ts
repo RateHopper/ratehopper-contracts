@@ -7,6 +7,7 @@ import {
     cbETH_ADDRESS,
     DAI_ADDRESS,
     EURC_ADDRESS,
+    GHO_ADDRESS,
     MAI_ADDRESS,
     PARASWAP_V6_CONTRACT_ADDRESS,
     Protocols,
@@ -94,6 +95,7 @@ export async function deployHandlers() {
         cbETH_ADDRESS,
         USDS_ADDRESS,
         EURC_ADDRESS,
+        GHO_ADDRESS,
         sUSDS_ADDRESS,
         wstETH_ADDRESS,
     ];

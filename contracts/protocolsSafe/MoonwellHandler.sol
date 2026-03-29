@@ -100,11 +100,11 @@ contract MoonwellHandler is BaseProtocolHandler {
         address asset,
         address onBehalfOf,
         bytes calldata /* extraData */
-    ) external view returns (uint256) {
+    ) external returns (uint256) {
         address mContract = getMContract(asset);
         if (mContract == address(0)) revert TokenNotRegistered();
 
-        return IMToken(mContract).borrowBalanceStored(onBehalfOf);
+        return IMToken(mContract).borrowBalanceCurrent(onBehalfOf);
     }
 
     function switchIn(
@@ -172,8 +172,9 @@ contract MoonwellHandler is BaseProtocolHandler {
             address mTokenAddress = getMContract(collateralAssets[i].asset);
             if (mTokenAddress == address(0)) revert TokenNotRegistered();
 
-            // Track ETH balance before redeem to only wrap ETH received from Moonwell
+            // Track balances before redeem to only transfer the redeemed amount
             uint256 ethBefore = collateralAssets[i].asset == registry.WETH_ADDRESS() ? address(onBehalfOf).balance : 0;
+            uint256 balanceBefore = IERC20(collateralAssets[i].asset).balanceOf(onBehalfOf);
 
             if (collateralAssets[i].amount == type(uint256).max) {
                 uint256 mTokenBalance = IERC20(mTokenAddress).balanceOf(onBehalfOf);
@@ -207,13 +208,14 @@ contract MoonwellHandler is BaseProtocolHandler {
                 }
             }
 
-            uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(onBehalfOf);
-            require(currentBalance > 0, "No collateral balance available");
+            uint256 balanceAfter = IERC20(collateralAssets[i].asset).balanceOf(onBehalfOf);
+            uint256 amountToTransfer = balanceAfter - balanceBefore;
+            require(amountToTransfer > 0, "No collateral redeemed");
 
             bool successTransfer = ISafe(onBehalfOf).execTransactionFromModule(
                 collateralAssets[i].asset,
                 0,
-                abi.encodeCall(IERC20.transfer, (address(this), currentBalance)),
+                abi.encodeCall(IERC20.transfer, (address(this), amountToTransfer)),
                 ISafe.Operation.Call
             );
 
@@ -242,7 +244,7 @@ contract MoonwellHandler is BaseProtocolHandler {
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(address(this));
             require(currentBalance > 0, "No collateral balance available");
 
-            IERC20(collateralAssets[i].asset).transfer(onBehalfOf, currentBalance);
+            IERC20(collateralAssets[i].asset).safeTransfer(onBehalfOf, currentBalance);
 
             bool successApprove = ISafe(onBehalfOf).execTransactionFromModule(
                 collateralAssets[i].asset,
@@ -302,7 +304,7 @@ contract MoonwellHandler is BaseProtocolHandler {
 
         require(successApprove, "moonwell approve failed");
 
-        IERC20(asset).transfer(onBehalfOf, amount);
+        IERC20(asset).safeTransfer(onBehalfOf, amount);
 
         _executeSafeTransactionWithMoonwellCheck(
             onBehalfOf,
@@ -369,8 +371,9 @@ contract MoonwellHandler is BaseProtocolHandler {
         address mTokenAddress = getMContract(asset);
         if (mTokenAddress == address(0)) revert TokenNotRegistered();
 
-        // Track ETH balance before redeem to only wrap ETH received from Moonwell
+        // Track balances before redeem to only transfer the redeemed amount
         uint256 ethBefore = asset == registry.WETH_ADDRESS() ? address(onBehalfOf).balance : 0;
+        uint256 balanceBefore = IERC20(asset).balanceOf(onBehalfOf);
 
         // Redeem from Moonwell
         if (amount == type(uint256).max) {
@@ -420,12 +423,15 @@ contract MoonwellHandler is BaseProtocolHandler {
             }
         }
 
-        // Transfer withdrawn asset from Safe to handler contract
-        uint256 currentBalance = IERC20(asset).balanceOf(onBehalfOf);
+        // Transfer only the redeemed amount from Safe to handler contract
+        uint256 balanceAfter = IERC20(asset).balanceOf(onBehalfOf);
+        uint256 amountToTransfer = balanceAfter - balanceBefore;
+        require(amountToTransfer > 0, "No assets redeemed");
+
         bool successTransfer = ISafe(onBehalfOf).execTransactionFromModule(
             asset,
             0,
-            abi.encodeCall(IERC20.transfer, (address(this), currentBalance)),
+            abi.encodeCall(IERC20.transfer, (address(this), amountToTransfer)),
             ISafe.Operation.Call
         );
         require(successTransfer, "Transfer transaction failed");
