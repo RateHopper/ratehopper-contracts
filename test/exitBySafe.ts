@@ -399,6 +399,9 @@ describe("Safe wallet exit function tests", function () {
                 expect(collateralBalanceAfter).to.equal(collateralBalanceBefore);
             }
         }
+
+        const managerDebtBalance = await debtContract.balanceOf(safeModuleAddress);
+        expect(managerDebtBalance).to.equal(0n);
     }
 
     // ─── Tests ───

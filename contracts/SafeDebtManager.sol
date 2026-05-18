@@ -457,6 +457,11 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
                 )
             );
             require(repaySuccess, "Repay failed");
+
+            uint256 balanceAfterRepay = IERC20(_debtAsset).balanceOf(address(this));
+            if (balanceAfterRepay > 0) {
+                IERC20(_debtAsset).safeTransfer(_onBehalfOf, balanceAfterRepay);
+            }
         }
 
         if (_withdrawCollateral) {
