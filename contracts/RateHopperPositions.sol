@@ -79,7 +79,8 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint256 fee0,
         address token1,
         uint256 collected1,
-        uint256 fee1
+        uint256 fee1,
+        uint128 currentValueUsd6
     );
     event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
     event PerformanceFeeBpsUpdated(uint16 previousPerformanceFeeBps, uint16 newPerformanceFeeBps);
@@ -404,7 +405,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     ///      time fee harvest, BEFORE decreaseLiquidity so principal isn't
     ///      taxed).
     function _collectLp(address _onBehalfOf, uint256 tokenId) internal {
-        (, , address token0, address token1, , , , , , , , ) = POSITION_MANAGER.positions(tokenId);
+        (, , address token0, address token1, uint24 lpPoolFee, , , , , , , ) = POSITION_MANAGER.positions(tokenId);
 
         uint256 bal0Before = IERC20(token0).balanceOf(address(this));
         uint256 bal1Before = IERC20(token1).balanceOf(address(this));
@@ -414,10 +415,24 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint256 collected0 = IERC20(token0).balanceOf(address(this)) - bal0Before;
         uint256 collected1 = IERC20(token1).balanceOf(address(this)) - bal1Before;
 
+        // USDC-equivalent gross value of the collected legs. token0 = WETH
+        // (since WETH < USDC on Base), so collected0 is valued at the LP
+        // pool's spot price; collected1 is already in USDC.
+        uint128 currentValueUsd6;
+        if (collected0 > 0) {
+            address pool = UNISWAP_V3_FACTORY.getPool(token0, token1, lpPoolFee);
+            (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3Pool(pool).slot0();
+            uint256 priceX192 = uint256(sqrtPriceX96) * uint256(sqrtPriceX96);
+            uint256 wethValueInUsdc = Math.mulDiv(collected0, priceX192, 1 << 192);
+            currentValueUsd6 = uint128(wethValueInUsdc + collected1);
+        } else {
+            currentValueUsd6 = uint128(collected1);
+        }
+
         uint256 fee0 = _chargeCollectFee(token0, collected0, _onBehalfOf);
         uint256 fee1 = _chargeCollectFee(token1, collected1, _onBehalfOf);
 
-        emit FeesCollected(_onBehalfOf, tokenId, token0, collected0, fee0, token1, collected1, fee1);
+        emit FeesCollected(_onBehalfOf, tokenId, token0, collected0, fee0, token1, collected1, fee1, currentValueUsd6);
     }
 
     /// @dev Module-mediated `POSITION_MANAGER.collect` for the full owed
