@@ -51,6 +51,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     uint16 public immutable MAX_FEE_BPS;
 
     address public treasury;
+    uint16 public performanceFeeBps;
     uint16 public feeCollectBps;
 
     bytes4 private constant EXACT_INPUT_SINGLE_SELECTOR = 0x04e45aaf;
@@ -60,12 +61,15 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint256 indexed tokenId,
         uint256 usdcInput,
         uint128 wethToLp,
-        uint128 usdcToLp
+        uint128 usdcToLp,
+        uint128 currentValueUsd6
     );
     event PositionClosed(
         address indexed onBehalfOf,
         uint256 indexed tokenId,
-        uint128 currentValueUsd6
+        uint128 initialValueUsd6,
+        uint128 currentValueUsd6,
+        uint128 feeUsd6
     );
     event FeesCollected(
         address indexed onBehalfOf,
@@ -78,7 +82,9 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint256 fee1
     );
     event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
+    event PerformanceFeeBpsUpdated(uint16 previousPerformanceFeeBps, uint16 newPerformanceFeeBps);
     event FeeCollectBpsUpdated(uint16 previousFeeCollectBps, uint16 newFeeCollectBps);
+    event TokenRescued(address indexed token, address indexed recipient, uint256 amount);
 
     error InvalidTreasury();
     error FeeAboveMax();
@@ -111,6 +117,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         address _swapRouter,
         IUniswapV3Factory _uniswapV3Factory,
         address _treasury,
+        uint16 _performanceFeeBps,
         uint16 _feeCollectBps,
         uint16 _maxFeeBps,
         address _initialOwner
@@ -122,6 +129,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         if (_swapRouter == address(0)) revert ZeroAddress();
         if (address(_uniswapV3Factory) == address(0)) revert ZeroAddress();
         if (_treasury == address(0)) revert InvalidTreasury();
+        if (_performanceFeeBps > _maxFeeBps) revert FeeAboveMax();
         if (_feeCollectBps > _maxFeeBps) revert FeeAboveMax();
 
         POSITION_MANAGER = _positionManager;
@@ -132,6 +140,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         UNISWAP_V3_FACTORY = _uniswapV3Factory;
         MAX_FEE_BPS = _maxFeeBps;
         treasury = _treasury;
+        performanceFeeBps = _performanceFeeBps;
         feeCollectBps = _feeCollectBps;
     }
 
@@ -230,7 +239,17 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         // 4. Final sanity: NFT must be on the Safe.
         if (POSITION_MANAGER.ownerOf(tokenId) != _onBehalfOf) revert LpNotOnSafe();
 
-        emit PositionOpened(_onBehalfOf, tokenId, usdcAmount, usedWeth, usedUsdc);
+        // USDC-equivalent value of the freshly-minted LP position. WETH leg
+        // is valued using the just-executed swap rate (halfUsdc / wethReceived)
+        // instead of a separate oracle / slot0 read — same data, no extra gas.
+        uint128 currentValueUsd6;
+        {
+            uint256 wethValueInUsdc = wethReceived > 0
+                ? Math.mulDiv(uint256(usedWeth), halfUsdc, uint256(wethReceived))
+                : 0;
+            currentValueUsd6 = uint128(wethValueInUsdc + uint256(usedUsdc));
+        }
+        emit PositionOpened(_onBehalfOf, tokenId, usdcAmount, usedWeth, usedUsdc, currentValueUsd6);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -251,11 +270,15 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     ///                      leg back to USDC.
     /// @param  slippageBps  Slippage tolerance in bps applied to the swap's
     ///                      spot-price quote.
+    /// @param  initialValueUsd6  Caller-attested USDC value of the position at
+    ///                      open. The performance fee (`performanceFeeBps`) is charged on
+    ///                      net profit only — `max(0, realized - initialValue)`.
     function closeLp(
         address _onBehalfOf,
         uint256 tokenId,
         uint24 swapPoolFeeTier,
-        uint16 slippageBps
+        uint16 slippageBps,
+        uint128 initialValueUsd6
     ) external nonReentrant onlyOperatorOrSafe(_onBehalfOf) {
 
         // Snapshot Safe balances so we measure only what this closeLp adds.
@@ -327,7 +350,27 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         }
 
         uint128 currentValueUsd6 = uint128(USDC.balanceOf(_onBehalfOf) - usdcBefore);
-        emit PositionClosed(_onBehalfOf, tokenId, currentValueUsd6);
+
+        // 6. Performance fee: charge `performanceFeeBps` on NET PROFIT only — the realized
+        //    USDC above the caller-attested initial value. No fee on break-even
+        //    or losses. Pulled from the Safe to the treasury module-mediated
+        //    (the realized USDC is on the Safe after the swap).
+        uint128 feeUsd6 = 0;
+        if (currentValueUsd6 > initialValueUsd6) {
+            uint256 profit = uint256(currentValueUsd6) - uint256(initialValueUsd6);
+            feeUsd6 = uint128((profit * performanceFeeBps) / 10_000);
+            if (feeUsd6 > 0) {
+                _safeExec(
+                    _onBehalfOf,
+                    address(USDC),
+                    0,
+                    abi.encodeCall(IERC20.transfer, (treasury, uint256(feeUsd6))),
+                    11
+                );
+            }
+        }
+
+        emit PositionClosed(_onBehalfOf, tokenId, initialValueUsd6, currentValueUsd6, feeUsd6);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -412,10 +455,29 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         treasury = newTreasury;
     }
 
+    function setPerformanceFeeBps(uint16 newPerformanceFeeBps) external onlyOwner {
+        if (newPerformanceFeeBps > MAX_FEE_BPS) revert FeeAboveMax();
+        emit PerformanceFeeBpsUpdated(performanceFeeBps, newPerformanceFeeBps);
+        performanceFeeBps = newPerformanceFeeBps;
+    }
+
     function setFeeCollectBps(uint16 newFeeCollectBps) external onlyOwner {
         if (newFeeCollectBps > MAX_FEE_BPS) revert FeeAboveMax();
         emit FeeCollectBpsUpdated(feeCollectBps, newFeeCollectBps);
         feeCollectBps = newFeeCollectBps;
+    }
+
+    /// @notice Recover an ERC20 token accidentally sent to or stranded in
+    ///         this contract (e.g. dust from rounding, direct transfers,
+    ///         residue from a failed mid-position step).
+    /// @dev    onlyOwner. Does NOT touch tokens on the Safe — only this
+    ///         contract's own balance. Used as a transparent escape hatch:
+    ///         every rescue emits `TokenRescued`.
+    function rescueToken(address token, address recipient, uint256 amount) external onlyOwner {
+        if (token == address(0)) revert ZeroAddress();
+        if (recipient == address(0)) revert ZeroAddress();
+        IERC20(token).safeTransfer(recipient, amount);
+        emit TokenRescued(token, recipient, amount);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -520,10 +582,9 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         );
         if (!ok) revert ModuleCallFailed(4);
 
-        uint128 liquidityOut;
         uint256 amount0Out;
         uint256 amount1Out;
-        (tokenId, liquidityOut, amount0Out, amount1Out) =
+        (tokenId, , amount0Out, amount1Out) =
             abi.decode(ret, (uint256, uint128, uint256, uint256));
         amount0Used = uint128(amount0Out);
         amount1Used = uint128(amount1Out);
