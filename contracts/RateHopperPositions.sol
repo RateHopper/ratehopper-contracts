@@ -11,7 +11,6 @@ import {IUniswapV3Factory} from "./interfaces/uniswapV3/IUniswapV3Factory.sol";
 import {IUniswapV3Pool} from "./interfaces/uniswapV3/IUniswapV3Pool.sol";
 import {ISafe} from "./interfaces/safe/ISafe.sol";
 
-import {ISafeDebtManager} from "./interfaces/ISafeDebtManager.sol";
 import {IProtocolRegistry} from "./interfaces/IProtocolRegistry.sol";
 
 /// @title RateHopperPositions
@@ -44,7 +43,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     }
 
     INonfungiblePositionManager public immutable POSITION_MANAGER;
-    ISafeDebtManager public immutable DEBT_MANAGER;
+    IProtocolRegistry public immutable REGISTRY;
     IERC20 public immutable USDC;
     IERC20 public immutable WETH;
     address public immutable SWAP_ROUTER;
@@ -98,7 +97,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     ///         it is NOT this contract.
     modifier onlyOperatorOrSafe(address _onBehalfOf) {
         if (_onBehalfOf == address(0)) revert ZeroAddress();
-        if (msg.sender != DEBT_MANAGER.registry().safeOperator() && msg.sender != _onBehalfOf) {
+        if (msg.sender != REGISTRY.safeOperator() && msg.sender != _onBehalfOf) {
             revert NotAuthorized();
         }
         _;
@@ -106,7 +105,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
 
     constructor(
         INonfungiblePositionManager _positionManager,
-        ISafeDebtManager _debtManager,
+        IProtocolRegistry _registry,
         IERC20 _usdc,
         IERC20 _weth,
         address _swapRouter,
@@ -117,7 +116,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         address _initialOwner
     ) Ownable(_initialOwner) {
         if (address(_positionManager) == address(0)) revert ZeroAddress();
-        if (address(_debtManager) == address(0)) revert ZeroAddress();
+        if (address(_registry) == address(0)) revert ZeroAddress();
         if (address(_usdc) == address(0)) revert ZeroAddress();
         if (address(_weth) == address(0)) revert ZeroAddress();
         if (_swapRouter == address(0)) revert ZeroAddress();
@@ -126,7 +125,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         if (_feeCollectBps > _maxFeeBps) revert FeeAboveMax();
 
         POSITION_MANAGER = _positionManager;
-        DEBT_MANAGER = _debtManager;
+        REGISTRY = _registry;
         USDC = _usdc;
         WETH = _weth;
         SWAP_ROUTER = _swapRouter;
@@ -164,8 +163,8 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint256 usdcAmount,
         int24 tickLower,
         int24 tickUpper,
-        uint24 lpPoolFee,
-        uint24 swapFee,
+        uint24 lpPoolFeeTier,
+        uint24 swapPoolFeeTier,
         uint16 slippageBps
     )
         external
@@ -187,13 +186,13 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         //    is computed from the pool's spot price with the caller-supplied
         //    slippageBps tolerance.
         uint256 swapAmountOutMin =
-            _quoteSwapAmountOutMin(address(USDC), address(WETH), halfUsdc, swapFee, slippageBps);
+            _quoteSwapAmountOutMin(address(USDC), address(WETH), halfUsdc, swapPoolFeeTier, slippageBps);
         bytes memory swapData = abi.encodeWithSelector(
             EXACT_INPUT_SINGLE_SELECTOR,
             ExactInputSingleParams({
                 tokenIn: address(USDC),
                 tokenOut: address(WETH),
-                fee: swapFee,
+                fee: swapPoolFeeTier,
                 recipient: _onBehalfOf,
                 amountIn: halfUsdc,
                 amountOutMinimum: swapAmountOutMin,
@@ -218,7 +217,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint128 usedUsdc;
         (tokenId, usedWeth, usedUsdc) = _safeMintLp(
             _onBehalfOf,
-            lpPoolFee,
+            lpPoolFeeTier,
             tickLower,
             tickUpper,
             uint256(wethReceived),
@@ -248,14 +247,14 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     ///         or the backend operator (`registry.safeOperator()`).
     /// @param  _onBehalfOf  The Safe whose position is being closed.
     /// @param  tokenId      Uniswap V3 LP NFT id (owned by `_onBehalfOf`).
-    /// @param  swapFee      Uniswap V3 pool fee tier used to swap the WETH
+    /// @param  swapPoolFeeTier      Uniswap V3 pool fee tier used to swap the WETH
     ///                      leg back to USDC.
     /// @param  slippageBps  Slippage tolerance in bps applied to the swap's
     ///                      spot-price quote.
     function closeLp(
         address _onBehalfOf,
         uint256 tokenId,
-        uint24 swapFee,
+        uint24 swapPoolFeeTier,
         uint16 slippageBps
     ) external nonReentrant onlyOperatorOrSafe(_onBehalfOf) {
 
@@ -309,13 +308,13 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint128 wethToSwap = uint128(WETH.balanceOf(_onBehalfOf) - wethBefore);
         if (wethToSwap > 0) {
             uint256 swapAmountOutMin =
-                _quoteSwapAmountOutMin(address(WETH), address(USDC), wethToSwap, swapFee, slippageBps);
+                _quoteSwapAmountOutMin(address(WETH), address(USDC), wethToSwap, swapPoolFeeTier, slippageBps);
             bytes memory swapData = abi.encodeWithSelector(
                 EXACT_INPUT_SINGLE_SELECTOR,
                 ExactInputSingleParams({
                     tokenIn: address(WETH),
                     tokenOut: address(USDC),
-                    fee: swapFee,
+                    fee: swapPoolFeeTier,
                     recipient: _onBehalfOf,
                     amountIn: uint256(wethToSwap),
                     amountOutMinimum: swapAmountOutMin,
@@ -435,12 +434,12 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         address tokenIn,
         address tokenOut,
         uint256 amountIn,
-        uint24 swapFee,
+        uint24 swapPoolFeeTier,
         uint16 slippageBps
     ) internal view returns (uint256) {
-        address pool = UNISWAP_V3_FACTORY.getPool(tokenIn, tokenOut, swapFee);
+        address pool = UNISWAP_V3_FACTORY.getPool(tokenIn, tokenOut, swapPoolFeeTier);
         (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3Pool(pool).slot0();
-        uint256 amountInAfterFee = Math.mulDiv(amountIn, 1_000_000 - uint256(swapFee), 1_000_000);
+        uint256 amountInAfterFee = Math.mulDiv(amountIn, 1_000_000 - uint256(swapPoolFeeTier), 1_000_000);
         uint256 priceX192 = uint256(sqrtPriceX96) * uint256(sqrtPriceX96);
         uint256 expectedOut = tokenIn < tokenOut
             ? Math.mulDiv(amountInAfterFee, priceX192, 1 << 192)
@@ -492,7 +491,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     ///         and `deadline` to `block.timestamp` (no staleness protection).
     function _safeMintLp(
         address _onBehalfOf,
-        uint24 lpPoolFee,
+        uint24 lpPoolFeeTier,
         int24 tickLower,
         int24 tickUpper,
         uint256 wethDesired,
@@ -501,7 +500,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
             token0: address(WETH),
             token1: address(USDC),
-            fee: lpPoolFee,
+            fee: lpPoolFeeTier,
             tickLower: tickLower,
             tickUpper: tickUpper,
             amount0Desired: wethDesired,

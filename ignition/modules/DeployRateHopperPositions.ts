@@ -10,12 +10,12 @@ import {
 /**
  * Standalone deployment module for RateHopperPositions.
  *
- * RateHopperPositions sits on TOP of an already-deployed SafeDebtManager,
- * so its address is passed in (not redeployed) — either via the
- * `safeDebtManager` module parameter or the `RHP_SAFE_DEBT_MANAGER` env var.
+ * RateHopperPositions reads `safeOperator` from an already-deployed
+ * ProtocolRegistry, so its address is passed in (not redeployed) — either
+ * via the `registry` module parameter or the `RHP_REGISTRY` env var.
  *
  * Environment variables:
- *  - RHP_SAFE_DEBT_MANAGER:  SafeDebtManager address (required)
+ *  - RHP_REGISTRY:           ProtocolRegistry address (required)
  *  - RHP_TREASURY:           Treasury address that collects fees (required)
  *  - RHP_INITIAL_OWNER:      Owner of the contract (required)
  *  - RHP_FEE_COLLECT_BPS:    Fee on harvested LP fees in bps (default 250 = 2.5%)
@@ -27,9 +27,9 @@ import {
  *     --network base --verify
  */
 export default buildModule("DeployRateHopperPositions", (m) => {
-    const safeDebtManager = m.getParameter<string>(
-        "safeDebtManager",
-        process.env.RHP_SAFE_DEBT_MANAGER ?? "",
+    const registry = m.getParameter<string>(
+        "registry",
+        process.env.RHP_REGISTRY ?? "",
     );
     const treasury = m.getParameter<string>("treasury", process.env.RHP_TREASURY ?? "");
     const initialOwner = m.getParameter<string>(
@@ -47,7 +47,7 @@ export default buildModule("DeployRateHopperPositions", (m) => {
 
     const rateHopperPositions = m.contract("RateHopperPositions", [
         UNISWAP_V3_NPM_ADDRESS,
-        safeDebtManager,
+        registry,
         USDC_ADDRESS,
         WETH_ADDRESS,
         UNISWAP_V3_SWAP_ROUTER_ADDRESS,

@@ -93,18 +93,18 @@ async function deployFixture() {
     await fluidHandler.waitForDeployment();
 
     const SafeDebtManager = await ethers.getContractFactory("SafeDebtManager");
-    const safeModule = await SafeDebtManager.deploy(
+    const safeDebtManager = await SafeDebtManager.deploy(
         await protocolRegistry.getAddress(),
         [Protocols.FLUID],
         [await fluidHandler.getAddress()],
         pauser.address,
     );
-    await safeModule.waitForDeployment();
+    await safeDebtManager.waitForDeployment();
 
     const RHP = await ethers.getContractFactory("RateHopperPositions");
     const rhp = await RHP.deploy(
         UNISWAP_V3_NPM_ADDRESS,
-        await safeModule.getAddress(),
+        await protocolRegistry.getAddress(),
         USDC_ADDRESS,
         WETH_ADDRESS,
         UNISWAP_V3_SWAP_ROUTER_ADDRESS,
@@ -116,7 +116,7 @@ async function deployFixture() {
     );
     await rhp.waitForDeployment();
 
-    return { deployer, pauser, treasury, protocolRegistry, fluidHandler, safeModule, rhp };
+    return { deployer, pauser, treasury, protocolRegistry, fluidHandler, safeDebtManager, rhp };
 }
 
 // Inlined Fluid supply+borrow helper. We don't import from debtSwapBySafe.ts
@@ -180,9 +180,9 @@ async function wideTicksAroundSpot(): Promise<{ tickLower: number; tickUpper: nu
 
 describe("RateHopperPositions - constructor", function () {
     it("stores the immutables and initial mutables", async function () {
-        const { rhp, treasury, safeModule } = await deployFixture();
+        const { rhp, treasury, protocolRegistry } = await deployFixture();
         expect(await rhp.POSITION_MANAGER()).to.equal(UNISWAP_V3_NPM_ADDRESS);
-        expect(await rhp.DEBT_MANAGER()).to.equal(await safeModule.getAddress());
+        expect(await rhp.REGISTRY()).to.equal(await protocolRegistry.getAddress());
         expect(await rhp.USDC()).to.equal(USDC_ADDRESS);
         expect(await rhp.SWAP_ROUTER()).to.equal(UNISWAP_V3_SWAP_ROUTER_ADDRESS);
         expect(await rhp.UNISWAP_V3_FACTORY()).to.equal(UNISWAP_V3_FACTORY_ADDRESS);
@@ -192,16 +192,16 @@ describe("RateHopperPositions - constructor", function () {
     });
 
     it("reverts on zero addresses and on feeCollectBps > maxFeeBps", async function () {
-        const { treasury, safeModule } = await deployFixture();
+        const { treasury, protocolRegistry } = await deployFixture();
         const F = await ethers.getContractFactory("RateHopperPositions");
-        const safeAddr = await safeModule.getAddress();
+        const registryAddr = await protocolRegistry.getAddress();
         const [deployer] = await ethers.getSigners();
 
         // Build constructor args with one override at a time so each
         // zero-address slot is exercised independently.
         const defaults = {
             positionManager: UNISWAP_V3_NPM_ADDRESS as string,
-            debtManager: safeAddr,
+            registry: registryAddr,
             usdc: USDC_ADDRESS as string,
             weth: WETH_ADDRESS as string,
             swapRouter: UNISWAP_V3_SWAP_ROUTER_ADDRESS as string,
@@ -215,7 +215,7 @@ describe("RateHopperPositions - constructor", function () {
             const m = { ...defaults, ...o };
             return [
                 m.positionManager,
-                m.debtManager,
+                m.registry,
                 m.usdc,
                 m.weth,
                 m.swapRouter,
@@ -228,7 +228,7 @@ describe("RateHopperPositions - constructor", function () {
         };
 
         await expect(F.deploy(...build({ positionManager: ZERO_ADDRESS }))).to.be.revertedWithCustomError(F, "ZeroAddress");
-        await expect(F.deploy(...build({ debtManager: ZERO_ADDRESS }))).to.be.revertedWithCustomError(F, "ZeroAddress");
+        await expect(F.deploy(...build({ registry: ZERO_ADDRESS }))).to.be.revertedWithCustomError(F, "ZeroAddress");
         await expect(F.deploy(...build({ usdc: ZERO_ADDRESS }))).to.be.revertedWithCustomError(F, "ZeroAddress");
         await expect(F.deploy(...build({ weth: ZERO_ADDRESS }))).to.be.revertedWithCustomError(F, "ZeroAddress");
         await expect(F.deploy(...build({ swapRouter: ZERO_ADDRESS }))).to.be.revertedWithCustomError(F, "ZeroAddress");
@@ -313,8 +313,8 @@ describe.only("RateHopperPositions - integration (Base fork)", function () {
     });
 
     it("closes an LP-backed Fluid debt position with profit", async function () {
-        const { rhp, safeModule, treasury } = await deployFixture();
-        const safeModuleAddress = await safeModule.getAddress();
+        const { rhp, safeDebtManager, treasury } = await deployFixture();
+        const safeDebtManagerAddress = await safeDebtManager.getAddress();
         const rhpAddress = await rhp.getAddress();
 
         // Pretty-printers for the running log.
@@ -325,7 +325,7 @@ describe.only("RateHopperPositions - integration (Base fork)", function () {
 
         console.log("\n  ─── Deployed addresses ───");
         console.log(`    RateHopperPositions: ${rhpAddress}`);
-        console.log(`    SafeDebtManager:     ${safeModuleAddress}`);
+        console.log(`    SafeDebtManager:     ${safeDebtManagerAddress}`);
         console.log(`    Safe (env-driven):   ${safeAddress}`);
         console.log(`    Treasury:            ${treasury.address}`);
 
@@ -333,9 +333,9 @@ describe.only("RateHopperPositions - integration (Base fork)", function () {
         //    token transfer) and RateHopperPositions (so closeLp can pull the
         //    NFT and invoke exit module-mediated, no approvals needed).
         console.log("\n  [1/10] Enable SafeDebtManager + RateHopperPositions as Safe modules");
-        await safeWallet.executeTransaction(await safeWallet.createEnableModuleTx(safeModuleAddress));
+        await safeWallet.executeTransaction(await safeWallet.createEnableModuleTx(safeDebtManagerAddress));
         await safeWallet.executeTransaction(await safeWallet.createEnableModuleTx(rhpAddress));
-        console.log(`         modules enabled: ${safeModuleAddress}, ${rhpAddress}`);
+        console.log(`         modules enabled: ${safeDebtManagerAddress}, ${rhpAddress}`);
 
         // 2. Open a real Fluid debt position: supply 0.001 ETH (auto-wrapped
         //    by the WETH/USDC vault), borrow 1 USDC. Safe ends with 1 USDC
