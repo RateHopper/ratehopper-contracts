@@ -28,7 +28,7 @@ const safeAddress = process.env.TESTING_SAFE_WALLET_ADDRESS!;
 
 // Fee config
 const MAX_FEE_BPS = 2000;
-const FEE_BPS = 1000; // 10% — DEFAULT_FEE_BPS performance fee on net profit at closeLp
+const PERFORMANCE_FEE_BPS = 1000; // 10% — performance fee on net profit at closeLp
 const COLLECT_FEE_BPS = 250; // 2.5% on collected LP fees
 const SLIPPAGE_BPS = 100; // 1% — per-call slippage tolerance for openLp/closeLp swaps
 
@@ -64,9 +64,11 @@ const UNISWAP_V3_POOL_ABI = [
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Fixture — deploys ProtocolRegistry + FluidSafeHandler + SafeDebtManager +
-//  RateHopperPositions. Under the module-pattern design, closeLp invokes
-//  exit() module-mediated (msg.sender == safe), so RHP does NOT need to be
-//  the registry `safeOperator` — that slot stays free for the backend EOA.
+//  RateHopperPositions. RHP gates openLp/closeLp/collectLp on
+//  `onlyOperatorOrSafe` (Safe self-call OR the registry's `safeOperator`).
+//  All NPM/SwapRouter calls inside RHP are module-mediated via the Safe, so
+//  RHP itself does NOT need to be the registry's `safeOperator` — that slot
+//  stays free for the backend EOA driving closes on the Safe's behalf.
 // ─────────────────────────────────────────────────────────────────────────
 
 async function deployFixture() {
@@ -111,7 +113,7 @@ async function deployFixture() {
         UNISWAP_V3_SWAP_ROUTER_ADDRESS,
         UNISWAP_V3_FACTORY_ADDRESS,
         treasury.address,
-        FEE_BPS,
+        PERFORMANCE_FEE_BPS,
         COLLECT_FEE_BPS,
         MAX_FEE_BPS,
         deployer.address,
@@ -276,7 +278,7 @@ describe("RateHopperPositions - constructor", function () {
         expect(await rhp.UNISWAP_V3_FACTORY()).to.equal(UNISWAP_V3_FACTORY_ADDRESS);
         expect(await rhp.MAX_FEE_BPS()).to.equal(MAX_FEE_BPS);
         expect(await rhp.treasury()).to.equal(treasury.address);
-        expect(await rhp.performanceFeeBps()).to.equal(FEE_BPS);
+        expect(await rhp.performanceFeeBps()).to.equal(PERFORMANCE_FEE_BPS);
         expect(await rhp.feeCollectBps()).to.equal(COLLECT_FEE_BPS);
     });
 
@@ -296,7 +298,7 @@ describe("RateHopperPositions - constructor", function () {
             swapRouter: UNISWAP_V3_SWAP_ROUTER_ADDRESS as string,
             uniswapV3Factory: UNISWAP_V3_FACTORY_ADDRESS as string,
             treasury: treasury.address,
-            performanceFeeBps: FEE_BPS as number,
+            performanceFeeBps: PERFORMANCE_FEE_BPS as number,
             feeCollectBps: COLLECT_FEE_BPS as number,
             maxFeeBps: MAX_FEE_BPS as number,
             initialOwner: deployer.address,
@@ -354,7 +356,7 @@ describe("RateHopperPositions - owner setters", function () {
         const { rhp, deployer } = await deployFixture();
         const [, other] = await ethers.getSigners();
 
-        await expect(rhp.connect(deployer).setPerformanceFeeBps(500)).to.emit(rhp, "PerformanceFeeBpsUpdated").withArgs(FEE_BPS, 500);
+        await expect(rhp.connect(deployer).setPerformanceFeeBps(500)).to.emit(rhp, "PerformanceFeeBpsUpdated").withArgs(PERFORMANCE_FEE_BPS, 500);
         expect(await rhp.performanceFeeBps()).to.equal(500);
 
         await expect(rhp.connect(deployer).setPerformanceFeeBps(MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(rhp, "FeeAboveMax");
@@ -611,7 +613,7 @@ describe("RateHopperPositions - integration (Base fork)", function () {
 
         console.log("\n  ─── Results ───");
         console.log(`         realized value (event): ${fmtUsdc(currentValueUsd6)}`);
-        console.log(`         perf fee (event):       ${fmtUsdc(feeUsd6)} (${FEE_BPS / 100}% of profit)`);
+        console.log(`         perf fee (event):       ${fmtUsdc(feeUsd6)} (${PERFORMANCE_FEE_BPS / 100}% of profit)`);
         console.log(`         fee → treasury (delta): ${fmtUsdc(feeCharged)}`);
         console.log(`         net → Safe (delta):     ${fmtUsdc(safeNetGain)}`);
         console.log(`         RateHopperPositions residual USDC: ${fmtUsdc(rhpUsdcAfter)} (expected 0)`);
@@ -621,7 +623,7 @@ describe("RateHopperPositions - integration (Base fork)", function () {
         //     profit, so the treasury receives performanceFeeBps (10%) of it and the Safe
         //     receives the remainder. NFT is burned (full close).
         expect(currentValueUsd6).to.be.gt(0n);
-        expect(feeUsd6).to.equal((currentValueUsd6 * BigInt(FEE_BPS)) / 10_000n);
+        expect(feeUsd6).to.equal((currentValueUsd6 * BigInt(PERFORMANCE_FEE_BPS)) / 10_000n);
         expect(feeCharged).to.equal(feeUsd6);
         expect(safeNetGain).to.equal(currentValueUsd6 - feeUsd6);
         expect(safeUsdcAfter).to.be.gt(safeUsdcBefore);
@@ -1064,7 +1066,7 @@ describe("RateHopperPositions - integration (Base fork)", function () {
             initialValueUsd6,
         );
         const profit = currentValueUsd6 - initialValueUsd6;
-        const expectedFee = (profit * BigInt(FEE_BPS)) / 10_000n;
+        const expectedFee = (profit * BigInt(PERFORMANCE_FEE_BPS)) / 10_000n;
         console.log(
             `\n  [perf-fee/partial] realized ${ethers.formatUnits(currentValueUsd6, 6)} − basis ${ethers.formatUnits(initialValueUsd6, 6)} = profit ${ethers.formatUnits(profit, 6)} → fee ${ethers.formatUnits(feeUsd6, 6)}`,
         );
