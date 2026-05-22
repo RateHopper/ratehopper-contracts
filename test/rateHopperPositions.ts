@@ -28,6 +28,7 @@ const safeAddress = process.env.TESTING_SAFE_WALLET_ADDRESS!;
 
 // Fee config
 const MAX_FEE_BPS = 2000;
+const FEE_BPS = 1000; // 10% — DEFAULT_FEE_BPS performance fee on net profit at closeLp
 const COLLECT_FEE_BPS = 250; // 2.5% on collected LP fees
 const SLIPPAGE_BPS = 100; // 1% — per-call slippage tolerance for openLp/closeLp swaps
 
@@ -110,6 +111,7 @@ async function deployFixture() {
         UNISWAP_V3_SWAP_ROUTER_ADDRESS,
         UNISWAP_V3_FACTORY_ADDRESS,
         treasury.address,
+        FEE_BPS,
         COLLECT_FEE_BPS,
         MAX_FEE_BPS,
         deployer.address,
@@ -174,6 +176,92 @@ async function wideTicksAroundSpot(): Promise<{ tickLower: number; tickUpper: nu
     };
 }
 
+// Enable RHP as a module, run a Fluid supply+borrow, then open a balanced
+// in-range LP via openLp. Returns the minted tokenId. Shared by the
+// performance-fee tests.
+async function openBalancedPosition(
+    rhp: any,
+    safeWallet: any,
+    signer: ethers.Wallet,
+    supplyEth: bigint,
+    borrowUsdc: bigint,
+): Promise<bigint> {
+    const rhpAddress = await rhp.getAddress();
+    await safeWallet.executeTransaction(await safeWallet.createEnableModuleTx(rhpAddress));
+    await supplyAndBorrowOnFluid(signer, safeWallet, FLUID_WETH_USDC_VAULT, supplyEth, borrowUsdc);
+
+    const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_VIEW_ABI, ethers.provider);
+    const usdcAmount = await usdc.balanceOf(safeAddress);
+    const { tickLower, tickUpper } = await wideTicksAroundSpot();
+
+    await safeWallet.executeTransaction(
+        await safeWallet.createTransaction({
+            transactions: [
+                {
+                    to: rhpAddress,
+                    value: "0",
+                    data: rhp.interface.encodeFunctionData("openLp", [
+                        safeAddress,
+                        usdcAmount,
+                        tickLower,
+                        tickUpper,
+                        500,
+                        500,
+                        SLIPPAGE_BPS,
+                    ]),
+                    operation: OperationType.Call,
+                },
+            ],
+        }),
+    );
+    const opened = await rhp.queryFilter(rhp.filters.PositionOpened(safeAddress), -10);
+    return opened[opened.length - 1].args.tokenId as bigint;
+}
+
+// Run closeLp via the Safe with the given baseline (performanceFeeBps already set on the
+// contract). Returns the PositionClosed event values + treasury/Safe USDC
+// deltas across the call. Since the position is opened and closed in the same
+// test with no external pool volume, accrued trading fees are ~0 — so the
+// treasury USDC delta isolates the performance fee.
+async function closeAndMeasure(
+    rhp: any,
+    safeWallet: any,
+    treasuryAddr: string,
+    tokenId: bigint,
+    initialValueUsd6: bigint,
+): Promise<{ currentValueUsd6: bigint; feeUsd6: bigint; treasuryDelta: bigint; safeDelta: bigint }> {
+    const rhpAddress = await rhp.getAddress();
+    const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_VIEW_ABI, ethers.provider);
+    const tBefore: bigint = await usdc.balanceOf(treasuryAddr);
+    const sBefore: bigint = await usdc.balanceOf(safeAddress);
+
+    await safeWallet.executeTransaction(
+        await safeWallet.createTransaction({
+            transactions: [
+                {
+                    to: rhpAddress,
+                    value: "0",
+                    data: rhp.interface.encodeFunctionData("closeLp", [
+                        safeAddress,
+                        tokenId,
+                        500,
+                        SLIPPAGE_BPS,
+                        initialValueUsd6,
+                    ]),
+                    operation: OperationType.Call,
+                },
+            ],
+        }),
+    );
+    const ev = (await rhp.queryFilter(rhp.filters.PositionClosed(safeAddress, tokenId), -10)).slice(-1)[0].args;
+    return {
+        currentValueUsd6: ev.currentValueUsd6 as bigint,
+        feeUsd6: ev.feeUsd6 as bigint,
+        treasuryDelta: ((await usdc.balanceOf(treasuryAddr)) as bigint) - tBefore,
+        safeDelta: ((await usdc.balanceOf(safeAddress)) as bigint) - sBefore,
+    };
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 //  Unit tests — pure contract logic, no fork dependencies on Uniswap/Fluid
 // ─────────────────────────────────────────────────────────────────────────
@@ -188,10 +276,11 @@ describe("RateHopperPositions - constructor", function () {
         expect(await rhp.UNISWAP_V3_FACTORY()).to.equal(UNISWAP_V3_FACTORY_ADDRESS);
         expect(await rhp.MAX_FEE_BPS()).to.equal(MAX_FEE_BPS);
         expect(await rhp.treasury()).to.equal(treasury.address);
+        expect(await rhp.performanceFeeBps()).to.equal(FEE_BPS);
         expect(await rhp.feeCollectBps()).to.equal(COLLECT_FEE_BPS);
     });
 
-    it("reverts on zero addresses and on feeCollectBps > maxFeeBps", async function () {
+    it("reverts on zero addresses and on performanceFeeBps / feeCollectBps > maxFeeBps", async function () {
         const { treasury, protocolRegistry } = await deployFixture();
         const F = await ethers.getContractFactory("RateHopperPositions");
         const registryAddr = await protocolRegistry.getAddress();
@@ -207,6 +296,7 @@ describe("RateHopperPositions - constructor", function () {
             swapRouter: UNISWAP_V3_SWAP_ROUTER_ADDRESS as string,
             uniswapV3Factory: UNISWAP_V3_FACTORY_ADDRESS as string,
             treasury: treasury.address,
+            performanceFeeBps: FEE_BPS as number,
             feeCollectBps: COLLECT_FEE_BPS as number,
             maxFeeBps: MAX_FEE_BPS as number,
             initialOwner: deployer.address,
@@ -221,6 +311,7 @@ describe("RateHopperPositions - constructor", function () {
                 m.swapRouter,
                 m.uniswapV3Factory,
                 m.treasury,
+                m.performanceFeeBps,
                 m.feeCollectBps,
                 m.maxFeeBps,
                 m.initialOwner,
@@ -234,6 +325,7 @@ describe("RateHopperPositions - constructor", function () {
         await expect(F.deploy(...build({ swapRouter: ZERO_ADDRESS }))).to.be.revertedWithCustomError(F, "ZeroAddress");
         await expect(F.deploy(...build({ uniswapV3Factory: ZERO_ADDRESS }))).to.be.revertedWithCustomError(F, "ZeroAddress");
         await expect(F.deploy(...build({ treasury: ZERO_ADDRESS }))).to.be.revertedWithCustomError(F, "InvalidTreasury");
+        await expect(F.deploy(...build({ performanceFeeBps: MAX_FEE_BPS + 1 }))).to.be.revertedWithCustomError(F, "FeeAboveMax");
         await expect(F.deploy(...build({ feeCollectBps: MAX_FEE_BPS + 1 }))).to.be.revertedWithCustomError(F, "FeeAboveMax");
     });
 });
@@ -253,6 +345,20 @@ describe("RateHopperPositions - owner setters", function () {
             "InvalidTreasury",
         );
         await expect(rhp.connect(other).setTreasury(other.address)).to.be.revertedWithCustomError(
+            rhp,
+            "OwnableUnauthorizedAccount",
+        );
+    });
+
+    it("setPerformanceFeeBps emits, validates the cap, and rejects non-owner", async function () {
+        const { rhp, deployer } = await deployFixture();
+        const [, other] = await ethers.getSigners();
+
+        await expect(rhp.connect(deployer).setPerformanceFeeBps(500)).to.emit(rhp, "PerformanceFeeBpsUpdated").withArgs(FEE_BPS, 500);
+        expect(await rhp.performanceFeeBps()).to.equal(500);
+
+        await expect(rhp.connect(deployer).setPerformanceFeeBps(MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(rhp, "FeeAboveMax");
+        await expect(rhp.connect(other).setPerformanceFeeBps(100)).to.be.revertedWithCustomError(
             rhp,
             "OwnableUnauthorizedAccount",
         );
@@ -282,7 +388,7 @@ describe("RateHopperPositions - owner setters", function () {
 //  Integration test — real Base mainnet contracts on the fork
 // ─────────────────────────────────────────────────────────────────────────
 
-describe.only("RateHopperPositions - integration (Base fork)", function () {
+describe("RateHopperPositions - integration (Base fork)", function () {
     this.timeout(300_000);
 
     let signer: ethers.Wallet;
@@ -455,14 +561,14 @@ describe.only("RateHopperPositions - integration (Base fork)", function () {
         console.log("\n  [8/9] closeLp swap leg fee tier (calldata built on-chain)");
         console.log(`         swapFee: ${swapFee} (WETH → USDC on the ${swapFee}-bps pool)`);
 
-        // 9. Capture balances and run closeLp via the Safe (3-arg signature:
-        //    safe, tokenId, swapFee). Debt repayment is the user's job in a
-        //    separate Safe-level Fluid `exit()` call.
+        // 9. Capture balances and run closeLp via the Safe. We pass
+        //    initialValueUsd6 = 0 so the entire realized USDC counts as profit
+        //    and the 10% performance fee path is exercised in full.
         const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_VIEW_ABI, ethers.provider);
         const treasuryUsdcBefore = await usdc.balanceOf(treasury.address);
         const safeUsdcBefore = await usdc.balanceOf(safeAddress);
 
-        console.log("\n  [9/9] Call closeLp via Safe");
+        console.log("\n  [9/9] Call closeLp via Safe (initialValueUsd6 = 0 → all profit)");
         console.log(`         pre-close treasury USDC: ${fmtUsdc(treasuryUsdcBefore)}`);
         console.log(`         pre-close safe USDC:     ${fmtUsdc(safeUsdcBefore)}`);
 
@@ -477,12 +583,19 @@ describe.only("RateHopperPositions - integration (Base fork)", function () {
                             tokenId,
                             swapFee,
                             SLIPPAGE_BPS,
+                            0, // initialValueUsd6 — treat full realized value as profit
                         ]),
                         operation: OperationType.Call,
                     },
                 ],
             }),
         );
+
+        // Read the PositionClosed event for the realized value + fee charged.
+        const closedEv = (await rhp.queryFilter(rhp.filters.PositionClosed(safeAddress, tokenId), -10)).slice(-1)[0]
+            .args;
+        const currentValueUsd6: bigint = closedEv.currentValueUsd6;
+        const feeUsd6: bigint = closedEv.feeUsd6;
 
         const treasuryUsdcAfter = await usdc.balanceOf(treasury.address);
         const safeUsdcAfter = await usdc.balanceOf(safeAddress);
@@ -497,19 +610,20 @@ describe.only("RateHopperPositions - integration (Base fork)", function () {
         }
 
         console.log("\n  ─── Results ───");
-        console.log(`         fee → treasury:        ${fmtUsdc(feeCharged)}`);
-        console.log(`         net → Safe (delta):    ${fmtUsdc(safeNetGain)}`);
-        console.log(`         post-close treasury:   ${fmtUsdc(treasuryUsdcAfter)}`);
-        console.log(`         post-close safe USDC:  ${fmtUsdc(safeUsdcAfter)}`);
+        console.log(`         realized value (event): ${fmtUsdc(currentValueUsd6)}`);
+        console.log(`         perf fee (event):       ${fmtUsdc(feeUsd6)} (${FEE_BPS / 100}% of profit)`);
+        console.log(`         fee → treasury (delta): ${fmtUsdc(feeCharged)}`);
+        console.log(`         net → Safe (delta):     ${fmtUsdc(safeNetGain)}`);
         console.log(`         RateHopperPositions residual USDC: ${fmtUsdc(rhpUsdcAfter)} (expected 0)`);
         console.log(`         NFT burned by closeLp: ${nftBurned}\n`);
 
-        // 10. Assertions. Fee logic is currently removed (TODO in the
-        //     contract), so the treasury balance is unchanged. closeLp no
-        //     longer repays the debt — it just forwards the full realized
-        //     USDC to the Safe — so the Safe's USDC delta equals the LP's
-        //     unwind value.
-        expect(treasuryUsdcAfter).to.equal(treasuryUsdcBefore);
+        // 10. Assertions. With initialValueUsd6 = 0, the whole realized value is
+        //     profit, so the treasury receives performanceFeeBps (10%) of it and the Safe
+        //     receives the remainder. NFT is burned (full close).
+        expect(currentValueUsd6).to.be.gt(0n);
+        expect(feeUsd6).to.equal((currentValueUsd6 * BigInt(FEE_BPS)) / 10_000n);
+        expect(feeCharged).to.equal(feeUsd6);
+        expect(safeNetGain).to.equal(currentValueUsd6 - feeUsd6);
         expect(safeUsdcAfter).to.be.gt(safeUsdcBefore);
         expect(nftBurned).to.equal(true);
     });
@@ -848,7 +962,13 @@ describe.only("RateHopperPositions - integration (Base fork)", function () {
         // 2. Operator closes the same LP directly; USDC is forwarded to the Safe.
         console.log("\n  [operator 5/5] Operator EOA calls closeLp directly");
         const safeUsdcBefore = await usdc.balanceOf(safeAddress);
-        await (await rhp.connect(operatorEOA).closeLp(safeAddress, tokenId, 500, SLIPPAGE_BPS)).wait();
+        // Pass a high initialValueUsd6 so no performance fee is charged — this
+        // test is about the operator authorization path, not fee mechanics.
+        await (
+            await rhp
+                .connect(operatorEOA)
+                .closeLp(safeAddress, tokenId, 500, SLIPPAGE_BPS, ethers.parseUnits("1000000", 6))
+        ).wait();
         const safeUsdcAfter = await usdc.balanceOf(safeAddress);
 
         let nftBurned = false;
@@ -892,5 +1012,98 @@ describe.only("RateHopperPositions - integration (Base fork)", function () {
             rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 500, SLIPPAGE_BPS),
         ).to.be.reverted;
         console.log("    openLp(module not enabled)    → reverted (Safe GS104) ✓");
+    });
+
+    it("closeLp charges NO performance fee when realized <= initialValueUsd6 (break-even / loss)", async function () {
+        const { rhp, treasury } = await deployFixture();
+        const tokenId = await openBalancedPosition(
+            rhp,
+            safeWallet,
+            signer,
+            ethers.parseEther("0.01"),
+            ethers.parseUnits("10", 6),
+        );
+
+        // Attest an initial value far above anything the LP can realize, so
+        // profit = max(0, realized - initialValue) = 0 → no fee.
+        const { currentValueUsd6, feeUsd6, treasuryDelta, safeDelta } = await closeAndMeasure(
+            rhp,
+            safeWallet,
+            treasury.address,
+            tokenId,
+            ethers.parseUnits("1000000", 6),
+        );
+        console.log(
+            `\n  [perf-fee/no-profit] realized ${ethers.formatUnits(currentValueUsd6, 6)} USDC → fee ${ethers.formatUnits(feeUsd6, 6)} USDC`,
+        );
+
+        expect(currentValueUsd6).to.be.gt(0n);
+        expect(feeUsd6).to.equal(0n);
+        expect(treasuryDelta).to.equal(0n);
+        expect(safeDelta).to.equal(currentValueUsd6); // full realized value to the Safe
+    });
+
+    it("closeLp charges performanceFeeBps only on profit above initialValueUsd6 (partial profit)", async function () {
+        const { rhp, treasury } = await deployFixture();
+        const tokenId = await openBalancedPosition(
+            rhp,
+            safeWallet,
+            signer,
+            ethers.parseEther("0.01"),
+            ethers.parseUnits("10", 6),
+        );
+
+        // initialValue well below the ~10 USDC the position realizes → only the
+        // delta above it is taxed.
+        const initialValueUsd6 = ethers.parseUnits("4", 6);
+        const { currentValueUsd6, feeUsd6, treasuryDelta, safeDelta } = await closeAndMeasure(
+            rhp,
+            safeWallet,
+            treasury.address,
+            tokenId,
+            initialValueUsd6,
+        );
+        const profit = currentValueUsd6 - initialValueUsd6;
+        const expectedFee = (profit * BigInt(FEE_BPS)) / 10_000n;
+        console.log(
+            `\n  [perf-fee/partial] realized ${ethers.formatUnits(currentValueUsd6, 6)} − basis ${ethers.formatUnits(initialValueUsd6, 6)} = profit ${ethers.formatUnits(profit, 6)} → fee ${ethers.formatUnits(feeUsd6, 6)}`,
+        );
+
+        expect(currentValueUsd6).to.be.gt(initialValueUsd6); // partial-profit scenario holds
+        expect(feeUsd6).to.equal(expectedFee);
+        expect(treasuryDelta).to.equal(feeUsd6);
+        expect(safeDelta).to.equal(currentValueUsd6 - feeUsd6);
+    });
+
+    it("closeLp applies the owner-updated performanceFeeBps rate", async function () {
+        const { rhp, deployer, treasury } = await deployFixture();
+
+        // Owner lowers the performance fee 10% → 5%; closeLp must use the new rate.
+        await (await rhp.connect(deployer).setPerformanceFeeBps(500)).wait();
+        expect(await rhp.performanceFeeBps()).to.equal(500);
+
+        const tokenId = await openBalancedPosition(
+            rhp,
+            safeWallet,
+            signer,
+            ethers.parseEther("0.01"),
+            ethers.parseUnits("10", 6),
+        );
+
+        // initialValue 0 → the whole realized value is profit, taxed at 5%.
+        const { currentValueUsd6, feeUsd6, treasuryDelta } = await closeAndMeasure(
+            rhp,
+            safeWallet,
+            treasury.address,
+            tokenId,
+            0n,
+        );
+        console.log(
+            `\n  [perf-fee/updated-rate] realized ${ethers.formatUnits(currentValueUsd6, 6)} USDC → fee ${ethers.formatUnits(feeUsd6, 6)} USDC (5%)`,
+        );
+
+        expect(currentValueUsd6).to.be.gt(0n);
+        expect(feeUsd6).to.equal((currentValueUsd6 * 500n) / 10_000n);
+        expect(treasuryDelta).to.equal(feeUsd6);
     });
 });
