@@ -69,7 +69,8 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint256 indexed tokenId,
         uint128 initialValueUsd6,
         uint128 currentValueUsd6,
-        uint128 feeUsd6
+        uint128 feeUsd6,
+        uint16 exitBps
     );
     event FeesCollected(
         address indexed onBehalfOf,
@@ -92,6 +93,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     error SwapFailed();
     error ZeroAddress();
     error InvalidUsdcAmount();
+    error InvalidExitBps();
     error ModuleCallFailed(uint8 step);
     error LpNotOnSafe();
     error NotAuthorized();
@@ -257,9 +259,10 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     //  closeLp
     // ─────────────────────────────────────────────────────────────────────
 
-    /// @notice Atomic LP unwind: harvest fees → decreaseLiquidity → collect
-    ///         principal → burn → swap WETH leg to USDC. The NFT stays on the
-    ///         Safe throughout; every sub-step is module-mediated.
+    /// @notice Atomic LP unwind: harvest fees → decreaseLiquidity (partial or
+    ///         full) → collect principal → (full only) burn → swap WETH leg to
+    ///         USDC. The NFT stays on the Safe throughout; every sub-step is
+    ///         module-mediated.
     /// @dev    Debt repayment happens outside this function (the user runs
     ///         Fluid `exit()` via a separate Safe transaction once the USDC
     ///         lands on the Safe). PRECONDITION: the Safe MUST have enabled
@@ -271,16 +274,35 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     ///                      leg back to USDC.
     /// @param  slippageBps  Slippage tolerance in bps applied to the swap's
     ///                      spot-price quote.
-    /// @param  initialValueUsd6  Caller-attested USDC value of the position at
-    ///                      open. The performance fee (`performanceFeeBps`) is charged on
-    ///                      net profit only — `max(0, realized - initialValue)`.
+    /// @param  initialValueUsd6  Caller-attested USDC cost basis ATTRIBUTABLE
+    ///                      TO THIS CALL. The contract prorates by `exitBps`
+    ///                      to derive the perf-fee basis used here:
+    ///                      `basis = initialValueUsd6 * exitBps / 10_000`.
+    ///                      Performance fee (`performanceFeeBps`) is charged
+    ///                      on net profit only: `max(0, realized - basis)`.
+    ///                      For a one-shot full close on a fresh position
+    ///                      this equals the open-time value of the entire
+    ///                      position. For a SEQUENCE of closes (partial then
+    ///                      later partial/full), the caller MUST pass the
+    ///                      residual basis = open-time value minus what was
+    ///                      already drawn down by prior closes
+    ///                      (`prevInitialValueUsd6 * prevExitBps / 10_000`).
+    ///                      Failing to deduct double-counts the basis and
+    ///                      under-charges the perf fee.
+    /// @param  exitBps      Fraction of remaining liquidity to remove, in bps.
+    ///                      `10_000` = full close (NFT is burned); any value in
+    ///                      `(0, 10_000)` is a partial close (NFT kept alive,
+    ///                      accrued fees still fully harvested up-front). Must
+    ///                      satisfy `0 < exitBps <= 10_000`.
     function closeLp(
         address _onBehalfOf,
         uint256 tokenId,
         uint24 swapPoolFeeTier,
         uint16 slippageBps,
-        uint128 initialValueUsd6
+        uint128 initialValueUsd6,
+        uint16 exitBps
     ) external nonReentrant onlyOperatorOrSafe(_onBehalfOf) {
+        if (exitBps == 0 || exitBps > 10_000) revert InvalidExitBps();
 
         // Snapshot Safe balances so we measure only what this closeLp adds.
         uint256 wethBefore = WETH.balanceOf(_onBehalfOf);
@@ -289,13 +311,20 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         // 1. Harvest accrued LP fees first. Before `decreaseLiquidity`, the
         //    position's `tokensOwed` contains ONLY the accrued fees, so
         //    `_collectLp` charges `feeCollectBps` on the fees alone (not on
-        //    principal).
+        //    principal). Done on every close — partial or full — so the user
+        //    always receives the full accrued-fee accounting.
         _collectLp(_onBehalfOf, tokenId);
 
-        // 2. Decrease all liquidity, module-mediated. Principal moves into
-        //    `tokensOwed0`/`tokensOwed1`, ready to be collected.
+        // 2. Decrease liquidity (partial or full), module-mediated. Principal
+        //    moves into `tokensOwed0`/`tokensOwed1`, ready to be collected.
+        //    On full close (`exitBps == 10_000`), avoid the mulDiv round-down
+        //    and remove exactly `liquidity` so `burn` succeeds.
         (, , , , , , , uint128 liquidity, , , , ) = POSITION_MANAGER.positions(tokenId);
-        if (liquidity > 0) {
+        uint128 liquidityToRemove = exitBps == 10_000
+            ? liquidity
+            : uint128(Math.mulDiv(uint256(liquidity), uint256(exitBps), 10_000));
+
+        if (liquidityToRemove > 0) {
             _safeExec(
                 _onBehalfOf,
                 address(POSITION_MANAGER),
@@ -304,7 +333,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
                     INonfungiblePositionManager.decreaseLiquidity,
                     (INonfungiblePositionManager.DecreaseLiquidityParams({
                         tokenId: tokenId,
-                        liquidity: liquidity,
+                        liquidity: liquidityToRemove,
                         amount0Min: 0,
                         amount1Min: 0,
                         deadline: block.timestamp
@@ -312,20 +341,23 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
                 ),
                 7
             );
+
+            // 3. Collect the principal directly to the Safe (no fee — capital).
+            //    Also needed for `burn` to succeed (NPM requires tokensOwed == 0).
+            _collectToRecipient(_onBehalfOf, tokenId, _onBehalfOf, 8);
         }
 
-        // 3. Collect the principal directly to the Safe (no fee — capital).
-        //    Also needed for `burn` to succeed (NPM requires tokensOwed == 0).
-        _collectToRecipient(_onBehalfOf, tokenId, _onBehalfOf, 8);
-
-        // 4. Burn the now-empty NFT, module-mediated.
-        _safeExec(
-            _onBehalfOf,
-            address(POSITION_MANAGER),
-            0,
-            abi.encodeCall(INonfungiblePositionManager.burn, (tokenId)),
-            9
-        );
+        // 4. Burn the now-empty NFT only on a full close. Partial closes leave
+        //    the position open so it can keep earning fees / be unwound later.
+        if (exitBps == 10_000) {
+            _safeExec(
+                _onBehalfOf,
+                address(POSITION_MANAGER),
+                0,
+                abi.encodeCall(INonfungiblePositionManager.burn, (tokenId)),
+                9
+            );
+        }
 
         // 5. Swap the WETH delta on the Safe → USDC, mirroring openLp's
         //    structure (module-mediated, on-chain calldata, spot-price slippage).
@@ -352,13 +384,19 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
 
         uint128 currentValueUsd6 = uint128(USDC.balanceOf(_onBehalfOf) - usdcBefore);
 
-        // 6. Performance fee: charge `performanceFeeBps` on NET PROFIT only — the realized
-        //    USDC above the caller-attested initial value. No fee on break-even
-        //    or losses. Pulled from the Safe to the treasury module-mediated
-        //    (the realized USDC is on the Safe after the swap).
+        // 6. Performance fee: charge `performanceFeeBps` on NET PROFIT only —
+        //    the realized USDC above the prorated initial-value basis. On a
+        //    partial close, the basis is `initialValueUsd6 * exitBps / 10_000`
+        //    so each slice is fee'd against its own fraction of the open-time
+        //    basis. No fee on break-even or losses. Pulled from the Safe to
+        //    the treasury module-mediated (the realized USDC is on the Safe
+        //    after the swap).
+        uint128 basisForExit = exitBps == 10_000
+            ? initialValueUsd6
+            : uint128(Math.mulDiv(uint256(initialValueUsd6), uint256(exitBps), 10_000));
         uint128 feeUsd6 = 0;
-        if (currentValueUsd6 > initialValueUsd6) {
-            uint256 profit = uint256(currentValueUsd6) - uint256(initialValueUsd6);
+        if (currentValueUsd6 > basisForExit) {
+            uint256 profit = uint256(currentValueUsd6) - uint256(basisForExit);
             feeUsd6 = uint128((profit * performanceFeeBps) / 10_000);
             if (feeUsd6 > 0) {
                 _safeExec(
@@ -371,7 +409,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
             }
         }
 
-        emit PositionClosed(_onBehalfOf, tokenId, initialValueUsd6, currentValueUsd6, feeUsd6);
+        emit PositionClosed(_onBehalfOf, tokenId, initialValueUsd6, currentValueUsd6, feeUsd6, exitBps);
     }
 
     // ─────────────────────────────────────────────────────────────────────

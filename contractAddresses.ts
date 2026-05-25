@@ -45,6 +45,12 @@ export const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
 // Team owner wallet (for ownership transfer after deployment)
 export const ADMIN_ADDRESS = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
 
+// RateHopper canonical Base deployments — referenced by downstream deploys
+// (e.g. DeployRateHopperPositions reads PROTOCOL_REGISTRY_ADDRESS to wire RHP
+// to the existing registry). Update these here when a new authoritative
+// deployment ships.
+export const PROTOCOL_REGISTRY_ADDRESS = "0xcBf89580f582197450fB40f0313206B3aa82435F";
+
 // Protocol enum
 export enum Protocol {
     AAVE_V3,
