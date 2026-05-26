@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 // Minimal vendored interface for Uniswap V3's Nonfungible Position Manager.
-// Only the surface RateHopperPositions calls is declared, to sidestep the
+// Only the surface RatehopperUniV3Positions calls is declared, to sidestep the
 // upstream v3-periphery package's dependency on the OZ v4 ERC721 file layout.
 // Canonical implementation:
 //   https://github.com/Uniswap/v3-periphery/blob/main/contracts/interfaces/INonfungiblePositionManager.sol

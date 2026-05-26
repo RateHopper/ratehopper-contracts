@@ -17,7 +17,7 @@
         "coverage": "node --max-old-space-size=12288 ./node_modules/.bin/hardhat coverage",
         "clean": "npx hardhat clean",
         "deploy": "rm -rf ignition/deployments/chain-8453 && npx hardhat ignition deploy ignition/modules/DeployAll.ts --network base --verify --reset",
-        "deploy:rhp": "npx hardhat ignition deploy ignition/modules/DeployRateHopperPositions.ts --network base --verify",
+        "deploy:rhp": "npx hardhat ignition deploy ignition/modules/DeployRatehopperUniV3Positions.ts --network base --verify",
         "verify": "npx hardhat run scripts/verifyAll.ts --network base",
         "wipe": "npx hardhat ignition wipe chain-8453"
     },
