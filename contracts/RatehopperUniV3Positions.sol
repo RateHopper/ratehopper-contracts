@@ -13,7 +13,7 @@ import {ISafe} from "./interfaces/safe/ISafe.sol";
 
 import {IProtocolRegistry} from "./interfaces/IProtocolRegistry.sol";
 
-/// @title RateHopperPositions
+/// @title RatehopperUniV3Positions
 /// @notice Atomic Uniswap V3 WETH/USDC LP lifecycle helper for Gnosis Safes:
 ///           - `openLp()` splits the Safe's USDC, swaps half to WETH on the
 ///             pinned SwapRouter02, then mints a WETH/USDC LP NFT on the Safe.
@@ -26,7 +26,7 @@ import {IProtocolRegistry} from "./interfaces/IProtocolRegistry.sol";
 ///         spot-price-based slippage is applied per-call via `slippageBps`.
 ///         Supply/borrow on a lending protocol (e.g. Fluid) and debt repayment
 ///         are the user's responsibility via separate Safe transactions.
-contract RateHopperPositions is Ownable, ReentrancyGuard {
+contract RatehopperUniV3Positions is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     /// @dev Mirror of SwapRouter02's `ExactInputSingleParams`. Inlined so we
@@ -53,6 +53,37 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     address public treasury;
     uint16 public performanceFeeBps;
     uint16 public feeCollectBps;
+    /// @notice Hard ceiling on the caller-supplied `slippageBps` accepted by
+    ///         `openLp` / `closeLp` / `_quoteSwapAmountOutMin`. Defaults to
+    ///         300 (3%). Owner-mutable via `setMaxSlippageBps`, but capped at
+    ///         `MAX_SETTABLE_SLIPPAGE_BPS = 1000` (10%) to bound the owner's
+    ///         authority — even a compromised owner cannot disable slippage
+    ///         protection entirely.
+    uint16 public maxSlippageBps = 300;
+
+    /// @notice Absolute ceiling on what owner can set `maxSlippageBps` to.
+    ///         Hard-coded user-protection guardrail.
+    uint16 public constant MAX_SETTABLE_SLIPPAGE_BPS = 1000;
+
+    /// @notice Allow-list of acceptable Uniswap V3 fee tiers for both the LP
+    ///         pool (mint side) and the swap pool. Constrains caller / operator
+    ///         routing away from thin pools where `slot0` manipulation is
+    ///         cheap and slippage extraction is large. Defaults at deploy:
+    ///         {100, 500, 3000} = enabled; everything else (notably the
+    ///         10000-bps WETH/USDC tier on Base) = disabled. Mutable via
+    ///         `setFeeTierAllowed`.
+    mapping(uint24 feeTier => bool) public allowedFeeTier;
+
+    /// @notice Per-tokenId cost basis remaining to be drawn down by future
+    ///         `closeLp` calls. Set at `openLp` to the freshly-minted LP's
+    ///         USDC-equivalent value (immutable to the caller); decremented
+    ///         by `basis * exitBps / 10_000` on each `closeLp`, deleted on a
+    ///         full close. A value of 0 means "no active position recorded
+    ///         under this tokenId" (never opened via this contract OR already
+    ///         fully closed). This replaces the prior caller-attested
+    ///         `initialValueUsd6` parameter — neither a Safe owner nor a
+    ///         compromised operator can lie about the perf-fee basis anymore.
+    mapping(uint256 tokenId => uint128 residualBasisUsd6) public residualBasisUsd6Of;
 
     bytes4 private constant EXACT_INPUT_SINGLE_SELECTOR = 0x04e45aaf;
 
@@ -67,7 +98,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     event PositionClosed(
         address indexed onBehalfOf,
         uint256 indexed tokenId,
-        uint128 initialValueUsd6,
+        uint128 basisUsd6,
         uint128 currentValueUsd6,
         uint128 feeUsd6,
         uint16 exitBps
@@ -86,6 +117,8 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
     event PerformanceFeeBpsUpdated(uint16 previousPerformanceFeeBps, uint16 newPerformanceFeeBps);
     event FeeCollectBpsUpdated(uint16 previousFeeCollectBps, uint16 newFeeCollectBps);
+    event MaxSlippageBpsUpdated(uint16 previousMaxSlippageBps, uint16 newMaxSlippageBps);
+    event FeeTierAllowedUpdated(uint24 indexed feeTier, bool previousAllowed, bool newAllowed);
     event TokenRescued(address indexed token, address indexed recipient, uint256 amount);
 
     error InvalidTreasury();
@@ -94,9 +127,13 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     error ZeroAddress();
     error InvalidUsdcAmount();
     error InvalidExitBps();
+    error SlippageAboveMax();
+    error FeeTierNotAllowed();
+    error UnknownPosition();
     error ModuleCallFailed(uint8 step);
     error LpNotOnSafe();
     error NotAuthorized();
+    error DeadlineExpired();
 
     /// @notice Restricts a call to either the backend operator (the registry's
     ///         `safeOperator`) or the Safe itself. The operator drives closes
@@ -145,6 +182,14 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         treasury = _treasury;
         performanceFeeBps = _performanceFeeBps;
         feeCollectBps = _feeCollectBps;
+
+        // Default allow-list: the three liquid Base WETH/USDC tiers. Excludes
+        // 10000 deliberately — that pool is thin and is the cheap target for
+        // slot0 manipulation. Owner can flip individual tiers later via
+        // `setFeeTierAllowed`.
+        allowedFeeTier[100] = true;
+        allowedFeeTier[500] = true;
+        allowedFeeTier[3000] = true;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -176,15 +221,23 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         int24 tickLower,
         int24 tickUpper,
         uint24 lpPoolFeeTier,
+        uint256 mintAmount0Min,
+        uint256 mintAmount1Min,
         uint24 swapPoolFeeTier,
-        uint16 slippageBps
+        uint256 swapAmountOutMin,
+        uint16 slippageBps,
+        uint256 deadline
     )
         external
         nonReentrant
         onlyOperatorOrSafe(_onBehalfOf)
         returns (uint256 tokenId)
     {
+        if (block.timestamp > deadline) revert DeadlineExpired();
         if (usdcAmount == 0) revert InvalidUsdcAmount();
+        if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
+        if (!allowedFeeTier[lpPoolFeeTier]) revert FeeTierNotAllowed();
+        if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
 
         uint256 halfUsdc = usdcAmount / 2;
         uint256 retainedUsdc = usdcAmount - halfUsdc;
@@ -194,11 +247,10 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint256 wethBefore = WETH.balanceOf(_onBehalfOf);
 
         // 1. Build the swap calldata in-contract — caller controls only the
-        //    fee tier, not the selector / tokens / recipient. amountOutMinimum
-        //    is computed from the pool's spot price with the caller-supplied
-        //    slippageBps tolerance.
-        uint256 swapAmountOutMin =
-            _quoteSwapAmountOutMin(address(USDC), address(WETH), halfUsdc, swapPoolFeeTier, slippageBps);
+        //    fee tier, not the selector / tokens / recipient. `amountOutMinimum`
+        //    is caller-supplied (`swapAmountOutMin`, derived off-chain from a
+        //    quote with a tolerance buffer); spot-price-based fallback is
+        //    intentionally removed (per C-01) to prevent in-block manipulation.
         bytes memory swapData = abi.encodeWithSelector(
             EXACT_INPUT_SINGLE_SELECTOR,
             ExactInputSingleParams({
@@ -220,8 +272,9 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint128 wethReceived = uint128(WETH.balanceOf(_onBehalfOf) - wethBefore);
 
         // 3. Approve NPM and mint the LP. NFT lands on Safe. amount0Min /
-        //    amount1Min are hardcoded to 0 (no mint slippage protection;
-        //    also permits one-sided tick ranges).
+        //    amount1Min come from the caller (typically derived off-chain
+        //    from a quote with a tolerance buffer); set both to 0 to opt out
+        //    of slippage protection (e.g. for one-sided ranges).
         _safeApprove(_onBehalfOf, address(WETH), address(POSITION_MANAGER), uint256(wethReceived));
         _safeApprove(_onBehalfOf, address(USDC), address(POSITION_MANAGER), retainedUsdc);
 
@@ -233,7 +286,10 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
             tickLower,
             tickUpper,
             uint256(wethReceived),
-            retainedUsdc
+            retainedUsdc,
+            mintAmount0Min,
+            mintAmount1Min,
+            deadline
         );
 
         _safeApprove(_onBehalfOf, address(WETH), address(POSITION_MANAGER), 0);
@@ -252,6 +308,12 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
                 : 0;
             currentValueUsd6 = uint128(wethValueInUsdc + uint256(usedUsdc));
         }
+
+        // Persist the open-time basis on-chain so `closeLp` can no longer
+        // accept a caller-attested value. The slot is decremented on each
+        // partial close and deleted on a full close (C-03).
+        residualBasisUsd6Of[tokenId] = currentValueUsd6;
+
         emit PositionOpened(_onBehalfOf, tokenId, usdcAmount, usedWeth, usedUsdc, currentValueUsd6);
     }
 
@@ -274,35 +336,47 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
     ///                      leg back to USDC.
     /// @param  slippageBps  Slippage tolerance in bps applied to the swap's
     ///                      spot-price quote.
-    /// @param  initialValueUsd6  Caller-attested USDC cost basis ATTRIBUTABLE
-    ///                      TO THIS CALL. The contract prorates by `exitBps`
-    ///                      to derive the perf-fee basis used here:
-    ///                      `basis = initialValueUsd6 * exitBps / 10_000`.
-    ///                      Performance fee (`performanceFeeBps`) is charged
-    ///                      on net profit only: `max(0, realized - basis)`.
-    ///                      For a one-shot full close on a fresh position
-    ///                      this equals the open-time value of the entire
-    ///                      position. For a SEQUENCE of closes (partial then
-    ///                      later partial/full), the caller MUST pass the
-    ///                      residual basis = open-time value minus what was
-    ///                      already drawn down by prior closes
-    ///                      (`prevInitialValueUsd6 * prevExitBps / 10_000`).
-    ///                      Failing to deduct double-counts the basis and
-    ///                      under-charges the perf fee.
     /// @param  exitBps      Fraction of remaining liquidity to remove, in bps.
-    ///                      `10_000` = full close (NFT is burned); any value in
-    ///                      `(0, 10_000)` is a partial close (NFT kept alive,
-    ///                      accrued fees still fully harvested up-front). Must
-    ///                      satisfy `0 < exitBps <= 10_000`.
+    ///                      `10_000` = full close (NFT is burned, residual
+    ///                      basis deleted); any value in `(0, 10_000)` is a
+    ///                      partial close (NFT kept alive, accrued fees still
+    ///                      fully harvested up-front, residual basis
+    ///                      decremented by `residual * exitBps / 10_000`).
+    ///                      Must satisfy `0 < exitBps <= 10_000`.
+    /// @dev    The performance-fee basis is read from `residualBasisUsd6Of`
+    ///         (set at `openLp` to the freshly-minted LP's USDC-equivalent
+    ///         value) and prorated by `exitBps`. Caller cannot lie about
+    ///         basis (C-03). On full close the slot is deleted; on partial
+    ///         close it is decremented so subsequent closes always price
+    ///         against the correct residual without off-chain bookkeeping.
     function closeLp(
         address _onBehalfOf,
         uint256 tokenId,
         uint24 swapPoolFeeTier,
+        uint256 swapAmountOutMin,
         uint16 slippageBps,
-        uint128 initialValueUsd6,
-        uint16 exitBps
+        uint16 exitBps,
+        uint256 decreaseAmount0Min,
+        uint256 decreaseAmount1Min,
+        uint256 deadline
     ) external nonReentrant onlyOperatorOrSafe(_onBehalfOf) {
+        if (block.timestamp > deadline) revert DeadlineExpired();
         if (exitBps == 0 || exitBps > 10_000) revert InvalidExitBps();
+        if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
+        if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
+
+        // Read + decrement stored basis BEFORE any module call (CEI). Zero
+        // means either never opened via this contract or already fully closed.
+        uint128 residualBasis = residualBasisUsd6Of[tokenId];
+        if (residualBasis == 0) revert UnknownPosition();
+        uint128 basisForExit = exitBps == 10_000
+            ? residualBasis
+            : uint128(Math.mulDiv(uint256(residualBasis), uint256(exitBps), 10_000));
+        if (exitBps == 10_000) {
+            delete residualBasisUsd6Of[tokenId];
+        } else {
+            residualBasisUsd6Of[tokenId] = residualBasis - basisForExit;
+        }
 
         // Snapshot Safe balances so we measure only what this closeLp adds.
         uint256 wethBefore = WETH.balanceOf(_onBehalfOf);
@@ -334,9 +408,9 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
                     (INonfungiblePositionManager.DecreaseLiquidityParams({
                         tokenId: tokenId,
                         liquidity: liquidityToRemove,
-                        amount0Min: 0,
-                        amount1Min: 0,
-                        deadline: block.timestamp
+                        amount0Min: decreaseAmount0Min,
+                        amount1Min: decreaseAmount1Min,
+                        deadline: deadline
                     }))
                 ),
                 7
@@ -360,11 +434,11 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         }
 
         // 5. Swap the WETH delta on the Safe → USDC, mirroring openLp's
-        //    structure (module-mediated, on-chain calldata, spot-price slippage).
+        //    structure (module-mediated, on-chain calldata). `amountOutMinimum`
+        //    is caller-supplied (`swapAmountOutMin`) — spot-price-derived
+        //    fallback removed per C-01 to prevent in-block manipulation.
         uint128 wethToSwap = uint128(WETH.balanceOf(_onBehalfOf) - wethBefore);
         if (wethToSwap > 0) {
-            uint256 swapAmountOutMin =
-                _quoteSwapAmountOutMin(address(WETH), address(USDC), wethToSwap, swapPoolFeeTier, slippageBps);
             bytes memory swapData = abi.encodeWithSelector(
                 EXACT_INPUT_SINGLE_SELECTOR,
                 ExactInputSingleParams({
@@ -385,15 +459,9 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint128 currentValueUsd6 = uint128(USDC.balanceOf(_onBehalfOf) - usdcBefore);
 
         // 6. Performance fee: charge `performanceFeeBps` on NET PROFIT only —
-        //    the realized USDC above the prorated initial-value basis. On a
-        //    partial close, the basis is `initialValueUsd6 * exitBps / 10_000`
-        //    so each slice is fee'd against its own fraction of the open-time
-        //    basis. No fee on break-even or losses. Pulled from the Safe to
-        //    the treasury module-mediated (the realized USDC is on the Safe
-        //    after the swap).
-        uint128 basisForExit = exitBps == 10_000
-            ? initialValueUsd6
-            : uint128(Math.mulDiv(uint256(initialValueUsd6), uint256(exitBps), 10_000));
+        //    realized USDC above the stored basis (already prorated by exitBps
+        //    at the top of the function). No fee on break-even or losses.
+        //    Pulled from the Safe to the treasury module-mediated.
         uint128 feeUsd6 = 0;
         if (currentValueUsd6 > basisForExit) {
             uint256 profit = uint256(currentValueUsd6) - uint256(basisForExit);
@@ -409,7 +477,7 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
             }
         }
 
-        emit PositionClosed(_onBehalfOf, tokenId, initialValueUsd6, currentValueUsd6, feeUsd6, exitBps);
+        emit PositionClosed(_onBehalfOf, tokenId, basisForExit, currentValueUsd6, feeUsd6, exitBps);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -520,6 +588,25 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         feeCollectBps = newFeeCollectBps;
     }
 
+    /// @notice Update the ceiling on caller-supplied `slippageBps` for
+    ///         `openLp` / `closeLp`. Hard-capped at `MAX_SETTABLE_SLIPPAGE_BPS`
+    ///         (1000 = 10%) so even a compromised owner cannot disable
+    ///         slippage protection.
+    function setMaxSlippageBps(uint16 newMaxSlippageBps) external onlyOwner {
+        if (newMaxSlippageBps > MAX_SETTABLE_SLIPPAGE_BPS) revert SlippageAboveMax();
+        emit MaxSlippageBpsUpdated(maxSlippageBps, newMaxSlippageBps);
+        maxSlippageBps = newMaxSlippageBps;
+    }
+
+    /// @notice Enable or disable a Uniswap V3 fee tier for use as either the
+    ///         LP pool or the swap pool in `openLp` / `closeLp`. Constrains
+    ///         routing away from thin pools that are cheap to manipulate.
+    function setFeeTierAllowed(uint24 feeTier, bool allowed) external onlyOwner {
+        bool previousAllowed = allowedFeeTier[feeTier];
+        emit FeeTierAllowedUpdated(feeTier, previousAllowed, allowed);
+        allowedFeeTier[feeTier] = allowed;
+    }
+
     /// @notice Recover an ERC20 token accidentally sent to or stranded in
     ///         this contract (e.g. dust from rounding, direct transfers,
     ///         residue from a failed mid-position step).
@@ -552,6 +639,8 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
         uint24 swapPoolFeeTier,
         uint16 slippageBps
     ) internal view returns (uint256) {
+        if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
+        if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
         address pool = UNISWAP_V3_FACTORY.getPool(tokenIn, tokenOut, swapPoolFeeTier);
         (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3Pool(pool).slot0();
         uint256 amountInAfterFee = Math.mulDiv(amountIn, 1_000_000 - uint256(swapPoolFeeTier), 1_000_000);
@@ -601,16 +690,21 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
 
     /// @notice Module-mediated NPM.mint from the Safe; decodes the return
     ///         data to surface the new tokenId + amounts consumed.
-    /// @dev    `amount0Min`/`amount1Min` are hardcoded to 0 (no slippage
-    ///         protection on the mint, also permits one-sided tick ranges)
-    ///         and `deadline` to `block.timestamp` (no staleness protection).
+    /// @dev    `amount0Min`/`amount1Min` are caller-supplied (derive off-chain
+    ///         from a quote with a tolerance buffer; pass 0 to opt out — e.g.
+    ///         for one-sided ranges). `deadline` is caller-supplied and
+    ///         validated at the public `openLp` entry — passed straight
+    ///         through here.
     function _safeMintLp(
         address _onBehalfOf,
         uint24 lpPoolFeeTier,
         int24 tickLower,
         int24 tickUpper,
         uint256 wethDesired,
-        uint256 usdcDesired
+        uint256 usdcDesired,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        uint256 deadline
     ) internal returns (uint256 tokenId, uint128 amount0Used, uint128 amount1Used) {
         INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
             token0: address(WETH),
@@ -620,10 +714,10 @@ contract RateHopperPositions is Ownable, ReentrancyGuard {
             tickUpper: tickUpper,
             amount0Desired: wethDesired,
             amount1Desired: usdcDesired,
-            amount0Min: 0,
-            amount1Min: 0,
+            amount0Min: amount0Min,
+            amount1Min: amount1Min,
             recipient: _onBehalfOf,
-            deadline: block.timestamp
+            deadline: deadline
         });
 
         bytes memory mintCall = abi.encodeCall(INonfungiblePositionManager.mint, params);

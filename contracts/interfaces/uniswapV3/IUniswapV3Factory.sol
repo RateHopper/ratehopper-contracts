@@ -3,7 +3,7 @@ pragma solidity >=0.5.0;
 
 /**
  * @dev Simplified Uniswap V3 factory interface — only the pool-lookup surface
- *      this repo uses (e.g. RateHopperPositions reads the swap pool's spot
+ *      this repo uses (e.g. RatehopperUniV3Positions reads the swap pool's spot
  *      price for on-chain slippage computation).
  */
 interface IUniswapV3Factory {

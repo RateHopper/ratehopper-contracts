@@ -9,9 +9,9 @@ import {
 } from "../../contractAddresses";
 
 /**
- * Standalone deployment module for RateHopperPositions.
+ * Standalone deployment module for RatehopperUniV3Positions.
  *
- * RateHopperPositions reads `safeOperator` from an already-deployed
+ * RatehopperUniV3Positions reads `safeOperator` from an already-deployed
  * ProtocolRegistry, so its address is passed in (not redeployed) — either
  * via the `registry` module parameter or the `RHP_REGISTRY` env var.
  *
@@ -27,10 +27,10 @@ import {
  *  - DEPLOYER_PRIVATE_KEY:      Deployer key (set in hardhat.config.ts)
  *
  * Usage:
- *   npx hardhat ignition deploy ignition/modules/DeployRateHopperPositions.ts \
+ *   npx hardhat ignition deploy ignition/modules/DeployRatehopperUniV3Positions.ts \
  *     --network base --verify
  */
-export default buildModule("DeployRateHopperPositions", (m) => {
+export default buildModule("DeployRatehopperUniV3Positions", (m) => {
     const registry = m.getParameter<string>("registry", process.env.RHP_REGISTRY ?? PROTOCOL_REGISTRY_ADDRESS);
     const treasury = m.getParameter<string>("treasury", process.env.RHP_TREASURY ?? "");
     const initialOwner = m.getParameter<string>("initialOwner", process.env.ADMIN_ADDRESS ?? "");
@@ -41,7 +41,7 @@ export default buildModule("DeployRateHopperPositions", (m) => {
     const feeCollectBps = m.getParameter<number>("feeCollectBps", Number(process.env.RHP_FEE_COLLECT_BPS ?? 250));
     const maxFeeBps = m.getParameter<number>("maxFeeBps", Number(process.env.RHP_MAX_FEE_BPS ?? 2000));
 
-    const rateHopperPositions = m.contract("RateHopperPositions", [
+    const ratehopperUniV3Positions = m.contract("RatehopperUniV3Positions", [
         UNISWAP_V3_NPM_ADDRESS,
         registry,
         USDC_ADDRESS,
@@ -55,5 +55,5 @@ export default buildModule("DeployRateHopperPositions", (m) => {
         initialOwner,
     ]);
 
-    return { rateHopperPositions };
+    return { ratehopperUniV3Positions };
 });
