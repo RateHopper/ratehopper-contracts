@@ -44,4 +44,7 @@ interface IUniswapV3Pool {
             uint8 feeProtocol,
             bool unlocked
         );
+
+    /// @notice The currently in-range liquidity available to the pool.
+    function liquidity() external view returns (uint128);
 }

@@ -20,7 +20,9 @@ import {
  *                               to `PROTOCOL_REGISTRY_ADDRESS` in
  *                               `contractAddresses.ts` (the canonical Base registry).
  *  - RHP_TREASURY:              Treasury address that collects fees (required)
- *  - RHP_INITIAL_OWNER:         Owner of the contract (required)
+ *  - RHP_INITIAL_ADMIN:         DEFAULT_ADMIN_ROLE holder (operational setters; required)
+ *  - RHP_TIMELOCK:              TimelockController address that holds CRITICAL_ROLE
+ *                               for fund-impacting setters (required, H-04)
  *  - RHP_PERFORMANCE_FEE_BPS:   Performance fee on net profit at closeLp in bps (default 1000 = 10%)
  *  - RHP_FEE_COLLECT_BPS:       Fee on harvested LP fees in bps (default 250 = 2.5%)
  *  - RHP_MAX_FEE_BPS:           Hard upper bound on BOTH fees (default 2000 = 20%)
@@ -33,7 +35,8 @@ import {
 export default buildModule("DeployRatehopperUniV3Positions", (m) => {
     const registry = m.getParameter<string>("registry", process.env.RHP_REGISTRY ?? PROTOCOL_REGISTRY_ADDRESS);
     const treasury = m.getParameter<string>("treasury", process.env.RHP_TREASURY ?? "");
-    const initialOwner = m.getParameter<string>("initialOwner", process.env.ADMIN_ADDRESS ?? "");
+    const initialAdmin = m.getParameter<string>("initialAdmin", process.env.RHP_INITIAL_ADMIN ?? process.env.ADMIN_ADDRESS ?? "");
+    const timelock = m.getParameter<string>("timelock", process.env.RHP_TIMELOCK ?? "");
     const performanceFeeBps = m.getParameter<number>(
         "performanceFeeBps",
         Number(process.env.RHP_PERFORMANCE_FEE_BPS ?? 1000),
@@ -52,7 +55,8 @@ export default buildModule("DeployRatehopperUniV3Positions", (m) => {
         performanceFeeBps,
         feeCollectBps,
         maxFeeBps,
-        initialOwner,
+        initialAdmin,
+        timelock,
     ]);
 
     return { ratehopperUniV3Positions };
