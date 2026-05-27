@@ -672,21 +672,14 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         });
     });
 
-    // SKIPPED post-C-03: this test mints the LP NFT directly via NPM (step 6),
-    // but closeLp now requires `residualBasisUsd6Of[tokenId]` to be set by
-    // openLp. Reframe to route through `rhp.openLp(...)` instead of manual
-    // NPM mint, or rely on the "uses the stored basis from openLp" test
-    // (which already covers the open → close lifecycle end-to-end).
-    it.skip("closes an LP-backed Fluid debt position with profit", async function () {
+    it("closes an LP-backed Fluid debt position end-to-end via openLp + closeLp", async function () {
         const { rhp, safeDebtManager, treasury } = await deployFixture();
         const safeDebtManagerAddress = await safeDebtManager.getAddress();
         const rhpAddress = await rhp.getAddress();
 
         // Pretty-printers for the running log.
         const usdcCx = new ethers.Contract(USDC_ADDRESS, ERC20_VIEW_ABI, ethers.provider);
-        const wethCx = new ethers.Contract(WETH_ADDRESS, ERC20_VIEW_ABI, ethers.provider);
         const fmtUsdc = (v: bigint) => `${ethers.formatUnits(v, 6)} USDC`;
-        const fmtEth = (v: bigint) => `${ethers.formatEther(v)} ETH`;
 
         console.log("\n  ─── Deployed addresses ───");
         console.log(`    RatehopperUniV3Positions: ${rhpAddress}`);
@@ -695,141 +688,71 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         console.log(`    Treasury:            ${treasury.address}`);
 
         // 1. Enable both modules on the Safe: SafeDebtManager (for exit's
-        //    token transfer) and RatehopperUniV3Positions (so closeLp can pull the
-        //    NFT and invoke exit module-mediated, no approvals needed).
-        console.log("\n  [1/10] Enable SafeDebtManager + RatehopperUniV3Positions as Safe modules");
+        //    token transfer) and RatehopperUniV3Positions (so openLp/closeLp
+        //    can drive the LP lifecycle module-mediated, no approvals needed).
+        console.log("\n  [1/6] Enable SafeDebtManager + RatehopperUniV3Positions as Safe modules");
         await safeWallet.executeTransaction(await safeWallet.createEnableModuleTx(safeDebtManagerAddress));
         await safeWallet.executeTransaction(await safeWallet.createEnableModuleTx(rhpAddress));
         console.log(`         modules enabled: ${safeDebtManagerAddress}, ${rhpAddress}`);
 
-        // 2. Open a real Fluid debt position: supply 0.001 ETH (auto-wrapped
-        //    by the WETH/USDC vault), borrow 1 USDC. Safe ends with 1 USDC
-        //    of debt and 1 USDC of free balance.
-        console.log("\n  [2/10] Open Fluid debt: supply 0.001 ETH, borrow 1 USDC");
-        await supplyAndBorrowOnFluid(
-            signer,
-            safeWallet,
-            FLUID_WETH_USDC_VAULT,
-            ethers.parseEther("0.001"),
-            ethers.parseUnits("1", 6),
-        );
-        console.log(`         Safe USDC balance after borrow: ${fmtUsdc(await usdcCx.balanceOf(safeAddress))}`);
+        // 2. Open a real Fluid debt position: supply 0.01 ETH (auto-wrapped
+        //    by the WETH/USDC vault), borrow 10 USDC. Safe ends with 10 USDC
+        //    of debt and 10 USDC of free balance — enough for openLp to split.
+        console.log("\n  [2/6] Open Fluid debt: supply 0.01 ETH, borrow 10 USDC");
+        const supplyEth = ethers.parseEther("0.01");
+        const borrowUsdc = ethers.parseUnits("10", 6);
+        await supplyAndBorrowOnFluid(signer, safeWallet, FLUID_WETH_USDC_VAULT, supplyEth, borrowUsdc);
+        const safeUsdcAfterBorrow: bigint = await usdcCx.balanceOf(safeAddress);
+        console.log(`         Safe USDC balance after borrow: ${fmtUsdc(safeUsdcAfterBorrow)}`);
 
-        // 3. Wrap 0.005 ETH on the Safe so it can mint the LP NFT.
-        console.log("\n  [3/10] Wrap 0.005 ETH → WETH on Safe (so it can mint an LP NFT)");
-        const weth = new ethers.Contract(WETH_ADDRESS, WETH_ABI, signer);
+        // 3. Pick a balanced tick range around the current spot (so openLp's
+        //    swap-half-then-mint yields a balanced position). Uses the same
+        //    WETH/USDC 500-bps pool both for the swap leg and the LP mint.
+        const { tickLower, tickUpper } = await wideTicksAroundSpot();
+        console.log(`\n  [3/6] Tick range chosen around spot: [${tickLower}, ${tickUpper}]`);
+
+        // 4. openLp via the Safe — the canonical entry point. Splits the
+        //    borrowed USDC, swaps half to WETH on SwapRouter02, mints the
+        //    WETH/USDC LP NFT, and stores `residualBasisUsd6Of[tokenId]` so
+        //    closeLp can read the basis later (C-03).
+        console.log("\n  [4/6] openLp via Safe (USDC split + swap + mint, basis stored on-chain)");
         await safeWallet.executeTransaction(
             await safeWallet.createTransaction({
                 transactions: [
                     {
-                        to: WETH_ADDRESS,
-                        value: ethers.parseEther("0.005").toString(),
-                        data: weth.interface.encodeFunctionData("deposit", []),
-                        operation: OperationType.Call,
-                    },
-                ],
-            }),
-        );
-        console.log(`         Safe WETH balance: ${fmtEth(await wethCx.balanceOf(safeAddress))}`);
-
-        // 4. Approve NPM to pull WETH for the mint.
-        console.log("\n  [4/10] Approve Uniswap V3 NPM to pull WETH from Safe");
-        const npm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, signer);
-        await safeWallet.executeTransaction(
-            await safeWallet.createTransaction({
-                transactions: [
-                    {
-                        to: WETH_ADDRESS,
+                        to: rhpAddress,
                         value: "0",
-                        data: weth.interface.encodeFunctionData("approve", [UNISWAP_V3_NPM_ADDRESS, ethers.MaxUint256]),
+                        data: rhp.interface.encodeFunctionData("openLp", [
+                            safeAddress,
+                            safeUsdcAfterBorrow,
+                            tickLower,
+                            tickUpper,
+                            500, // lpPoolFeeTier
+                            0, // mintAmount0Min — opt-out for balanced range
+                            0, // mintAmount1Min
+                            500, // swapPoolFeeTier
+                            1n, // swapAmountOutMin — contract rejects 0; 1 wei = effectively disabled
+                            SLIPPAGE_BPS,
+                            FAR_DEADLINE,
+                        ]),
                         operation: OperationType.Call,
                     },
                 ],
             }),
         );
-
-        // 5. Read the WETH/USDC 500-bps pool's current tick so we can pick a
-        //    one-sided (above current price) range. A one-sided range above
-        //    price holds only WETH, so we know the entire deposit will be
-        //    in token0 (WETH) and the close will realize ~the same back.
-        console.log("\n  [5/10] Read Uniswap V3 WETH/USDC 500-bps pool to pick LP tick range");
-        const factory = new ethers.Contract(UNISWAP_V3_FACTORY_ADDRESS, UNISWAP_V3_FACTORY_ABI, signer);
-        const poolAddr = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, 500);
-        const pool = new ethers.Contract(poolAddr, UNISWAP_V3_POOL_ABI, signer);
-        const slot0 = await pool.slot0();
-        const currentTick = Number(slot0.tick);
-        const tickSpacing = 10;
-        const tickLower = Math.ceil((currentTick + 5_000) / tickSpacing) * tickSpacing;
-        const tickUpper = tickLower + 1_000;
-        console.log(`         pool:        ${poolAddr}`);
-        console.log(`         currentTick: ${currentTick}`);
-        console.log(`         tickRange:   [${tickLower}, ${tickUpper}] (above current → position holds only WETH)`);
-
-        const mintAmount = ethers.parseEther("0.001");
-        const mintParams = {
-            token0: WETH_ADDRESS,
-            token1: USDC_ADDRESS,
-            fee: 500,
-            tickLower,
-            tickUpper,
-            amount0Desired: mintAmount,
-            amount1Desired: 0n,
-            amount0Min: 0n,
-            amount1Min: 0n,
-            recipient: safeAddress,
-            deadline: Math.floor(Date.now() / 1000) + 3_600,
-        };
-
-        // 6. Predict (tokenId, liquidity, amount0, amount1) by impersonating
-        //    the Safe and staticCall'ing mint. Then execute the real mint via
-        //    the Safe in the same block, so predicted == actual.
-        console.log("\n  [6/10] Mint LP NFT (staticCall to predict, then execute via Safe)");
-        await network.provider.request({ method: "hardhat_impersonateAccount", params: [safeAddress] });
-        const safeImpersonated = await ethers.getSigner(safeAddress);
-        const [predTokenId, predLiquidity, predAmount0] = await npm
-            .connect(safeImpersonated)
-            .mint.staticCall(mintParams);
-        await network.provider.request({ method: "hardhat_stopImpersonatingAccount", params: [safeAddress] });
-        console.log(`         predicted tokenId:   ${predTokenId}`);
-        console.log(`         predicted liquidity: ${predLiquidity}`);
-        console.log(`         predicted amount0:   ${fmtEth(predAmount0)} (WETH actually deposited)`);
-
-        await safeWallet.executeTransaction(
-            await safeWallet.createTransaction({
-                transactions: [
-                    {
-                        to: UNISWAP_V3_NPM_ADDRESS,
-                        value: "0",
-                        data: npm.interface.encodeFunctionData("mint", [mintParams]),
-                        operation: OperationType.Call,
-                    },
-                ],
-            }),
-        );
-        const tokenId: bigint = predTokenId;
+        const openedEv = (await rhp.queryFilter(rhp.filters.PositionOpened(safeAddress), -10)).slice(-1)[0].args;
+        const tokenId: bigint = openedEv.tokenId;
+        const npm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, ethers.provider);
         expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
-        console.log(`         NFT owner == Safe: ${(await npm.ownerOf(tokenId)) === safeAddress}`);
-
-        // 7. (No NFT approval needed.) RatehopperUniV3Positions is enabled as a
-        //    Safe module, so closeLp pulls the NFT via
-        //    execTransactionFromModule rather than an ERC721 allowance.
-
-        // 8. closeLp builds the WETH → USDC swap calldata on-chain; the caller
-        //    supplies only the pool fee tier (500-bps, same pool the LP used).
-        const swapFee = 500;
-        console.log("\n  [8/9] closeLp swap leg fee tier (calldata built on-chain)");
-        console.log(`         swapFee: ${swapFee} (WETH → USDC on the ${swapFee}-bps pool)`);
-
-        // 9. Capture balances and run closeLp via the Safe. After C-03 the
-        //    perf-fee basis is read on-chain from `residualBasisUsd6Of[tokenId]`
-        //    (set at openLp); caller can no longer attest a value.
-        const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_VIEW_ABI, ethers.provider);
-        const treasuryUsdcBefore = await usdc.balanceOf(treasury.address);
-        const safeUsdcBefore = await usdc.balanceOf(safeAddress);
         const storedBasis: bigint = await rhp.residualBasisUsd6Of(tokenId);
+        console.log(`         minted tokenId: ${tokenId}; basis stored: ${fmtUsdc(storedBasis)}`);
 
-        console.log("\n  [9/9] Call closeLp via Safe (basis read from storage)");
-        console.log(`         stored basis:            ${fmtUsdc(storedBasis)}`);
+        // 5. Capture balances and run closeLp via the Safe. After C-03 the
+        //    perf-fee basis is read on-chain from `residualBasisUsd6Of[tokenId]`;
+        //    caller can no longer attest a value.
+        const treasuryUsdcBefore = await usdcCx.balanceOf(treasury.address);
+        const safeUsdcBefore = await usdcCx.balanceOf(safeAddress);
+        console.log("\n  [5/6] Call closeLp via Safe (basis read from storage)");
         console.log(`         pre-close treasury USDC: ${fmtUsdc(treasuryUsdcBefore)}`);
         console.log(`         pre-close safe USDC:     ${fmtUsdc(safeUsdcBefore)}`);
 
@@ -842,8 +765,8 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                         data: rhp.interface.encodeFunctionData("closeLp", [
                             safeAddress,
                             tokenId,
-                            swapFee,
-                            0,
+                            500, // swapPoolFeeTier
+                            1n, // swapAmountOutMin — contract rejects 0; 1 wei = effectively disabled
                             SLIPPAGE_BPS,
                             10_000, // exitBps — full close
                             0, // decreaseAmount0Min
@@ -857,16 +780,16 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
             }),
         );
 
-        // Read the PositionClosed event for the basis used + realized value + fee charged.
+        // 6. Read the PositionClosed event + derive deltas.
         const closedEv = (await rhp.queryFilter(rhp.filters.PositionClosed(safeAddress, tokenId), -10)).slice(-1)[0]
             .args;
         const basisUsd6: bigint = closedEv.basisUsd6;
         const currentValueUsd6: bigint = closedEv.currentValueUsd6;
         const feeUsd6: bigint = closedEv.feeUsd6;
 
-        const treasuryUsdcAfter = await usdc.balanceOf(treasury.address);
-        const safeUsdcAfter = await usdc.balanceOf(safeAddress);
-        const rhpUsdcAfter = await usdc.balanceOf(rhpAddress);
+        const treasuryUsdcAfter = await usdcCx.balanceOf(treasury.address);
+        const safeUsdcAfter = await usdcCx.balanceOf(safeAddress);
+        const rhpUsdcAfter = await usdcCx.balanceOf(rhpAddress);
         const feeCharged = treasuryUsdcAfter - treasuryUsdcBefore;
         const safeNetGain = safeUsdcAfter - safeUsdcBefore;
         let nftBurned = false;
@@ -1613,6 +1536,68 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         expect(first.feeUsd6).to.equal(expectedFeeFirst);
         expect(second.feeUsd6).to.equal(expectedFeeSecond);
         expect(first.basisUsd6 + second.basisUsd6).to.equal(openBasis); // conservation
+    });
+
+    it("closeLp charges perf fee on net profit (feeUsd6 > 0 branch, basis simulated via storage override)", async function () {
+        const { rhp, treasury } = await deployFixture();
+        const rhpAddress = await rhp.getAddress();
+        const tokenId = await openBalancedPosition(
+            rhp,
+            safeWallet,
+            signer,
+            ethers.parseEther("0.01"),
+            ethers.parseUnits("10", 6),
+        );
+
+        // Discover the storage slot for `residualBasisUsd6Of[tokenId]` at
+        // runtime — robust to inheritance reordering. The slot is
+        // `keccak256(abi.encode(tokenId, mappingBaseSlot))`; scan
+        // mappingBaseSlot 0..15 and pick the one whose stored value matches
+        // the public getter.
+        const openBasis: bigint = await rhp.residualBasisUsd6Of(tokenId);
+        const coder = ethers.AbiCoder.defaultAbiCoder();
+        let mappingSlot = -1;
+        for (let s = 0; s < 16; s++) {
+            const candidate = ethers.keccak256(coder.encode(["uint256", "uint256"], [tokenId, s]));
+            const raw = await ethers.provider.getStorage(rhpAddress, candidate);
+            if (BigInt(raw) === openBasis) {
+                mappingSlot = s;
+                break;
+            }
+        }
+        expect(mappingSlot, "residualBasisUsd6Of storage slot not found").to.not.equal(-1);
+
+        // Overwrite the basis to 1 wei. Realized USDC at close (~5 USDC) will
+        // then far exceed basis → fee = (realized - 1) * 1000 / 10_000.
+        const targetSlot = ethers.keccak256(
+            coder.encode(["uint256", "uint256"], [tokenId, mappingSlot]),
+        );
+        await network.provider.send("hardhat_setStorageAt", [
+            rhpAddress,
+            targetSlot,
+            ethers.zeroPadValue("0x01", 32),
+        ]);
+        expect(await rhp.residualBasisUsd6Of(tokenId)).to.equal(1n);
+
+        // Close + assert fee math against the lowered basis.
+        const { basisUsd6, currentValueUsd6, feeUsd6, treasuryDelta, safeDelta } = await closeAndMeasure(
+            rhp,
+            safeWallet,
+            treasury.address,
+            tokenId,
+        );
+        const expectedFee = ((currentValueUsd6 - 1n) * BigInt(PERFORMANCE_FEE_BPS)) / 10_000n;
+
+        console.log(
+            `\n  [perf-fee/profit] basis(forced) 0.000001 realized ${ethers.formatUnits(currentValueUsd6, 6)} → fee ${ethers.formatUnits(feeUsd6, 6)} (${PERFORMANCE_FEE_BPS / 100}%)`,
+        );
+
+        expect(basisUsd6).to.equal(1n); // basis-for-this-slice == stored
+        expect(currentValueUsd6).to.be.gt(1n); // we engineered a profit
+        expect(feeUsd6).to.equal(expectedFee);
+        expect(feeUsd6).to.be.gt(0n); // the load-bearing branch — fee transferred to treasury
+        expect(treasuryDelta).to.equal(feeUsd6);
+        expect(safeDelta).to.equal(currentValueUsd6 - feeUsd6);
     });
 
     it("rescueERC721 recovers a misdirected NFT, emits, and rejects zero-address / non-admin", async function () {
