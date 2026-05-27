@@ -29,7 +29,7 @@ import {IProtocolRegistry} from "./interfaces/IProtocolRegistry.sol";
 ///         Supply/borrow on a lending protocol (e.g. Fluid) and debt repayment
 ///         are the user's responsibility via separate Safe transactions.
 ///
-///         WETH/USDC-ONLY by design — every NPM mint and runtime
+///         WETH/USDC-ONLY by design — every NonfungiblePositionManager mint and runtime
 ///         token-pair check is hardcoded to the constructor-pinned `WETH` and
 ///         `USDC` immutables. The constructor only enforces `_weth < _usdc`
 ///         ordering (required by Uniswap V3's token0/token1 convention);
@@ -283,7 +283,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///           (c) The Safe MUST implement `IERC721Receiver` (return
     ///               the `onERC721Received` selector). Standard Gnosis Safe
     ///               with `DefaultCallbackHandler` does; Safes without it
-    ///               will revert during NPM's `_safeMint` with the inner
+    ///               will revert during NonfungiblePositionManager's `_safeMint` with the inner
     ///               revert bubbled by.
     /// @return tokenId  The newly-minted LP NFT id (owned by the Safe).
     function openLp(
@@ -310,14 +310,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
         if (!allowedFeeTier[lpPoolFeeTier]) revert FeeTierNotAllowed();
         if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
-        // Caller-supplied swap min must be non-zero. Without this, the swap's
-        // `amountOutMinimum` would silently become "no slippage protection"
-        // whenever a (compromised) operator passes 0, re-opening the MEV gap.
         if (swapAmountOutMin == 0) revert InvalidSwapAmountOutMin();
-        // validate both pools (LP mint + swap) pre-flight. Catches
-        // nonexistent / uninitialized / too-thin pools with a typed error
-        // before any module call (which would otherwise revert with an
-        // opaque NPM / SwapRouter reason).
         _validatePool(UNISWAP_V3_FACTORY.getPool(address(USDC), address(WETH), swapPoolFeeTier));
         _validatePool(UNISWAP_V3_FACTORY.getPool(address(WETH), address(USDC), lpPoolFeeTier));
 
@@ -358,7 +351,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         // tick we likely intended balanced for.
         if (wethReceived == 0) revert SwapFailed();
 
-        // 3. Approve NPM and mint the LP. NFT lands on Safe. amount0Min /
+        // 3. Approve NonfungiblePositionManager and mint the LP. NFT lands on Safe. amount0Min /
         //    amount1Min come from the caller (typically derived off-chain
         //    from a quote with a tolerance buffer); set both to 0 to opt out
         //    of slippage protection (e.g. for one-sided ranges).
@@ -458,16 +451,11 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         if (slippageBps == 0) revert SlippageTooLow();
         if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
         if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
-        // Caller-supplied swap min must be non-zero. Without this, a
-        // (compromised) operator passing `swapAmountOutMin = 0` re-opens
-        // the MEV gap that the caller-supplied min was introduced to close.
         if (swapAmountOutMin == 0) revert InvalidSwapAmountOutMin();
-        // Validate the swap pool pre-flight — `swapAmountOutMin` alone
-        // doesn't catch missing / uninitialized / drained pools.
         _validatePool(UNISWAP_V3_FACTORY.getPool(address(WETH), address(USDC), swapPoolFeeTier));
 
         // Read stored basis FIRST so unknown tokenIds revert with the precise
-        // `UnknownPosition` error instead of NPM's "Invalid token ID" string
+        // `UnknownPosition` error instead of NonfungiblePositionManager's "Invalid token ID" string
         // (which would happen if the token-pair check's `positions(tokenId)`
         // call ran first). Zero means either never opened via this contract
         // or already fully closed. The token-pair check is therefore
@@ -527,7 +515,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
             );
 
             // 3. Collect the principal directly to the Safe (no fee — capital).
-            //    Also needed for `burn` to succeed (NPM requires tokensOwed == 0).
+            //    Also needed for `burn` to succeed (NonfungiblePositionManager requires tokensOwed == 0).
             _collectToRecipient(_onBehalfOf, tokenId, _onBehalfOf, 8);
         }
 
@@ -775,7 +763,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
 
     /// @dev Assert that `tokenId` is a WETH/USDC LP position currently owned
     ///      by `_onBehalfOf`. Called at the top of `closeLp` and `collectLp`
-    ///      to fail fast before any module-mediated NPM call. Without this,
+    ///      to fail fast before any module-mediated NonfungiblePositionManager call. Without this,
     ///      an operator could route a non-WETH/USDC position through these
     ///      functions and skim `feeCollectBps` of the non-USDC leg, or
     ///      process a position the Safe doesn't actually own.
@@ -842,7 +830,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     /// @notice Generic module-mediated `target.call(value, data)` from the Safe.
     /// @dev    Uses `execTransactionFromModuleReturnData` and bubbles
     ///         the inner revert via assembly when present, so production
-    ///         debug surfaces the NPM/SwapRouter reason instead of an opaque
+    ///         debug surfaces the NonfungiblePositionManager/SwapRouter reason instead of an opaque
     ///         `ModuleCallFailed(step)`. Falls back to the typed step error
     ///         if the inner call returned no revert data.
     function _safeExec(address _onBehalfOf, address target, uint256 value, bytes memory data, uint8 step) internal {
@@ -862,7 +850,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         }
     }
 
-    /// @notice Module-mediated NPM.mint from the Safe; decodes the return
+    /// @notice Module-mediated NonfungiblePositionManager.mint from the Safe; decodes the return
     ///         data to surface the new tokenId + amounts consumed.
     /// @dev    `amount0Min`/`amount1Min` are caller-supplied (derive off-chain
     ///         from a quote with a tolerance buffer; pass 0 to opt out — e.g.
