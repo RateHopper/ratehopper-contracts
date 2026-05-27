@@ -547,6 +547,94 @@ describe("RatehopperUniV3Positions - owner setters", function () {
             rhp.connect(other).rescueToken(WETH_ADDRESS, recipient.address, 0),
         ).to.be.revertedWithCustomError(rhp, "AccessControlUnauthorizedAccount");
     });
+
+    it("setPerformanceFeeBps via TimelockController: rejects direct admin call, accepts scheduled+executed timelock call", async function () {
+        const [deployer, proposerExecutor, otherAdmin] = await ethers.getSigners();
+
+        // 1. Reuse the main fixture's registry — saves rebuilding ProtocolRegistry +
+        //    handlers just to satisfy the RHP constructor's non-zero registry check.
+        const { protocolRegistry } = await deployFixture();
+        const registryAddr = await protocolRegistry.getAddress();
+
+        // 2. Deploy a real TimelockController (2-day delay). `proposerExecutor`
+        //    EOA is both proposer and executor; no separate admin (the timelock
+        //    itself holds DEFAULT_ADMIN_ROLE on itself).
+        const MIN_DELAY = 2 * 24 * 60 * 60;
+        const Timelock = await ethers.getContractFactory("TimelockController");
+        const timelock = await Timelock.deploy(
+            MIN_DELAY,
+            [proposerExecutor.address],
+            [proposerExecutor.address],
+            ZERO_ADDRESS,
+        );
+        await timelock.waitForDeployment();
+        const timelockAddr = await timelock.getAddress();
+
+        // 3. Deploy a fresh RHP with `_initialAdmin = otherAdmin` and
+        //    `_timelock = timelockAddr`. otherAdmin gets DEFAULT_ADMIN_ROLE
+        //    (rescueToken etc.), the timelock holds CRITICAL_ROLE (setters).
+        const RHP = await ethers.getContractFactory("RatehopperUniV3Positions");
+        const rhpStandalone = await RHP.deploy(
+            UNISWAP_V3_NPM_ADDRESS,
+            registryAddr,
+            USDC_ADDRESS,
+            WETH_ADDRESS,
+            UNISWAP_V3_SWAP_ROUTER_ADDRESS,
+            UNISWAP_V3_FACTORY_ADDRESS,
+            deployer.address, // treasury (any non-zero is fine for this test)
+            PERFORMANCE_FEE_BPS,
+            COLLECT_FEE_BPS,
+            MAX_FEE_BPS,
+            otherAdmin.address, // _initialAdmin → DEFAULT_ADMIN_ROLE
+            timelockAddr, // _timelock → CRITICAL_ROLE
+        );
+        await rhpStandalone.waitForDeployment();
+        const rhpAddr = await rhpStandalone.getAddress();
+
+        // 4. Direct calls bypassing the timelock are rejected — even the
+        //    DEFAULT_ADMIN_ROLE holder cannot tweak fee setters.
+        await expect(
+            rhpStandalone.connect(otherAdmin).setPerformanceFeeBps(500),
+        ).to.be.revertedWithCustomError(rhpStandalone, "AccessControlUnauthorizedAccount");
+        await expect(
+            rhpStandalone.connect(deployer).setPerformanceFeeBps(500),
+        ).to.be.revertedWithCustomError(rhpStandalone, "AccessControlUnauthorizedAccount");
+
+        // 5. Schedule a setPerformanceFeeBps(500) call through the timelock.
+        const newFee = 500;
+        const callData = rhpStandalone.interface.encodeFunctionData("setPerformanceFeeBps", [newFee]);
+        const predecessor = ethers.ZeroHash;
+        const salt = ethers.id("test-update-perf-fee");
+        const operationId = await timelock.hashOperation(rhpAddr, 0, callData, predecessor, salt);
+
+        await expect(
+            timelock.connect(proposerExecutor).schedule(rhpAddr, 0, callData, predecessor, salt, MIN_DELAY),
+        ).to.emit(timelock, "CallScheduled");
+
+        // 6. Cannot execute before the delay elapses.
+        await expect(
+            timelock.connect(proposerExecutor).execute(rhpAddr, 0, callData, predecessor, salt),
+        ).to.be.revertedWithCustomError(timelock, "TimelockUnexpectedOperationState");
+
+        // 7. Advance time past the delay.
+        await network.provider.send("evm_increaseTime", [MIN_DELAY + 1]);
+        await network.provider.send("evm_mine");
+
+        // 8. Execute through the timelock → fee setter fires, fee updates,
+        //    event emits with the actual previous value (PERFORMANCE_FEE_BPS).
+        await expect(
+            timelock.connect(proposerExecutor).execute(rhpAddr, 0, callData, predecessor, salt),
+        )
+            .to.emit(rhpStandalone, "PerformanceFeeBpsUpdated")
+            .withArgs(PERFORMANCE_FEE_BPS, newFee)
+            .and.to.emit(timelock, "CallExecuted");
+
+        expect(await rhpStandalone.performanceFeeBps()).to.equal(newFee);
+
+        // 9. Operation is now Done — re-executing reverts (state machine moves
+        //    from Waiting → Ready → Done; a Done op cannot be re-executed).
+        expect(await timelock.isOperationDone(operationId)).to.equal(true);
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────

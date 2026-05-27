@@ -24,6 +24,8 @@ RateHopper Contracts is a smart contract system that enables users to automatica
 
 - **Leveraged Positions**: Enables creation of leveraged positions across supported protocols.
 
+- **Uniswap V3 LP Lifecycle**: `RatehopperUniV3Positions` is a Gnosis Safe module that opens, harvests fees from, and closes WETH/USDC LP positions atomically. Charges a configurable performance fee on profit at close, plus a separate fee on accrued LP fees. Critical setters are timelock-gated.
+
 ## Architecture
 
 The system consists of several key components:
@@ -56,7 +58,15 @@ The system consists of several key components:
 
 5. **LeveragedPosition.sol**: Facilitates creation of leveraged positions across protocols.
 
-6. **Morpho Libraries**: Supporting libraries for the Morpho protocol:
+6. **RatehopperUniV3Positions.sol**: Standalone Gnosis Safe module for Uniswap V3 WETH/USDC LP lifecycle. Three external entry points:
+
+    - `openLp()` — splits the Safe's USDC, swaps half to WETH via the pinned SwapRouter02, mints a Uniswap V3 LP NFT on the Safe.
+    - `closeLp()` — partial or full unwind (`exitBps`): harvests accrued fees, `decreaseLiquidity`, collects principal, optionally `burn`s, swaps the WETH leg back to USDC.
+    - `collectLp()` — mid-position fee harvest with no decrease/burn.
+
+    Caller passes per-call `swapAmountOutMin` and `deadline` (audit fixes C-01 / H-02). The constructor rejects any non-WETH/USDC token pair (M-08). Performance fee is charged on net profit (`currentValueUsd6 - basisUsd6`); fee-collect is charged on accrued fees only. All fee setters are gated by `CRITICAL_ROLE` on a TimelockController (H-04); `rescueToken` and similar emergency ops are gated by `DEFAULT_ADMIN_ROLE`.
+
+7. **Morpho Libraries**: Supporting libraries for the Morpho protocol:
 
     - `MathLib.sol`: Provides fixed-point arithmetic operations for the Morpho protocol
     - `SharesMathLib.sol`: Handles share-to-asset conversion with virtual shares to protect against share price manipulations
@@ -165,11 +175,25 @@ struct ParaswapParams {
 Create a `.env` file with the following required variables (use `.env.sample` as a template):
 
 ```env
-ADMIN_ADDRESS=0x...           # Initial admin and timelock proposer/executor
+# Core deploy
+ADMIN_ADDRESS=0x...           # Initial admin and timelock proposer/executor (used by DeployAll AND DeployRatehopperUniV3Positions)
 SAFE_OPERATOR_ADDRESS=0x...   # Operator address for Safe interactions
 PAUSER_ADDRESS=0x...          # Address that can pause contracts
 DEPLOYER_PRIVATE_KEY=...      # Private key for deployment
 EXPLORER_KEY=...              # Block explorer API key for verification
+
+# Optional — RatehopperUniV3Positions deploy (yarn deploy:rhp)
+RHP_REGISTRY=0x...            # ProtocolRegistry address. Falls back to PROTOCOL_REGISTRY_ADDRESS in contractAddresses.ts
+RHP_TREASURY=0x...            # Treasury that collects feeCollectBps + performanceFeeBps cuts. REQUIRED.
+RHP_INITIAL_ADMIN=0x...       # DEFAULT_ADMIN_ROLE holder (rescueToken etc.). Falls back to ADMIN_ADDRESS
+RHP_TIMELOCK=0x...            # Reuse an existing TimelockController instead of deploying a new one
+RHP_PERFORMANCE_FEE_BPS=1000  # Performance fee on profit at closeLp (bps). Default 1000 (10%)
+RHP_FEE_COLLECT_BPS=250       # Fee on accrued LP fees harvested via collectLp/closeLp (bps). Default 250 (2.5%)
+RHP_MAX_FEE_BPS=2000          # Hard upper bound on BOTH fees (bps). Default 2000 (20%)
+
+# Optional — TimelockController inside DeployRatehopperUniV3Positions
+TIMELOCK_ADMIN=0x...          # Proposer + executor on the new timelock. Falls back to ADMIN_ADDRESS
+TIMELOCK_DELAY=172800         # Min delay before queued ops execute (seconds). Default 172800 (2 days)
 ```
 ## Setup and Development
 
@@ -252,6 +276,23 @@ This deploys all contracts sequentially in a single transaction chain:
 6. **SafeDebtManager** → `transferOwnership` to `ADMIN_ADDRESS`
 7. **LeveragedPosition** → `transferOwnership` to `ADMIN_ADDRESS`
 8. **SafeExecTransactionWrapper**
+
+### Deploy RatehopperUniV3Positions (Standalone)
+
+`RatehopperUniV3Positions` is deployed separately because it sits on top of an existing `ProtocolRegistry` and needs its own TimelockController for fund-impacting setters.
+
+```bash
+yarn deploy:rhp
+# or equivalently:
+npx hardhat ignition deploy ignition/modules/DeployRatehopperUniV3Positions.ts --network base --verify
+```
+
+This module by default deploys:
+
+1. **TimelockController** (proposer + executor = `TIMELOCK_ADMIN` ?? `ADMIN_ADDRESS`; delay = `TIMELOCK_DELAY` ?? 2 days)
+2. **RatehopperUniV3Positions** (wired to the registry from `RHP_REGISTRY` ?? `PROTOCOL_REGISTRY_ADDRESS`; CRITICAL_ROLE granted to the timelock from step 1)
+
+To reuse an existing TimelockController instead of deploying a new one, set `RHP_TIMELOCK=0x...` — the module skips step 1 and points RHP at the supplied address. See `## Environment Variables` for the full list of optional knobs.
 
 ### Deployment Output
 
