@@ -31,7 +31,7 @@ import {IProtocolRegistry} from "./interfaces/IProtocolRegistry.sol";
 ///         are the user's responsibility via separate Safe transactions.
 ///
 ///         WETH/USDC-ONLY by design — the constructor rejects any other
-///         token pair (M-08). This is the precondition that makes the raw
+///         token pair. This is the precondition that makes the raw
 ///         module-mediated `IERC20.approve` in `_safeApprove` safe: WETH and
 ///         USDC accept non-zero→non-zero approvals, so the two-step
 ///         `forceApprove` ceremony is provably unnecessary. Adding any
@@ -41,7 +41,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
 
-    /// @notice Timelocked role for fund-impacting setters (H-04). Granted to
+    /// @notice Timelocked role for fund-impacting setters. Granted to
     ///         a `TimelockController` at construction; mutations require a
     ///         scheduled call through the timelock, giving users time to
     ///         react to malicious changes. Matches the `ProtocolRegistry`
@@ -109,10 +109,10 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///         `_quoteSwapAmountOutMin`). Defense in depth on top of the
     ///         fee-tier allow-list — protects against allow-listed pools that
     ///         drain in the future. Defaults to 0 (disabled). Owner-mutable
-    ///         via `setMinPoolLiquidity` (H-01).
+    ///         via `setMinPoolLiquidity`.
     uint128 public minPoolLiquidity;
 
-    // L-07: SwapRouter02 `exactInputSingle` selector. Verify with:
+    // SwapRouter02 `exactInputSingle` selector. Verify with:
     //   cast sig "exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))"
     //   = 0x04e45aaf
     bytes4 private constant EXACT_INPUT_SINGLE_SELECTOR = 0x04e45aaf;
@@ -174,6 +174,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     error PoolTooThin();
     error MinUsdcOutNotMet();
     error SlippageTooLow();
+    error InvalidSwapAmountOutMin();
 
     /// @notice Restricts a call to either the backend operator (the registry's
     ///         `safeOperator`) or the Safe itself. The operator drives closes
@@ -212,9 +213,9 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         // Base WETH < Base USDC as addresses; the contract pins WETH=token0
         // / USDC=token1 in `_safeMintLp` and assumes token0=WETH in
         // `_collectLp`. Assert at deploy so a wrong-chain deployment fails
-        // loud rather than silently inverting valuations later (M-03).
+        // loud rather than silently inverting valuations later.
         if (address(_weth) >= address(_usdc)) revert WrongTokenOrder();
-        // M-08: lock to WETH/USDC-shaped tokens at construction so the raw
+        // lock to WETH/USDC-shaped tokens at construction so the raw
         // module-mediated `IERC20.approve` in `_safeApprove` is provably safe
         // (WETH/USDC accept non-zero→non-zero approve; USDT-style two-step
         // tokens cannot be passed here). The decimals check rejects most
@@ -246,15 +247,9 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         allowedFeeTier[500] = true;
         allowedFeeTier[3000] = true;
 
-        // H-04: grant DEFAULT_ADMIN_ROLE to the admin (for role management +
-        // operational setters like rescueToken) and CRITICAL_ROLE to the
-        // timelock (for fund-impacting setters). Mirrors `ProtocolRegistry`.
         _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
         _grantRole(CRITICAL_ROLE, _timelock);
 
-        // L-05: emit initial-state events from the constructor so off-chain
-        // indexers that key off `*Updated` see the values without waiting
-        // for the first setter call.
         emit TreasuryUpdated(address(0), _treasury);
         emit PerformanceFeeBpsUpdated(0, _performanceFeeBps);
         emit FeeCollectBpsUpdated(0, _feeCollectBps);
@@ -287,11 +282,11 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///               module, the first sub-step reverts with
     ///               `ModuleCallFailed`.
     ///           (b) The Safe MUST hold at least `usdcAmount` of USDC.
-    ///           (c) I-03: The Safe MUST implement `IERC721Receiver` (return
+    ///           (c) The Safe MUST implement `IERC721Receiver` (return
     ///               the `onERC721Received` selector). Standard Gnosis Safe
     ///               with `DefaultCallbackHandler` does; Safes without it
     ///               will revert during NPM's `_safeMint` with the inner
-    ///               revert bubbled by L-01.
+    ///               revert bubbled by.
     /// @return tokenId  The newly-minted LP NFT id (owned by the Safe).
     function openLp(
         address _onBehalfOf,
@@ -317,7 +312,11 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
         if (!allowedFeeTier[lpPoolFeeTier]) revert FeeTierNotAllowed();
         if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
-        // H-01: validate both pools (LP mint + swap) pre-flight. Catches
+        // Caller-supplied swap min must be non-zero. Without this, the swap's
+        // `amountOutMinimum` would silently become "no slippage protection"
+        // whenever a (compromised) operator passes 0, re-opening the MEV gap.
+        if (swapAmountOutMin == 0) revert InvalidSwapAmountOutMin();
+        // validate both pools (LP mint + swap) pre-flight. Catches
         // nonexistent / uninitialized / too-thin pools with a typed error
         // before any module call (which would otherwise revert with an
         // opaque NPM / SwapRouter reason).
@@ -335,7 +334,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         //    fee tier, not the selector / tokens / recipient. `amountOutMinimum`
         //    is caller-supplied (`swapAmountOutMin`, derived off-chain from a
         //    quote with a tolerance buffer); spot-price-based fallback is
-        //    intentionally removed (per C-01) to prevent in-block manipulation.
+        //    intentionally removed to prevent in-block manipulation.
         bytes memory swapData = abi.encodeWithSelector(
             EXACT_INPUT_SINGLE_SELECTOR,
             ExactInputSingleParams({
@@ -355,7 +354,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         _safeApprove(_onBehalfOf, address(USDC), SWAP_ROUTER, 0, 21); // reset
 
         uint128 wethReceived = (WETH.balanceOf(_onBehalfOf) - wethBefore).toUint128();
-        // I-04 + L-03: post-swap zero-output guard. Even with caller-supplied
+        // post-swap zero-output guard. Even with caller-supplied
         // `swapAmountOutMin`, an exotic router path could silently succeed
         // with zero output; without WETH we'd mint a one-sided USDC LP at a
         // tick we likely intended balanced for.
@@ -401,7 +400,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
 
         // Persist the open-time basis on-chain so `closeLp` can no longer
         // accept a caller-attested value. The slot is decremented on each
-        // partial close and deleted on a full close (C-03).
+        // partial close and deleted on a full close.
         residualBasisUsd6Of[tokenId] = currentValueUsd6;
 
         emit PositionOpened(_onBehalfOf, tokenId, usdcAmount, usedWeth, usedUsdc, currentValueUsd6);
@@ -437,11 +436,11 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///                      if gross realized USDC < this. Set to 0 to disable.
     ///                      Bounds the *total* swap output regardless of
     ///                      `swapAmountOutMin` (which only bounds the WETH→USDC
-    ///                      swap leg in isolation) — C-02 final guard.
+    ///                      swap leg in isolation)
     /// @dev    The performance-fee basis is read from `residualBasisUsd6Of`
     ///         (set at `openLp` to the freshly-minted LP's USDC-equivalent
     ///         value) and prorated by `exitBps`. Caller cannot lie about
-    ///         basis (C-03). On full close the slot is deleted; on partial
+    ///         basis. On full close the slot is deleted; on partial
     ///         close it is decremented so subsequent closes always price
     ///         against the correct residual without off-chain bookkeeping.
     function closeLp(
@@ -461,25 +460,26 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         if (slippageBps == 0) revert SlippageTooLow();
         if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
         if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
-        // H-01: validate the swap pool pre-flight (C-02 covers `swapAmountOutMin`
-        // for slippage protection but doesn't catch missing / drained pools).
+        // Caller-supplied swap min must be non-zero. Without this, a
+        // (compromised) operator passing `swapAmountOutMin = 0` re-opens
+        // the MEV gap that the caller-supplied min was introduced to close.
+        if (swapAmountOutMin == 0) revert InvalidSwapAmountOutMin();
+        // Validate the swap pool pre-flight — `swapAmountOutMin` alone
+        // doesn't catch missing / uninitialized / drained pools.
         _validatePool(UNISWAP_V3_FACTORY.getPool(address(WETH), address(USDC), swapPoolFeeTier));
 
         // Read stored basis FIRST so unknown tokenIds revert with the precise
         // `UnknownPosition` error instead of NPM's "Invalid token ID" string
-        // (which would happen if H-03's positions(tokenId) call ran first).
-        // Zero means either never opened via this contract or already fully
-        // closed. The H-03 token-pair check is therefore defense-in-depth
-        // here (any tokenId in `residualBasisUsd6Of` was minted by this
-        // contract, so token0/token1 are guaranteed WETH/USDC) but the
-        // ownership half (M-02) still adds real value if the Safe transferred
-        // the NFT out after opening.
+        // (which would happen if the token-pair check's `positions(tokenId)`
+        // call ran first). Zero means either never opened via this contract
+        // or already fully closed. The token-pair check is therefore
+        // defense-in-depth here (any tokenId in `residualBasisUsd6Of` was
+        // minted by this contract, so token0/token1 are guaranteed WETH/USDC)
+        // but the ownership half still adds real value if the Safe
+        // transferred the NFT out after opening.
         uint128 residualBasis = residualBasisUsd6Of[tokenId];
         if (residualBasis == 0) revert UnknownPosition();
 
-        // H-03 + M-02: assert WETH/USDC pair and Safe-ownership before any
-        // state mutation or module call. Prevents fee-skim on non-WETH/USDC
-        // positions and fails fast if the tokenId isn't on this Safe.
         _requireWethUsdcPositionOwnedBy(_onBehalfOf, tokenId);
         uint128 basisForExit = exitBps == 10_000
             ? residualBasis
@@ -547,8 +547,8 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
 
         // 5. Swap the WETH delta on the Safe → USDC, mirroring openLp's
         //    structure (module-mediated, on-chain calldata). `amountOutMinimum`
-        //    is caller-supplied (`swapAmountOutMin`) — spot-price-derived
-        //    fallback removed per C-01 to prevent in-block manipulation.
+        //    is caller-supplied (`swapAmountOutMin`) — no spot-price-derived
+        //    fallback to prevent in-block manipulation.
         uint128 wethToSwap = (WETH.balanceOf(_onBehalfOf) - wethBefore).toUint128();
         if (wethToSwap > 0) {
             bytes memory swapData = abi.encodeWithSelector(
@@ -569,7 +569,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         }
 
         uint128 currentValueUsd6 = (USDC.balanceOf(_onBehalfOf) - usdcBefore).toUint128();
-        // C-02 (remainder): caller's final-value guard on gross realized USDC.
+        // caller's final-value guard on gross realized USDC.
         // Independent of `swapAmountOutMin` (which only bounds the WETH→USDC
         // swap leg) and the perf-fee rate (which can shift via setter).
         if (uint256(currentValueUsd6) < minUsdcOut) revert MinUsdcOutNotMet();
@@ -583,7 +583,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
             uint256 profit = uint256(currentValueUsd6) - uint256(basisForExit);
             feeUsd6 = ((profit * performanceFeeBps) / 10_000).toUint128();
             if (feeUsd6 > 0) {
-                // L-08: non-fatal fee transfer. If the treasury address is
+                // non-fatal fee transfer. If the treasury address is
                 // ever blacklisted (e.g. Circle USDC blacklist), users must
                 // still be able to exit their positions. Emit on failure for
                 // off-chain monitoring; zero out feeUsd6 so the event reflects
@@ -625,9 +625,8 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         nonReentrant
         onlyOperatorOrSafe(_onBehalfOf)
     {
-        // H-03 + M-02: assert WETH/USDC pair and Safe-ownership BEFORE the
-        // module-mediated collect (which would otherwise tax the collected
-        // legs of any non-WETH/USDC position the Safe holds).
+        // Must run BEFORE `_collectLp` — otherwise the collected legs of a
+        // non-WETH/USDC position the Safe holds would be taxed.
         _requireWethUsdcPositionOwnedBy(_onBehalfOf, tokenId);
         _collectLp(_onBehalfOf, tokenId);
     }
@@ -637,7 +636,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///      skimmed before forwarding the remainder to the Safe. Used by
     ///      `collectLp` (mid-position fee harvest) and by `closeLp` (close-
     ///      time fee harvest, BEFORE decreaseLiquidity so principal isn't
-    ///      taxed). I-01: `tokensOwed` is expected to contain ONLY accrued
+    ///      taxed). `tokensOwed` is expected to contain ONLY accrued
     ///      fees because the protocol owns the position lifecycle — direct
     ///      external `decreaseLiquidity` on the NFT (which would move
     ///      principal into `tokensOwed`) is outside the supported flow.
@@ -661,7 +660,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
             uint160 sqrtPriceX96 = _validatePool(pool);
             // Avoid materializing `sqrtPriceX96 * sqrtPriceX96` (would overflow
             // uint256 at extreme prices). Compute `priceX96` via mulDiv then
-            // value the WETH leg with a second mulDiv. (M-05)
+            // value the WETH leg with a second mulDiv.
             uint256 priceX96 = Math.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 1 << 96);
             uint256 wethValueInUsdc = Math.mulDiv(collected0, priceX96, 1 << 96);
             currentValueUsd6 = (wethValueInUsdc + collected1).toUint128();
@@ -726,7 +725,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///         `openLp` / `closeLp`. Hard-capped at `MAX_SETTABLE_SLIPPAGE_BPS`
     ///         (1000 = 10%) so even a compromised owner cannot disable
     ///         slippage protection.
-    function setMaxSlippageBps(uint16 newMaxSlippageBps) external onlyRole(CRITICAL_ROLE) {
+    function setMaxSlippageBps(uint16 newMaxSlippageBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newMaxSlippageBps > MAX_SETTABLE_SLIPPAGE_BPS) revert SlippageAboveMax();
         emit MaxSlippageBpsUpdated(maxSlippageBps, newMaxSlippageBps);
         maxSlippageBps = newMaxSlippageBps;
@@ -735,7 +734,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     /// @notice Enable or disable a Uniswap V3 fee tier for use as either the
     ///         LP pool or the swap pool in `openLp` / `closeLp`. Constrains
     ///         routing away from thin pools that are cheap to manipulate.
-    function setFeeTierAllowed(uint24 feeTier, bool allowed) external onlyRole(CRITICAL_ROLE) {
+    function setFeeTierAllowed(uint24 feeTier, bool allowed) external onlyRole(DEFAULT_ADMIN_ROLE) {
         bool previousAllowed = allowedFeeTier[feeTier];
         emit FeeTierAllowedUpdated(feeTier, previousAllowed, allowed);
         allowedFeeTier[feeTier] = allowed;
@@ -743,7 +742,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
 
     /// @notice Update the minimum `pool.liquidity()` floor enforced in
     ///         `_validatePool`. Set to 0 to disable the check.
-    function setMinPoolLiquidity(uint128 newMinPoolLiquidity) external onlyRole(CRITICAL_ROLE) {
+    function setMinPoolLiquidity(uint128 newMinPoolLiquidity) external onlyRole(DEFAULT_ADMIN_ROLE) {
         emit MinPoolLiquidityUpdated(minPoolLiquidity, newMinPoolLiquidity);
         minPoolLiquidity = newMinPoolLiquidity;
     }
@@ -764,7 +763,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     /// @notice Recover an ERC721 token accidentally sent to or stranded in
     ///         this contract (e.g. an LP NFT misdirected here instead of to
     ///         a Safe). DOES NOT touch NFTs held by a Safe — only this
-    ///         contract's own ownership. L-04.
+    ///         contract's own ownership..
     function rescueERC721(address token, uint256 tokenId, address recipient) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (token == address(0)) revert ZeroAddress();
         if (recipient == address(0)) revert ZeroAddress();
@@ -780,9 +779,8 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///      by `_onBehalfOf`. Called at the top of `closeLp` and `collectLp`
     ///      to fail fast before any module-mediated NPM call. Without this,
     ///      an operator could route a non-WETH/USDC position through these
-    ///      functions and skim `feeCollectBps` of the non-USDC leg (audit
-    ///      finding H-03), or process a position the Safe doesn't actually
-    ///      own (M-02).
+    ///      functions and skim `feeCollectBps` of the non-USDC leg, or
+    ///      process a position the Safe doesn't actually own.
     function _requireWethUsdcPositionOwnedBy(address _onBehalfOf, uint256 tokenId) internal view {
         (, , address token0, address token1, , , , , , , , ) = POSITION_MANAGER.positions(tokenId);
         if (token0 != address(WETH) || token1 != address(USDC)) revert WrongTokenPair();
@@ -810,7 +808,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         uint160 sqrtPriceX96 = _validatePool(pool);
         uint256 amountInAfterFee = Math.mulDiv(amountIn, 1_000_000 - uint256(swapPoolFeeTier), 1_000_000);
         // Avoid materializing `sqrtPriceX96 * sqrtPriceX96` (overflow at
-        // extreme prices). Use two mulDivs through priceX96 instead. (M-05)
+        // extreme prices). Use two mulDivs through priceX96 instead.
         uint256 priceX96 = Math.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 1 << 96);
         uint256 expectedOut = tokenIn < tokenOut
             ? Math.mulDiv(amountInAfterFee, priceX96, 1 << 96)
@@ -821,7 +819,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     /// @notice Validate a Uniswap V3 pool address: must exist, be initialized,
     ///         and (if `minPoolLiquidity > 0`) hold at least that much
     ///         in-range liquidity. Returns the pool's `sqrtPriceX96` so the
-    ///         caller doesn't need a second SLOAD. (H-01 + M-06)
+    ///         caller doesn't need a second SLOAD.
     function _validatePool(address pool) internal view returns (uint160 sqrtPriceX96) {
         if (pool == address(0)) revert PoolDoesNotExist();
         (sqrtPriceX96, , , , , , ) = IUniswapV3Pool(pool).slot0();
@@ -845,7 +843,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     // ─────────────────────────────────────────────────────────────────────
 
     /// @notice Module-mediated `IERC20.approve(spender, amount)` from the Safe.
-    /// @dev    M-08: uses raw `IERC20.approve` rather than `SafeERC20.forceApprove`.
+    /// @dev    Uses raw `IERC20.approve` rather than `SafeERC20.forceApprove`.
     ///         This is intentional and safe BECAUSE the constructor rejects
     ///         any token pair that isn't WETH/USDC-shaped (decimals 18 / 6,
     ///         WETH < USDC ordering), and both WETH and USDC accept
@@ -862,7 +860,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         );
         if (!ok) {
             if (ret.length > 0) {
-                assembly {
+                assembly ("memory-safe") {
                     revert(add(ret, 0x20), mload(ret))
                 }
             }
@@ -871,7 +869,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     }
 
     /// @notice Generic module-mediated `target.call(value, data)` from the Safe.
-    /// @dev    L-01: uses `execTransactionFromModuleReturnData` and bubbles
+    /// @dev    Uses `execTransactionFromModuleReturnData` and bubbles
     ///         the inner revert via assembly when present, so production
     ///         debug surfaces the NPM/SwapRouter reason instead of an opaque
     ///         `ModuleCallFailed(step)`. Falls back to the typed step error
@@ -885,7 +883,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         );
         if (!ok) {
             if (ret.length > 0) {
-                assembly {
+                assembly ("memory-safe") {
                     revert(add(ret, 0x20), mload(ret))
                 }
             }
