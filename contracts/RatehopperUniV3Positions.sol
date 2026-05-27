@@ -4,7 +4,6 @@ pragma solidity ^0.8.28;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -30,13 +29,18 @@ import {IProtocolRegistry} from "./interfaces/IProtocolRegistry.sol";
 ///         Supply/borrow on a lending protocol (e.g. Fluid) and debt repayment
 ///         are the user's responsibility via separate Safe transactions.
 ///
-///         WETH/USDC-ONLY by design — the constructor rejects any other
-///         token pair. This is the precondition that makes the raw
-///         module-mediated `IERC20.approve` in `_safeApprove` safe: WETH and
-///         USDC accept non-zero→non-zero approvals, so the two-step
-///         `forceApprove` ceremony is provably unnecessary. Adding any
-///         non-WETH/USDC token (e.g. USDT-style) requires also switching
-///         `_safeApprove` to `SafeERC20.forceApprove` via the Safe module.
+///         WETH/USDC-ONLY by design — every NPM mint and runtime
+///         token-pair check is hardcoded to the constructor-pinned `WETH` and
+///         `USDC` immutables. The constructor only enforces `_weth < _usdc`
+///         ordering (required by Uniswap V3's token0/token1 convention);
+///         picking the right pair is a deploy-process responsibility.
+///         The raw module-mediated `IERC20.approve` in `_safeApprove` relies
+///         on the deployed pair accepting non-zero→non-zero approvals — which
+///         is true for canonical WETH and USDC, but NOT for USDT-style
+///         two-step tokens. Deploying with such a token will surface as a
+///         revert at the first `_safeApprove` call. Adding support for any
+///         non-WETH/USDC token requires switching `_safeApprove` to
+///         `SafeERC20.forceApprove` via the Safe module.
 contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
@@ -73,7 +77,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     uint16 public performanceFeeBps;
     uint16 public feeCollectBps;
     /// @notice Hard ceiling on the caller-supplied `slippageBps` accepted by
-    ///         `openLp` / `closeLp` / `_quoteSwapAmountOutMin`. Defaults to
+    ///         `openLp` / `closeLp`. Defaults to
     ///         300 (3%). Owner-mutable via `setMaxSlippageBps`, but capped at
     ///         `MAX_SETTABLE_SLIPPAGE_BPS = 1000` (10%) to bound the owner's
     ///         authority — even a compromised owner cannot disable slippage
@@ -105,8 +109,9 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     mapping(uint256 tokenId => uint128 residualBasisUsd6) public residualBasisUsd6Of;
 
     /// @notice Minimum `pool.liquidity()` required for any pool this contract
-    ///         reads spot price from (LP pool in `_collectLp`, swap pool in
-    ///         `_quoteSwapAmountOutMin`). Defense in depth on top of the
+    ///         reads spot price from (LP pool in `_collectLp` for fee valuation;
+    ///         LP + swap pools in `openLp`/`closeLp` pre-flight). Defense in
+    ///         depth on top of the
     ///         fee-tier allow-list — protects against allow-listed pools that
     ///         drain in the future. Defaults to 0 (disabled). Owner-mutable
     ///         via `setMinPoolLiquidity`.
@@ -215,13 +220,6 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         // `_collectLp`. Assert at deploy so a wrong-chain deployment fails
         // loud rather than silently inverting valuations later.
         if (address(_weth) >= address(_usdc)) revert WrongTokenOrder();
-        // lock to WETH/USDC-shaped tokens at construction so the raw
-        // module-mediated `IERC20.approve` in `_safeApprove` is provably safe
-        // (WETH/USDC accept non-zero→non-zero approve; USDT-style two-step
-        // tokens cannot be passed here). The decimals check rejects most
-        // non-WETH-non-USDC pairs without hardcoding addresses.
-        if (IERC20Metadata(address(_weth)).decimals() != 18) revert WrongTokenPair();
-        if (IERC20Metadata(address(_usdc)).decimals() != 6) revert WrongTokenPair();
         if (_swapRouter == address(0)) revert ZeroAddress();
         if (address(_uniswapV3Factory) == address(0)) revert ZeroAddress();
         if (_treasury == address(0)) revert InvalidTreasury();
@@ -787,35 +785,6 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         if (POSITION_MANAGER.ownerOf(tokenId) != _onBehalfOf) revert LpNotOnSafe();
     }
 
-    /// @notice Compute the minimum acceptable output for a Uniswap V3
-    ///         `exactInputSingle` swap from `tokenIn` to `tokenOut` of
-    ///         `amountIn`, using the pool's spot price and the caller-supplied
-    ///         slippage tolerance.
-    /// @dev    Spot price is read from `slot0` and the pool fee is subtracted
-    ///         from input before the price conversion so the quote accounts
-    ///         for it. This catches honest misconfigurations + natural price
-    ///         drift but does NOT defend against sandwich/MEV attacks.
-    function _quoteSwapAmountOutMin(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint24 swapPoolFeeTier,
-        uint16 slippageBps
-    ) internal view returns (uint256) {
-        if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
-        if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
-        address pool = UNISWAP_V3_FACTORY.getPool(tokenIn, tokenOut, swapPoolFeeTier);
-        uint160 sqrtPriceX96 = _validatePool(pool);
-        uint256 amountInAfterFee = Math.mulDiv(amountIn, 1_000_000 - uint256(swapPoolFeeTier), 1_000_000);
-        // Avoid materializing `sqrtPriceX96 * sqrtPriceX96` (overflow at
-        // extreme prices). Use two mulDivs through priceX96 instead.
-        uint256 priceX96 = Math.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 1 << 96);
-        uint256 expectedOut = tokenIn < tokenOut
-            ? Math.mulDiv(amountInAfterFee, priceX96, 1 << 96)
-            : Math.mulDiv(amountInAfterFee, 1 << 96, priceX96);
-        return (expectedOut * (10_000 - slippageBps)) / 10_000;
-    }
-
     /// @notice Validate a Uniswap V3 pool address: must exist, be initialized,
     ///         and (if `minPoolLiquidity > 0`) hold at least that much
     ///         in-range liquidity. Returns the pool's `sqrtPriceX96` so the
@@ -844,12 +813,14 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
 
     /// @notice Module-mediated `IERC20.approve(spender, amount)` from the Safe.
     /// @dev    Uses raw `IERC20.approve` rather than `SafeERC20.forceApprove`.
-    ///         This is intentional and safe BECAUSE the constructor rejects
-    ///         any token pair that isn't WETH/USDC-shaped (decimals 18 / 6,
-    ///         WETH < USDC ordering), and both WETH and USDC accept
-    ///         non-zero→non-zero approvals. If a non-WETH/USDC token is ever
-    ///         routed through here (e.g. via adding new params), switch to
-    ///         `SafeERC20.forceApprove` via the Safe module first.
+    ///         This is safe ONLY for tokens that accept non-zero→non-zero
+    ///         approvals — true for canonical WETH and USDC, but NOT for
+    ///         USDT-style two-step tokens. The contract is shape-locked to
+    ///         the constructor-pinned `WETH` / `USDC` immutables; the deploy
+    ///         process is responsible for picking canonical addresses.
+    ///         Deploying with USDT or similar will revert at the first
+    ///         non-zero→non-zero approve. To support such tokens, switch to
+    ///         `SafeERC20.forceApprove` via the Safe module.
     function _safeApprove(address _onBehalfOf, address token, address spender, uint256 amount, uint8 step) internal {
         bytes memory approveCall = abi.encodeCall(IERC20.approve, (spender, amount));
         (bool ok, bytes memory ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(

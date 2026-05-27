@@ -49,6 +49,7 @@ const NPM_ABI = [
     "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
     "function mint((address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline) params) payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
     "function decreaseLiquidity((uint256 tokenId, uint128 liquidity, uint256 amount0Min, uint256 amount1Min, uint256 deadline) params) payable returns (uint256 amount0, uint256 amount1)",
+    "function transferFrom(address from, address to, uint256 tokenId)",
 ];
 
 const WETH_ABI = [
@@ -1612,5 +1613,62 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         expect(first.feeUsd6).to.equal(expectedFeeFirst);
         expect(second.feeUsd6).to.equal(expectedFeeSecond);
         expect(first.basisUsd6 + second.basisUsd6).to.equal(openBasis); // conservation
+    });
+
+    it("rescueERC721 recovers a misdirected NFT, emits, and rejects zero-address / non-admin", async function () {
+        const { rhp, deployer } = await deployFixture();
+        const [, other, recipient] = await ethers.getSigners();
+        const rhpAddress = await rhp.getAddress();
+
+        // Stage: open an LP via openLp (NFT lands on Safe), then route it to
+        // RHP using a plain `transferFrom` from the Safe — simulates the
+        // misdirected-NFT scenario rescueERC721 is built for. We use
+        // `transferFrom` (not `safeTransferFrom`) because RHP doesn't
+        // implement `onERC721Received` — that's intentional, RHP isn't a
+        // normal NFT recipient. `rescueERC721` handles whatever lands here.
+        const tokenId = await openBalancedPosition(
+            rhp,
+            safeWallet,
+            signer,
+            ethers.parseEther("0.01"),
+            ethers.parseUnits("10", 6),
+        );
+        const npm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, ethers.provider);
+        expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
+
+        await safeWallet.executeTransaction(
+            await safeWallet.createTransaction({
+                transactions: [
+                    {
+                        to: UNISWAP_V3_NPM_ADDRESS,
+                        value: "0",
+                        data: npm.interface.encodeFunctionData("transferFrom", [safeAddress, rhpAddress, tokenId]),
+                        operation: OperationType.Call,
+                    },
+                ],
+            }),
+        );
+        expect(await npm.ownerOf(tokenId)).to.equal(rhpAddress);
+
+        // Happy path: rescue the NFT to a fresh recipient EOA.
+        await expect(rhp.connect(deployer).rescueERC721(UNISWAP_V3_NPM_ADDRESS, tokenId, recipient.address))
+            .to.emit(rhp, "NftRescued")
+            .withArgs(UNISWAP_V3_NPM_ADDRESS, recipient.address, tokenId);
+        expect(await npm.ownerOf(tokenId)).to.equal(recipient.address);
+
+        // Reverts on zero token address (pre-flight, before external call).
+        await expect(
+            rhp.connect(deployer).rescueERC721(ZERO_ADDRESS, tokenId, recipient.address),
+        ).to.be.revertedWithCustomError(rhp, "ZeroAddress");
+
+        // Reverts on zero recipient address.
+        await expect(
+            rhp.connect(deployer).rescueERC721(UNISWAP_V3_NPM_ADDRESS, tokenId, ZERO_ADDRESS),
+        ).to.be.revertedWithCustomError(rhp, "ZeroAddress");
+
+        // Reverts when called by non-admin.
+        await expect(
+            rhp.connect(other).rescueERC721(UNISWAP_V3_NPM_ADDRESS, tokenId, recipient.address),
+        ).to.be.revertedWithCustomError(rhp, "AccessControlUnauthorizedAccount");
     });
 });
