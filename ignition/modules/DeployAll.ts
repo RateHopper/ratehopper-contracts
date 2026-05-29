@@ -1,4 +1,5 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
+import TimelockControllerModule from "./TimelockControllerModule";
 import {
     getCTokenMappingArrays,
     getMTokenMappingArrays,
@@ -76,14 +77,12 @@ export default buildModule("DeployAll", (m) => {
     const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
     const DEFAULT_ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
-    // ── 1. TimelockController ──────────────────────────────────────────
-    const MIN_DELAY = 2 * 24 * 60 * 60; // 2 days
-    const timelock = m.contract("TimelockController", [
-        MIN_DELAY,
-        [adminAddress], // proposers
-        [adminAddress], // executors
-        ZERO_ADDRESS, // no admin
-    ]);
+    // ── 1. TimelockController (shared sub-module — Ignition deduplicates
+    //       the future across runs, so `yarn deploy:rhp` later reuses this
+    //       same address). Params come from TIMELOCK_ADMIN / TIMELOCK_DELAY
+    //       env vars in TimelockControllerModule, both with fallbacks to
+    //       ADMIN_ADDRESS / 2 days.
+    const { timelock } = m.useModule(TimelockControllerModule);
 
     // ── 2. ProtocolRegistry ────────────────────────────────────────────
     const registry = m.contract(
