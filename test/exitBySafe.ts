@@ -15,7 +15,8 @@ import { MoonwellHelper } from "./protocols/moonwell";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect } from "chai";
 import { deploySafeContractFixture } from "./deployUtils";
-import { safeAddress, createSafeTestHelpers } from "./debtSwapBySafe";
+import { safeAddress } from "./safeTestContext";
+import { createSafeTestHelpers } from "./debtSwapBySafe";
 
 describe("Safe wallet exit function tests", function () {
     this.timeout(300000);

@@ -56,7 +56,6 @@ import { expect } from "chai";
 import { deploySafeContractFixture } from "./deployUtils";
 import { zeroAddress } from "viem";
 
-export { safeAddress } from "./safeTestContext";
 import { safeAddress } from "./safeTestContext";
 
 // Export helper functions for reuse in other test files

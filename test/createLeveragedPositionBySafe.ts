@@ -23,7 +23,7 @@ import {
 import { MaxUint256 } from "ethers";
 import { deployLeveragedPositionContractFixture } from "./deployUtils";
 import { mContractAddressMap, MoonwellHelper, COMPTROLLER_ADDRESS } from "./protocols/moonwell";
-import { safeAddress } from "./debtSwapBySafe";
+import { safeAddress } from "./safeTestContext";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import { fluidVaultMap, FluidHelper } from "./protocols/fluid";
 

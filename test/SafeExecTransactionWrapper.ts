@@ -19,7 +19,7 @@ import { expect } from "chai";
 import { getGasOptions, deployLeveragedPositionContractFixture } from "./deployUtils";
 import { MaxUint256 } from "ethers";
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { safeAddress } from "./debtSwapBySafe";
+import { safeAddress } from "./safeTestContext";
 
 describe("SafeExecTransactionWrapper", function () {
     // Increase timeout for memory-intensive operations
