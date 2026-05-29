@@ -294,13 +294,14 @@ async function closeAndMeasure(
 
 describe("RatehopperUniV3Positions - constructor", function () {
     it("stores the immutables and initial mutables", async function () {
-        const { rhp, treasury, protocolRegistry } = await deployFixture();
+        const { rhp, deployer, treasury, protocolRegistry } = await deployFixture();
         expect(await rhp.POSITION_MANAGER()).to.equal(UNISWAP_V3_NPM_ADDRESS);
         expect(await rhp.REGISTRY()).to.equal(await protocolRegistry.getAddress());
         expect(await rhp.USDC()).to.equal(USDC_ADDRESS);
         expect(await rhp.SWAP_ROUTER()).to.equal(UNISWAP_V3_SWAP_ROUTER_ADDRESS);
         expect(await rhp.UNISWAP_V3_FACTORY()).to.equal(UNISWAP_V3_FACTORY_ADDRESS);
         expect(await rhp.MAX_FEE_BPS()).to.equal(MAX_FEE_BPS);
+        expect(await rhp.timelock()).to.equal(deployer.address);
         expect(await rhp.treasury()).to.equal(treasury.address);
         expect(await rhp.performanceFeeBps()).to.equal(PERFORMANCE_FEE_BPS);
         expect(await rhp.feeCollectBps()).to.equal(COLLECT_FEE_BPS);
@@ -311,6 +312,9 @@ describe("RatehopperUniV3Positions - constructor", function () {
         expect(await rhp.allowedFeeTier(3000)).to.equal(true);
         expect(await rhp.allowedFeeTier(10000)).to.equal(false);
         expect(await rhp.minPoolLiquidity()).to.equal(0n); // H-01 default: disabled
+        // CRITICAL_ROLE is self-administered to prevent DEFAULT_ADMIN_ROLE bypass.
+        const CRITICAL_ROLE = await rhp.CRITICAL_ROLE();
+        expect(await rhp.getRoleAdmin(CRITICAL_ROLE)).to.equal(CRITICAL_ROLE);
     });
 
     it("reverts on zero addresses and on performanceFeeBps / feeCollectBps > maxFeeBps", async function () {

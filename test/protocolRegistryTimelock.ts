@@ -38,7 +38,7 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
         const newMockParaswapAddress = "0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7";
 
         // Note: CRITICAL_ROLE is automatically granted to timelock in constructor
-        const CRITICAL_ROLE = await protocolRegistry.CRITICAL_ROLE();
+        const CRITICAL_ROLE = await protocolRegistry.CRITICAL_ROLE_PUBLIC();
 
         // Grant DEFAULT_ADMIN_ROLE to admin for routine operations
         const DEFAULT_ADMIN_ROLE = await protocolRegistry.DEFAULT_ADMIN_ROLE();
@@ -298,6 +298,107 @@ describe("ProtocolRegistry - Timelock Integration Tests", function () {
                 timelock,
                 "TimelockUnexpectedOperationState",
             );
+        });
+    });
+
+    describe("Handler Update Timelock Bypass Regression", function () {
+        async function deployHandlerFixture() {
+            const base = await loadFixture(deployTimelockFixture);
+            const { protocolRegistry, deployer, admin } = base;
+
+            const SafeDebtManager = await ethers.getContractFactory("SafeDebtManager");
+            const safeDebtManager = await SafeDebtManager.deploy(
+                await protocolRegistry.getAddress(),
+                [],
+                [],
+                deployer.address,
+            );
+            await safeDebtManager.waitForDeployment();
+
+            const LeveragedPosition = await ethers.getContractFactory("LeveragedPosition");
+            const leveragedPosition = await LeveragedPosition.deploy(
+                await protocolRegistry.getAddress(),
+                [],
+                [],
+                deployer.address,
+            );
+            await leveragedPosition.waitForDeployment();
+
+            return { ...base, safeDebtManager, leveragedPosition };
+        }
+
+        const AAVE_V3 = 0;
+        const SOME_HANDLER = "0x1111111111111111111111111111111111111111";
+
+        it("DEFAULT_ADMIN_ROLE cannot directly call SafeDebtManager.setProtocolHandler", async function () {
+            const { safeDebtManager, admin } = await deployHandlerFixture();
+            await expect(
+                safeDebtManager.connect(admin).setProtocolHandler(AAVE_V3, SOME_HANDLER),
+            ).to.be.revertedWithCustomError(safeDebtManager, "OnlyTimelock");
+        });
+
+        it("DEFAULT_ADMIN_ROLE granting itself CRITICAL_ROLE cannot bypass SafeDebtManager handler timelock", async function () {
+            const { protocolRegistry, safeDebtManager, deployer, CRITICAL_ROLE } = await deployHandlerFixture();
+
+            // Maliciously grant CRITICAL_ROLE to deployer (who has DEFAULT_ADMIN_ROLE)
+            await protocolRegistry.grantRole(CRITICAL_ROLE, deployer.address);
+            expect(await protocolRegistry.hasRole(CRITICAL_ROLE, deployer.address)).to.be.true;
+
+            // Even with CRITICAL_ROLE, deployer is not the timelock so must revert
+            await expect(
+                safeDebtManager.connect(deployer).setProtocolHandler(AAVE_V3, SOME_HANDLER),
+            ).to.be.revertedWithCustomError(safeDebtManager, "OnlyTimelock");
+        });
+
+        it("Timelock-scheduled execution can update SafeDebtManager handler", async function () {
+            const { protocolRegistry, safeDebtManager, timelock, CRITICAL_ROLE } = await deployHandlerFixture();
+
+            const target = await safeDebtManager.getAddress();
+            const data = safeDebtManager.interface.encodeFunctionData("setProtocolHandler", [AAVE_V3, SOME_HANDLER]);
+            const predecessor = ethers.ZeroHash;
+            const salt = ethers.id("test-sdm-handler-update");
+
+            // Timelock already holds CRITICAL_ROLE (granted in registry constructor)
+            expect(await protocolRegistry.hasRole(CRITICAL_ROLE, await timelock.getAddress())).to.be.true;
+
+            await timelock.schedule(target, 0, data, predecessor, salt, TWO_DAYS);
+            await time.increase(TWO_DAYS);
+            await timelock.execute(target, 0, data, predecessor, salt);
+
+            expect(await safeDebtManager.protocolHandlers(AAVE_V3)).to.equal(SOME_HANDLER);
+        });
+
+        it("DEFAULT_ADMIN_ROLE cannot directly call LeveragedPosition.setProtocolHandler", async function () {
+            const { leveragedPosition, admin } = await deployHandlerFixture();
+            await expect(
+                leveragedPosition.connect(admin).setProtocolHandler(AAVE_V3, SOME_HANDLER),
+            ).to.be.revertedWithCustomError(leveragedPosition, "OnlyTimelock");
+        });
+
+        it("DEFAULT_ADMIN_ROLE granting itself CRITICAL_ROLE cannot bypass LeveragedPosition handler timelock", async function () {
+            const { protocolRegistry, leveragedPosition, deployer, CRITICAL_ROLE } = await deployHandlerFixture();
+
+            await protocolRegistry.grantRole(CRITICAL_ROLE, deployer.address);
+            expect(await protocolRegistry.hasRole(CRITICAL_ROLE, deployer.address)).to.be.true;
+
+            await expect(
+                leveragedPosition.connect(deployer).setProtocolHandler(AAVE_V3, SOME_HANDLER),
+            ).to.be.revertedWithCustomError(leveragedPosition, "OnlyTimelock");
+        });
+
+        it("Timelock-scheduled execution can update LeveragedPosition handler", async function () {
+            const { leveragedPosition, timelock } = await deployHandlerFixture();
+
+            const target = await leveragedPosition.getAddress();
+            const data = leveragedPosition.interface.encodeFunctionData("setProtocolHandler", [AAVE_V3, SOME_HANDLER]);
+            const predecessor = ethers.ZeroHash;
+            const salt = ethers.id("test-lp-handler-update");
+
+            await timelock.schedule(target, 0, data, predecessor, salt, TWO_DAYS);
+            await time.increase(TWO_DAYS);
+            await timelock.execute(target, 0, data, predecessor, salt);
+
+            expect(await leveragedPosition.protocolHandlers(AAVE_V3)).to.equal(SOME_HANDLER);
         });
     });
 });

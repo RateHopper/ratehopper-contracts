@@ -73,6 +73,12 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     IUniswapV3Factory public immutable UNISWAP_V3_FACTORY;
     uint16 public immutable MAX_FEE_BPS;
 
+    /// @notice The immutable `TimelockController` address. Critical setters
+    ///         (`setTreasury`, `setPerformanceFeeBps`, `setFeeCollectBps`)
+    ///         require `msg.sender == timelock` so a `DEFAULT_ADMIN_ROLE`
+    ///         holder cannot self-grant `CRITICAL_ROLE` and bypass the delay.
+    address public immutable timelock;
+
     address public treasury;
     uint16 public performanceFeeBps;
     uint16 public feeCollectBps;
@@ -180,6 +186,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     error MinUsdcOutNotMet();
     error SlippageTooLow();
     error InvalidSwapAmountOutMin();
+    error OnlyTimelock();
 
     /// @notice Restricts a call to either the backend operator (the registry's
     ///         `safeOperator`) or the Safe itself. The operator drives closes
@@ -233,6 +240,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         SWAP_ROUTER = _swapRouter;
         UNISWAP_V3_FACTORY = _uniswapV3Factory;
         MAX_FEE_BPS = _maxFeeBps;
+        timelock = _timelock;
         treasury = _treasury;
         performanceFeeBps = _performanceFeeBps;
         feeCollectBps = _feeCollectBps;
@@ -247,6 +255,9 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
 
         _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
         _grantRole(CRITICAL_ROLE, _timelock);
+        // Make CRITICAL_ROLE self-administered so DEFAULT_ADMIN_ROLE cannot
+        // grant itself CRITICAL_ROLE and bypass the timelock-only setters.
+        _setRoleAdmin(CRITICAL_ROLE, CRITICAL_ROLE);
 
         emit TreasuryUpdated(address(0), _treasury);
         emit PerformanceFeeBpsUpdated(0, _performanceFeeBps);
@@ -690,18 +701,21 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     // ─────────────────────────────────────────────────────────────────────
 
     function setTreasury(address newTreasury) external onlyRole(CRITICAL_ROLE) {
+        if (msg.sender != timelock) revert OnlyTimelock();
         if (newTreasury == address(0)) revert InvalidTreasury();
         emit TreasuryUpdated(treasury, newTreasury);
         treasury = newTreasury;
     }
 
     function setPerformanceFeeBps(uint16 newPerformanceFeeBps) external onlyRole(CRITICAL_ROLE) {
+        if (msg.sender != timelock) revert OnlyTimelock();
         if (newPerformanceFeeBps > MAX_FEE_BPS) revert FeeAboveMax();
         emit PerformanceFeeBpsUpdated(performanceFeeBps, newPerformanceFeeBps);
         performanceFeeBps = newPerformanceFeeBps;
     }
 
     function setFeeCollectBps(uint16 newFeeCollectBps) external onlyRole(CRITICAL_ROLE) {
+        if (msg.sender != timelock) revert OnlyTimelock();
         if (newFeeCollectBps > MAX_FEE_BPS) revert FeeAboveMax();
         emit FeeCollectBpsUpdated(feeCollectBps, newFeeCollectBps);
         feeCollectBps = newFeeCollectBps;

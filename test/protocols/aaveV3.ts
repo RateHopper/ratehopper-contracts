@@ -9,7 +9,7 @@ import { approve, defaultProvider, formatAmount } from "../utils";
 import aaveDebtTokenJson from "../../externalAbi/aaveV3/aaveDebtToken.json";
 import aaveV3PoolJson from "../../externalAbi/aaveV3/aaveV3Pool.json";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { safeAddress } from "../debtSwapBySafe";
+import { safeAddress } from "../safeTestContext";
 
 export class AaveV3Helper {
     private protocolDataProvider;
