@@ -18,7 +18,7 @@ import chainAgnosticBundlerV2Abi from "../../externalAbi/morpho/chainAgnosticBun
 import morphoAbi from "../../externalAbi/morpho/morpho.json";
 import { BundlerAction } from "@morpho-org/bundler-sdk-ethers";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { safeAddress } from "../debtSwapBySafe";
+import { safeAddress } from "../safeTestContext";
 
 export const bundlerAddress = "0x23055618898e202386e6c13955a58d3c68200bfb";
 export const MORPHO_ADDRESS = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";

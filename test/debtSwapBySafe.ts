@@ -56,7 +56,8 @@ import { expect } from "chai";
 import { deploySafeContractFixture } from "./deployUtils";
 import { zeroAddress } from "viem";
 
-export const safeAddress = process.env.TESTING_SAFE_WALLET_ADDRESS!;
+export { safeAddress } from "./safeTestContext";
+import { safeAddress } from "./safeTestContext";
 
 // Export helper functions for reuse in other test files
 export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWallet: any; safeModuleAddress: string }) {

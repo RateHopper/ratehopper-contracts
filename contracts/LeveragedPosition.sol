@@ -29,6 +29,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
     error InsufficientTokenBalanceAfterSwap(uint256 expected, uint256 actual);
     error InvalidOperationType(uint8 operationType);
+    error OnlyTimelock();
 
     enum OperationType { Create, Close }
 
@@ -46,6 +47,12 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     }
 
     modifier onlyCriticalRole() {
+        require(registry.hasRole(CRITICAL_ROLE, msg.sender), "Caller does not have CRITICAL_ROLE");
+        _;
+    }
+
+    modifier onlyTimelockCriticalRole() {
+        if (msg.sender != registry.timelock()) revert OnlyTimelock();
         require(registry.hasRole(CRITICAL_ROLE, msg.sender), "Caller does not have CRITICAL_ROLE");
         _;
     }
@@ -140,9 +147,9 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     /// @notice Updates the handler address for a specific protocol
     /// @param _protocol The protocol to update the handler for
     /// @param _handler The new handler address
-    /// @dev Only callable by addresses with CRITICAL_ROLE in ProtocolRegistry. For production, should be behind a timelock.
+    /// @dev Only callable via the registry's immutable timelock and must also hold CRITICAL_ROLE.
     /// @dev Allows updating handlers if a bug is found or handler needs upgrade.
-    function setProtocolHandler(Protocol _protocol, address _handler) external onlyCriticalRole {
+    function setProtocolHandler(Protocol _protocol, address _handler) external onlyTimelockCriticalRole {
         require(_handler != address(0), "Invalid handler address");
         address oldHandler = protocolHandlers[_protocol];
         protocolHandlers[_protocol] = _handler;
