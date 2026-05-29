@@ -1,4 +1,5 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
+import TimelockControllerModule from "./TimelockControllerModule";
 import {
     PROTOCOL_REGISTRY_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
@@ -11,11 +12,14 @@ import {
 /**
  * Combined deployment module for TimelockController + RatehopperUniV3Positions.
  *
- * By default deploys a fresh TimelockController (2-day delay, admin EOA as
- * both proposer and executor, no separate admin) and wires its address into
- * RHP's `_timelock` constructor arg. To reuse an existing timelock, set
- * `RHP_TIMELOCK` — when present, the module skips the timelock deployment
- * and points RHP at the supplied address instead.
+ * The TimelockController is delegated to the shared `TimelockControllerModule`
+ * sub-module, which is ALSO consumed by `DeployAll`. Ignition deduplicates the
+ * `TimelockControllerModule#TimelockController` future across runs via the
+ * journal, so whichever deploy command runs first owns the deployment and the
+ * later command(s) reuse that same address automatically. To bypass the shared
+ * sub-module entirely and point RHP at a pre-existing (or externally deployed)
+ * timelock, set `RHP_TIMELOCK` — when present, this module skips the
+ * sub-module path and uses the literal address directly.
  *
  * Environment variables:
  *  - RHP_REGISTRY:              ProtocolRegistry address. If unset, falls back
@@ -26,14 +30,13 @@ import {
  *                               (operational setters: rescueToken, etc.).
  *                               Falls back to ADMIN_ADDRESS. Required.
  *  - RHP_TIMELOCK:              Pre-deployed TimelockController to reuse.
- *                               When set, SKIPS the new timelock deployment.
- *  - TIMELOCK_ADMIN:            EOA / multisig set as BOTH proposer AND
- *                               executor on the new timelock. Falls back to
- *                               ADMIN_ADDRESS. Required when RHP_TIMELOCK
- *                               is unset.
- *  - TIMELOCK_DELAY:            Minimum delay in seconds before a queued tx
- *                               can be executed. Defaults to 172800 (2 days).
- *                               Lower this for testnet only.
+ *                               When set, SKIPS the shared sub-module entirely.
+ *  - TIMELOCK_ADMIN:            (consumed by TimelockControllerModule) EOA /
+ *                               multisig set as BOTH proposer AND executor.
+ *                               Falls back to ADMIN_ADDRESS. Required when
+ *                               RHP_TIMELOCK is unset.
+ *  - TIMELOCK_DELAY:            (consumed by TimelockControllerModule) Minimum
+ *                               delay in seconds. Defaults to 172800 (2 days).
  *  - RHP_PERFORMANCE_FEE_BPS:   Performance fee on net profit at closeLp in
  *                               bps. Defaults to 1000 (10%).
  *  - RHP_FEE_COLLECT_BPS:       Fee on harvested LP fees in bps. Defaults to
@@ -47,31 +50,24 @@ import {
  *     --network base --verify
  */
 export default buildModule("DeployRatehopperUniV3Positions", (m) => {
-    const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-    const TWO_DAYS = 2 * 24 * 60 * 60;
-
-    // ── Timelock (deploy fresh OR reuse via RHP_TIMELOCK) ──────────────────
+    // ── Timelock ───────────────────────────────────────────────────────────
+    // Three modes:
+    //   1. `RHP_TIMELOCK` set  → reuse the supplied address (no deploy here).
+    //   2. `RHP_TIMELOCK` unset → consume the shared TimelockControllerModule.
+    //      Because Ignition keys futures by `<moduleName>#<contractName>`, the
+    //      sub-module's `TimelockControllerModule#TimelockController` is the
+    //      same future the `DeployAll` module references. The journal at
+    //      `ignition/deployments/chain-<chainId>/` deduplicates across runs,
+    //      so if `yarn deploy` already deployed it, `yarn deploy:rhp` reuses
+    //      that exact address.
+    //   3. First-ever run → sub-module deploys it; params (TIMELOCK_ADMIN,
+    //      TIMELOCK_DELAY) come from env vars inside TimelockControllerModule.
     const reuseTimelockAddr = process.env.RHP_TIMELOCK ?? "";
-    const timelockAdmin = m.getParameter<string>(
-        "timelockAdmin",
-        process.env.TIMELOCK_ADMIN ?? process.env.ADMIN_ADDRESS ?? "",
-    );
-    const timelockDelay = m.getParameter<number>(
-        "timelockDelay",
-        Number(process.env.TIMELOCK_DELAY ?? TWO_DAYS),
-    );
 
-    const timelock = reuseTimelockAddr
-        ? undefined
-        : m.contract("TimelockController", [
-              timelockDelay,
-              [timelockAdmin], // proposers
-              [timelockAdmin], // executors
-              ZERO_ADDRESS, // no separate admin — timelock holds DEFAULT_ADMIN_ROLE on itself
-          ]);
+    const timelock = reuseTimelockAddr ? undefined : m.useModule(TimelockControllerModule).timelock;
 
-    // Concrete address used for the RHP constructor arg: either the future
-    // newly-deployed timelock (Ignition resolves the address) or the literal
+    // Concrete address used for the RHP constructor arg: either the
+    // shared-sub-module future (Ignition resolves the address) or the literal
     // `RHP_TIMELOCK` pin.
     const timelockArg: any = timelock ?? reuseTimelockAddr;
 
