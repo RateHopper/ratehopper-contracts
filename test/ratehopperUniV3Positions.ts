@@ -32,6 +32,13 @@ const PERFORMANCE_FEE_BPS = 1000; // 10% — performance fee on net profit at cl
 const COLLECT_FEE_BPS = 250; // 2.5% on collected LP fees
 const SLIPPAGE_BPS = 100; // 1% — per-call slippage tolerance for openLp/closeLp swaps
 
+// Sentinel for the L-5 expectedSwapOut argument. Tests pass
+// `swapAmountOutMin = 1n`, and with `expectedSwapOut = 1n` the relationship
+// `1 >= (1 * (10_000 - SLIPPAGE_BPS)) / 10_000` is satisfied for any
+// `SLIPPAGE_BPS > 0`. Production callers must supply a real quoter-derived
+// value here.
+const EXPECTED_SWAP_OUT = 1n;
+
 // Deadline passed to openLp / closeLp in tests. Uses MaxUint256 so the
 // staleness check never fires unintentionally.
 const FAR_DEADLINE = ethers.MaxUint256;
@@ -218,6 +225,7 @@ async function openBalancedPosition(
                          0,
                         500,
                         1n,
+                        EXPECTED_SWAP_OUT,
                         SLIPPAGE_BPS,
                         FAR_DEADLINE,
                     ]),
@@ -265,6 +273,7 @@ async function closeAndMeasure(
                         tokenId,
                         500,
                         1n,
+                        EXPECTED_SWAP_OUT,
                         SLIPPAGE_BPS,
                         exitBps,
                         0,
@@ -312,6 +321,7 @@ describe("RatehopperUniV3Positions - constructor", function () {
         expect(await rhp.allowedFeeTier(3000)).to.equal(true);
         expect(await rhp.allowedFeeTier(10000)).to.equal(false);
         expect(await rhp.minPoolLiquidity()).to.equal(0n); // H-01 default: disabled
+        expect(await rhp.minPositionLiquidity()).to.equal(0n); // L-2 default: disabled
         // CRITICAL_ROLE is self-administered to prevent DEFAULT_ADMIN_ROLE bypass.
         const CRITICAL_ROLE = await rhp.CRITICAL_ROLE();
         expect(await rhp.getRoleAdmin(CRITICAL_ROLE)).to.equal(CRITICAL_ROLE);
@@ -504,6 +514,27 @@ describe("RatehopperUniV3Positions - owner setters", function () {
         expect(await rhp.minPoolLiquidity()).to.equal(0n);
 
         await expect(rhp.connect(other).setMinPoolLiquidity(123n)).to.be.revertedWithCustomError(
+            rhp,
+            "AccessControlUnauthorizedAccount",
+        );
+    });
+
+    it("setMinPositionLiquidity emits, accepts 0 (disabled), and rejects non-owner", async function () {
+        const { rhp, deployer } = await deployFixture();
+        const [, other] = await ethers.getSigners();
+
+        const newFloor = 1_000n;
+        await expect(rhp.connect(deployer).setMinPositionLiquidity(newFloor))
+            .to.emit(rhp, "MinPositionLiquidityUpdated")
+            .withArgs(0n, newFloor);
+        expect(await rhp.minPositionLiquidity()).to.equal(newFloor);
+
+        await expect(rhp.connect(deployer).setMinPositionLiquidity(0n))
+            .to.emit(rhp, "MinPositionLiquidityUpdated")
+            .withArgs(newFloor, 0n);
+        expect(await rhp.minPositionLiquidity()).to.equal(0n);
+
+        await expect(rhp.connect(other).setMinPositionLiquidity(123n)).to.be.revertedWithCustomError(
             rhp,
             "AccessControlUnauthorizedAccount",
         );
@@ -736,6 +767,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                             0, // mintAmount1Min
                             500, // swapPoolFeeTier
                             1n, // swapAmountOutMin — contract rejects 0; 1 wei = effectively disabled
+                            EXPECTED_SWAP_OUT,
                             SLIPPAGE_BPS,
                             FAR_DEADLINE,
                         ]),
@@ -771,6 +803,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                             tokenId,
                             500, // swapPoolFeeTier
                             1n, // swapAmountOutMin — contract rejects 0; 1 wei = effectively disabled
+                            EXPECTED_SWAP_OUT,
                             SLIPPAGE_BPS,
                             10_000, // exitBps — full close
                             0, // decreaseAmount0Min
@@ -895,6 +928,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                          0,
                         500,
                         1n,
+                        EXPECTED_SWAP_OUT,
                         SLIPPAGE_BPS,
                         FAR_DEADLINE,
                     ]),
@@ -976,6 +1010,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                              0,
                             500,
                         1n,
+                            EXPECTED_SWAP_OUT,
                             SLIPPAGE_BPS,
                         FAR_DEADLINE,
                         ]),
@@ -1167,14 +1202,14 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         // A stranger (neither operator nor Safe) is rejected by the gate.
         console.log("\n  [operator 3/5] Stranger EOA calls openLp → expect NotAuthorized");
         await expect(
-            rhp.connect(stranger).openLp(safeAddress, usdcAmount, tickLower, tickUpper, 500, 0, 0, 500, 1n, SLIPPAGE_BPS, FAR_DEADLINE),
+            rhp.connect(stranger).openLp(safeAddress, usdcAmount, tickLower, tickUpper, 500, 0, 0, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, FAR_DEADLINE),
         ).to.be.revertedWithCustomError(rhp, "NotAuthorized");
         console.log("         stranger rejected with NotAuthorized ✓");
 
         // 1. Operator opens the LP directly.
         console.log("\n  [operator 4/5] Operator EOA calls openLp directly (no Safe signature)");
         await (
-            await rhp.connect(operatorEOA).openLp(safeAddress, usdcAmount, tickLower, tickUpper, 500, 0, 0, 500, 1n, SLIPPAGE_BPS, FAR_DEADLINE)
+            await rhp.connect(operatorEOA).openLp(safeAddress, usdcAmount, tickLower, tickUpper, 500, 0, 0, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, FAR_DEADLINE)
         ).wait();
         const opened = await rhp.queryFilter(rhp.filters.PositionOpened(safeAddress), -10);
         const tokenId = opened[opened.length - 1].args.tokenId as bigint;
@@ -1189,7 +1224,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         await (
             await rhp
                 .connect(operatorEOA)
-                .closeLp(safeAddress, tokenId, 500, 1n, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, 0)
+                .closeLp(safeAddress, tokenId, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, 0)
         ).wait();
         const safeUsdcAfter = await usdc.balanceOf(safeAddress);
 
@@ -1220,20 +1255,20 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
 
         // usdcAmount == 0 → InvalidUsdcAmount (checked before any module call).
         await expect(
-            rhp.connect(operatorEOA).openLp(safeAddress, 0n, tickLower, tickUpper, 500, 0, 0, 500, 1n, SLIPPAGE_BPS, FAR_DEADLINE),
+            rhp.connect(operatorEOA).openLp(safeAddress, 0n, tickLower, tickUpper, 500, 0, 0, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, FAR_DEADLINE),
         ).to.be.revertedWithCustomError(rhp, "InvalidUsdcAmount");
         console.log("    openLp(usdcAmount = 0)        → reverted InvalidUsdcAmount ✓");
 
         // _onBehalfOf == address(0) → ZeroAddress (from onlyOperatorOrSafe).
         await expect(
-            rhp.connect(operatorEOA).openLp(ZERO_ADDRESS, someUsdc, tickLower, tickUpper, 500, 0, 0, 500, 1n, SLIPPAGE_BPS, FAR_DEADLINE),
+            rhp.connect(operatorEOA).openLp(ZERO_ADDRESS, someUsdc, tickLower, tickUpper, 500, 0, 0, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, FAR_DEADLINE),
         ).to.be.revertedWithCustomError(rhp, "ZeroAddress");
         console.log("    openLp(_onBehalfOf = 0x0)     → reverted ZeroAddress ✓");
 
         // RHP not enabled as a module on the Safe → the Safe rejects the
         // module call (Gnosis "GS104"), so the whole tx reverts.
         await expect(
-            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 0, 0, 500, 1n, SLIPPAGE_BPS, FAR_DEADLINE),
+            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 0, 0, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, FAR_DEADLINE),
         ).to.be.reverted;
         console.log("    openLp(module not enabled)    → reverted (Safe GS104) ✓");
 
@@ -1241,12 +1276,12 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         // any module call). Default maxSlippageBps = 300; passing 301 reverts.
         const maxSlip = Number(await rhp.maxSlippageBps());
         await expect(
-            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 0, 0, 500, 0, maxSlip + 1, FAR_DEADLINE),
+            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 0, 0, 500, 0, EXPECTED_SWAP_OUT, maxSlip + 1, FAR_DEADLINE),
         ).to.be.revertedWithCustomError(rhp, "SlippageAboveMax");
         console.log(`    openLp(slippageBps = ${maxSlip + 1})     → reverted SlippageAboveMax ✓`);
 
         await expect(
-            rhp.connect(operatorEOA).closeLp(safeAddress, 1n, 500, 0, maxSlip + 1, 10_000, 0, 0, FAR_DEADLINE, 0),
+            rhp.connect(operatorEOA).closeLp(safeAddress, 1n, 500, 0, EXPECTED_SWAP_OUT, maxSlip + 1, 10_000, 0, 0, FAR_DEADLINE, 0),
         ).to.be.revertedWithCustomError(rhp, "SlippageAboveMax");
         console.log(`    closeLp(slippageBps = ${maxSlip + 1})    → reverted SlippageAboveMax ✓`);
 
@@ -1255,29 +1290,29 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         // {100, 500, 3000}.
         const badTier = 10000;
         await expect(
-            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, badTier, 0, 0, 500, 1n, SLIPPAGE_BPS, FAR_DEADLINE),
+            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, badTier, 0, 0, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, FAR_DEADLINE),
         ).to.be.revertedWithCustomError(rhp, "FeeTierNotAllowed");
         console.log(`    openLp(lpPoolFeeTier = ${badTier})   → reverted FeeTierNotAllowed ✓`);
 
         await expect(
-            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 0, 0, badTier, 0, SLIPPAGE_BPS, FAR_DEADLINE),
+            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 0, 0, badTier, 0, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, FAR_DEADLINE),
         ).to.be.revertedWithCustomError(rhp, "FeeTierNotAllowed");
         console.log(`    openLp(swapPoolFeeTier = ${badTier}) → reverted FeeTierNotAllowed ✓`);
 
         await expect(
-            rhp.connect(operatorEOA).closeLp(safeAddress, 1n, badTier, 0, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, 0),
+            rhp.connect(operatorEOA).closeLp(safeAddress, 1n, badTier, 0, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, 0),
         ).to.be.revertedWithCustomError(rhp, "FeeTierNotAllowed");
         console.log(`    closeLp(swapPoolFeeTier = ${badTier}) → reverted FeeTierNotAllowed ✓`);
 
         // C-01 floor: swapAmountOutMin must be non-zero so a (compromised)
         // operator cannot disable per-call slippage protection by passing 0.
         await expect(
-            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 0, 0, 500, 0n, SLIPPAGE_BPS, FAR_DEADLINE),
+            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 0, 0, 500, 0n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, FAR_DEADLINE),
         ).to.be.revertedWithCustomError(rhp, "InvalidSwapAmountOutMin");
         console.log(`    openLp(swapAmountOutMin = 0)           → reverted InvalidSwapAmountOutMin ✓`);
 
         await expect(
-            rhp.connect(operatorEOA).closeLp(safeAddress, 1n, 500, 0n, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, 0),
+            rhp.connect(operatorEOA).closeLp(safeAddress, 1n, 500, 0n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, 0),
         ).to.be.revertedWithCustomError(rhp, "InvalidSwapAmountOutMin");
         console.log(`    closeLp(swapAmountOutMin = 0)          → reverted InvalidSwapAmountOutMin ✓`);
 
@@ -1287,7 +1322,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         const maxUint128 = 2n ** 128n - 1n;
         await (await rhp.connect(deployer).setMinPoolLiquidity(maxUint128)).wait();
         await expect(
-            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 0, 0, 500, 1n, SLIPPAGE_BPS, FAR_DEADLINE),
+            rhp.connect(operatorEOA).openLp(safeAddress, someUsdc, tickLower, tickUpper, 500, 0, 0, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, FAR_DEADLINE),
         ).to.be.revertedWithCustomError(rhp, "PoolTooThin");
         console.log(`    openLp(minPoolLiquidity = MAX)         → reverted PoolTooThin ✓`);
     });
@@ -1312,7 +1347,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         await expect(
             rhp
                 .connect(operatorEOA)
-                .closeLp(safeAddress, tokenId, 500, 1n, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, huge),
+                .closeLp(safeAddress, tokenId, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, huge),
         ).to.be.revertedWithCustomError(rhp, "MinUsdcOutNotMet");
         console.log(`\n  [c-02/minUsdcOut] closeLp with minUsdcOut = 1M USDC → reverted MinUsdcOutNotMet ✓`);
     });
@@ -1432,7 +1467,21 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         // Use an arbitrary tokenId that this contract never opened — the
         // residual basis slot is zero, so closeLp must revert UnknownPosition.
         await expect(
-            rhp.connect(operatorEOA).closeLp(safeAddress, 999_999n, 500, 1n, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, 0),
+            rhp.connect(operatorEOA).closeLp(safeAddress, 999_999n, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, 0),
+        ).to.be.revertedWithCustomError(rhp, "UnknownPosition");
+    });
+
+    it("collectLp on an unknown tokenId reverts with UnknownPosition (L-1)", async function () {
+        // L-1 audit fix: collectLp must reject tokenIds that were not opened
+        // via openLp (residualBasisUsd6Of slot is zero) so neither the Safe
+        // nor the registry.safeOperator can route arbitrary Safe-owned
+        // WETH/USDC NPM NFTs through the protocol's feeCollectBps path.
+        const { rhp, protocolRegistry, deployer } = await deployFixture();
+        const [, operatorEOA] = await ethers.getSigners();
+        await (await protocolRegistry.connect(deployer).setOperator(operatorEOA.address)).wait();
+
+        await expect(
+            rhp.connect(operatorEOA).collectLp(safeAddress, 999_999n),
         ).to.be.revertedWithCustomError(rhp, "UnknownPosition");
     });
 
@@ -1442,11 +1491,11 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         await (await protocolRegistry.connect(deployer).setOperator(operatorEOA.address)).wait();
 
         await expect(
-            rhp.connect(operatorEOA).closeLp(safeAddress, 1n, 500, 1n, SLIPPAGE_BPS, 0, 0, 0, FAR_DEADLINE, 0),
+            rhp.connect(operatorEOA).closeLp(safeAddress, 1n, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, 0, 0, 0, FAR_DEADLINE, 0),
         ).to.be.revertedWithCustomError(rhp, "InvalidExitBps");
 
         await expect(
-            rhp.connect(operatorEOA).closeLp(safeAddress, 1n, 500, 1n, SLIPPAGE_BPS, 10_001, 0, 0, FAR_DEADLINE, 0),
+            rhp.connect(operatorEOA).closeLp(safeAddress, 1n, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, 10_001, 0, 0, FAR_DEADLINE, 0),
         ).to.be.revertedWithCustomError(rhp, "InvalidExitBps");
     });
 
