@@ -43,6 +43,25 @@ import {
  *                               250 (2.5%).
  *  - RHP_MAX_FEE_BPS:           Hard upper bound on BOTH fees. Defaults to
  *                               2000 (20%).
+ *  - RHP_MIN_POSITION_LIQUIDITY: Floor on NPM `mint` liquidity (L-2 / L-4
+ *                               hardening). Defaults to 10000 — the exact
+ *                               threshold below which a 1-bps partial close
+ *                               can decrement basis while removing zero
+ *                               liquidity. Real WETH/USDC positions carry L
+ *                               orders of magnitude larger, so this default
+ *                               never rejects a legitimate position while
+ *                               fully closing the L-4 dust regime. Set 0 to
+ *                               disable.
+ *  - RHP_MIN_POOL_LIQUIDITY:    Floor on `pool.liquidity()` for any pool a
+ *                               spot price is read from (I-3 / manipulation
+ *                               hardening). Defaults to 0 (disabled) because
+ *                               the safe value is pool- and market-dependent:
+ *                               an over-aggressive floor bricks normal
+ *                               operation. RUNBOOK: measure the target
+ *                               WETH/USDC pool's in-range `liquidity()` and
+ *                               set this to a conservative fraction (e.g.
+ *                               ~25-50%) via this env var or post-deploy
+ *                               `setMinPoolLiquidity` (DEFAULT_ADMIN_ROLE).
  *  - DEPLOYER_PRIVATE_KEY:      Deployer key (set in hardhat.config.ts).
  *
  * Usage:
@@ -84,6 +103,14 @@ export default buildModule("DeployRatehopperUniV3Positions", (m) => {
     );
     const feeCollectBps = m.getParameter<number>("feeCollectBps", Number(process.env.RHP_FEE_COLLECT_BPS ?? 250));
     const maxFeeBps = m.getParameter<number>("maxFeeBps", Number(process.env.RHP_MAX_FEE_BPS ?? 2000));
+    const minPositionLiquidity = m.getParameter<bigint>(
+        "minPositionLiquidity",
+        BigInt(process.env.RHP_MIN_POSITION_LIQUIDITY ?? 10_000),
+    );
+    const minPoolLiquidity = m.getParameter<bigint>(
+        "minPoolLiquidity",
+        BigInt(process.env.RHP_MIN_POOL_LIQUIDITY ?? 0),
+    );
 
     const ratehopperUniV3Positions = m.contract(
         "RatehopperUniV3Positions",
@@ -100,6 +127,8 @@ export default buildModule("DeployRatehopperUniV3Positions", (m) => {
             maxFeeBps,
             initialAdmin,
             timelockArg,
+            minPoolLiquidity,
+            minPositionLiquidity,
         ],
         timelock ? { after: [timelock] } : undefined,
     );

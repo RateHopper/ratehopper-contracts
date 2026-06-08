@@ -13,16 +13,15 @@ interface IUniswapV3Pool {
     /// @param amount0 The amount of token0 to send
     /// @param amount1 The amount of token1 to send
     /// @param data Any data to be passed through to the callback
-    function flash(
-        address recipient,
-        uint256 amount0,
-        uint256 amount1,
-        bytes calldata data
-    ) external;
+    function flash(address recipient, uint256 amount0, uint256 amount1, bytes calldata data) external;
 
     /// @notice Returns the contract address of token0
     /// @return The address of token0
     function token0() external view returns (address);
+
+    /// @notice Returns the contract address of token1
+    /// @return The address of token1
+    function token1() external view returns (address);
 
     /// @notice The current price + tick of the pool, packed for gas efficiency.
     /// @return sqrtPriceX96 The current price of the pool as a Q64.96 sqrt(token1/token0).

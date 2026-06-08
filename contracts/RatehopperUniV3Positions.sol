@@ -41,6 +41,17 @@ import {IProtocolRegistry} from "./interfaces/IProtocolRegistry.sol";
 ///         revert at the first `_safeApprove` call. Adding support for any
 ///         non-WETH/USDC token requires switching `_safeApprove` to
 ///         `SafeERC20.forceApprove` via the Safe module.
+///
+///         FEE-HARVEST CAVEAT (I-1 informational): LP NFTs are minted to the
+///         Safe (`recipient = _onBehalfOf`), NOT held by this contract. The
+///         protocol's `feeCollectBps` is only applied when fees are harvested
+///         through `collectLp()` / `closeLp()` (which route `tokensOwed`
+///         through this contract before forwarding the remainder to the Safe).
+///         A Safe owner CAN call Uniswap V3 `NonfungiblePositionManager.collect()`
+///         directly and receive accrued fees without paying `feeCollectBps`.
+///         This is by design — user funds are never at risk and no third party
+///         can steal fees — but protocol fee accrual depends on harvests going
+///         through `collectLp()` / `closeLp()` rather than direct NPM calls.
 contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
@@ -119,8 +130,8 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///         LP + swap pools in `openLp`/`closeLp` pre-flight). Defense in
     ///         depth on top of the
     ///         fee-tier allow-list — protects against allow-listed pools that
-    ///         drain in the future. Defaults to 0 (disabled). Owner-mutable
-    ///         via `setMinPoolLiquidity`.
+    ///         drain in the future. Set at construction (`_minPoolLiquidity`);
+    ///         0 disables the check. Owner-mutable via `setMinPoolLiquidity`.
     uint128 public minPoolLiquidity;
 
     /// @notice Floor on the `liquidity` returned by NPM `mint` inside
@@ -128,8 +139,8 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///         can suffer the `liquidityToRemove == 0` partial-close path
     ///         (basis decrements but principal does not move); enforcing a
     ///         floor at mint time keeps the protocol away from that regime.
-    ///         Defaults to 0 (disabled). Owner-mutable via
-    ///         `setMinPositionLiquidity`.
+    ///         Set at construction (`_minPositionLiquidity`); 0 disables the
+    ///         check. Owner-mutable via `setMinPositionLiquidity`.
     uint128 public minPositionLiquidity;
 
     // SwapRouter02 `exactInputSingle` selector. Verify with:
@@ -233,7 +244,9 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         uint16 _feeCollectBps,
         uint16 _maxFeeBps,
         address _initialAdmin,
-        address _timelock
+        address _timelock,
+        uint128 _minPoolLiquidity,
+        uint128 _minPositionLiquidity
     ) {
         if (_initialAdmin == address(0)) revert ZeroAddress();
         if (_timelock == address(0)) revert ZeroAddress();
@@ -263,6 +276,8 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         treasury = _treasury;
         performanceFeeBps = _performanceFeeBps;
         feeCollectBps = _feeCollectBps;
+        minPoolLiquidity = _minPoolLiquidity;
+        minPositionLiquidity = _minPositionLiquidity;
 
         // Default allow-list: the three liquid Base WETH/USDC tiers. Excludes
         // 10000 deliberately — that pool is thin and is the cheap target for
@@ -282,8 +297,8 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         emit PerformanceFeeBpsUpdated(0, _performanceFeeBps);
         emit FeeCollectBpsUpdated(0, _feeCollectBps);
         emit MaxSlippageBpsUpdated(0, maxSlippageBps);
-        emit MinPoolLiquidityUpdated(0, 0);
-        emit MinPositionLiquidityUpdated(0, 0);
+        emit MinPoolLiquidityUpdated(0, _minPoolLiquidity);
+        emit MinPositionLiquidityUpdated(0, _minPositionLiquidity);
         emit FeeTierAllowedUpdated(100, false, true);
         emit FeeTierAllowedUpdated(500, false, true);
         emit FeeTierAllowedUpdated(3000, false, true);
@@ -338,12 +353,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         uint256 expectedSwapOut,
         uint16 slippageBps,
         uint256 deadline
-    )
-        external
-        nonReentrant
-        onlyOperatorOrSafe(_onBehalfOf)
-        returns (uint256 tokenId)
-    {
+    ) external nonReentrant onlyOperatorOrSafe(_onBehalfOf) returns (uint256 tokenId) {
         if (block.timestamp > deadline) revert DeadlineExpired();
         if (usdcAmount == 0) revert InvalidUsdcAmount();
         if (slippageBps == 0) revert SlippageTooLow();
@@ -577,13 +587,15 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
                 0,
                 abi.encodeCall(
                     INonfungiblePositionManager.decreaseLiquidity,
-                    (INonfungiblePositionManager.DecreaseLiquidityParams({
-                        tokenId: tokenId,
-                        liquidity: liquidityToRemove,
-                        amount0Min: decreaseAmount0Min,
-                        amount1Min: decreaseAmount1Min,
-                        deadline: deadline
-                    }))
+                    (
+                        INonfungiblePositionManager.DecreaseLiquidityParams({
+                            tokenId: tokenId,
+                            liquidity: liquidityToRemove,
+                            amount0Min: decreaseAmount0Min,
+                            amount1Min: decreaseAmount1Min,
+                            deadline: deadline
+                        })
+                    )
                 ),
                 7
             );
@@ -680,11 +692,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///         backend operator (`registry.safeOperator()`).
     /// @param  _onBehalfOf     The Safe that owns the LP position.
     /// @param  tokenId  Uniswap V3 LP NFT id (owned by `_onBehalfOf`).
-    function collectLp(address _onBehalfOf, uint256 tokenId)
-        external
-        nonReentrant
-        onlyOperatorOrSafe(_onBehalfOf)
-    {
+    function collectLp(address _onBehalfOf, uint256 tokenId) external nonReentrant onlyOperatorOrSafe(_onBehalfOf) {
         // Reject tokenIds the protocol does not manage: only positions opened
         // via `openLp` ever populate `residualBasisUsd6Of`. Without this gate
         // the Safe or `safeOperator` could route any Safe-owned WETH/USDC NPM
@@ -742,24 +750,21 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
 
     /// @dev Module-mediated `POSITION_MANAGER.collect` for the full owed
     ///      balance, sent to `recipient`. No fee logic — pure plumbing.
-    function _collectToRecipient(
-        address _onBehalfOf,
-        uint256 tokenId,
-        address recipient,
-        uint8 step
-    ) internal {
+    function _collectToRecipient(address _onBehalfOf, uint256 tokenId, address recipient, uint8 step) internal {
         _safeExec(
             _onBehalfOf,
             address(POSITION_MANAGER),
             0,
             abi.encodeCall(
                 INonfungiblePositionManager.collect,
-                (INonfungiblePositionManager.CollectParams({
-                    tokenId: tokenId,
-                    recipient: recipient,
-                    amount0Max: type(uint128).max,
-                    amount1Max: type(uint128).max
-                }))
+                (
+                    INonfungiblePositionManager.CollectParams({
+                        tokenId: tokenId,
+                        recipient: recipient,
+                        amount0Max: type(uint128).max,
+                        amount1Max: type(uint128).max
+                    })
+                )
             ),
             step
         );
@@ -863,12 +868,24 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         if (POSITION_MANAGER.ownerOf(tokenId) != _onBehalfOf) revert LpNotOnSafe();
     }
 
-    /// @notice Validate a Uniswap V3 pool address: must exist, be initialized,
-    ///         and (if `minPoolLiquidity > 0`) hold at least that much
-    ///         in-range liquidity. Returns the pool's `sqrtPriceX96` so the
-    ///         caller doesn't need a second SLOAD.
+    /// @notice Validate a Uniswap V3 pool address: must exist, hold the
+    ///         constructor-pinned WETH/USDC pair, be initialized, and (if
+    ///         `minPoolLiquidity > 0`) hold at least that much in-range
+    ///         liquidity. Returns the pool's `sqrtPriceX96` so the caller
+    ///         doesn't need a second SLOAD.
+    /// @dev    The pair assertion (I-3) is defense-in-depth: every caller
+    ///         resolves the pool via `UNISWAP_V3_FACTORY.getPool(WETH, USDC,
+    ///         tier)`, which already returns the canonically-sorted WETH/USDC
+    ///         pool, and `_collectLp` only forwards a position this contract
+    ///         minted. Asserting `token0/token1` here keeps the spot-price
+    ///         read (used to value the WETH leg) provably bound to WETH/USDC,
+    ///         so a future caller cannot route valuation through an unrelated
+    ///         pool.
     function _validatePool(address pool) internal view returns (uint160 sqrtPriceX96) {
         if (pool == address(0)) revert PoolDoesNotExist();
+        if (IUniswapV3Pool(pool).token0() != address(WETH) || IUniswapV3Pool(pool).token1() != address(USDC)) {
+            revert WrongTokenPair();
+        }
         (sqrtPriceX96, , , , , , ) = IUniswapV3Pool(pool).slot0();
         if (sqrtPriceX96 == 0) revert PoolNotInitialized();
         uint128 floor = minPoolLiquidity;
@@ -1012,8 +1029,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         uint256 amount0Out;
         uint256 amount1Out;
         uint128 liquidityMinted;
-        (tokenId, liquidityMinted, amount0Out, amount1Out) =
-            abi.decode(ret, (uint256, uint128, uint256, uint256));
+        (tokenId, liquidityMinted, amount0Out, amount1Out) = abi.decode(ret, (uint256, uint128, uint256, uint256));
         // Enforce the minted-liquidity floor. Dust-sized positions are the
         // class of LP that can hit the L-4 desync (partial close decrements
         // basis but `liquidityToRemove` truncates to zero); keeping mint above
