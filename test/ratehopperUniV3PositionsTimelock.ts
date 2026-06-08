@@ -54,13 +54,26 @@ describe("RatehopperUniV3Positions - Timelock Bypass Regression", function () {
             MAX_FEE_BPS,
             admin.address,
             await timelock.getAddress(),
+            0, // _minPoolLiquidity
+            0, // _minPositionLiquidity
         );
         await rhp.waitForDeployment();
 
         const DEFAULT_ADMIN_ROLE = await rhp.DEFAULT_ADMIN_ROLE();
         const CRITICAL_ROLE = await rhp.CRITICAL_ROLE();
 
-        return { rhp, protocolRegistry, timelock, deployer, admin, treasury, attacker, otherTreasury, DEFAULT_ADMIN_ROLE, CRITICAL_ROLE };
+        return {
+            rhp,
+            protocolRegistry,
+            timelock,
+            deployer,
+            admin,
+            treasury,
+            attacker,
+            otherTreasury,
+            DEFAULT_ADMIN_ROLE,
+            CRITICAL_ROLE,
+        };
     }
 
     describe("Direct admin calls", function () {
@@ -111,8 +124,18 @@ describe("RatehopperUniV3Positions - Timelock Bypass Regression", function () {
             expect(await rhp.hasRole(CRITICAL_ROLE, attacker.address)).to.be.true;
 
             // Even with CRITICAL_ROLE, the attacker is not the timelock - must revert
-            await expect(rhp.connect(attacker).setTreasury(otherTreasury.address))
-                .to.be.revertedWithCustomError(rhp, "OnlyTimelock");
+            await expect(rhp.connect(attacker).setTreasury(otherTreasury.address)).to.be.revertedWithCustomError(
+                rhp,
+                "OnlyTimelock",
+            );
+            await expect(rhp.connect(attacker).setPerformanceFeeBps(500)).to.be.revertedWithCustomError(
+                rhp,
+                "OnlyTimelock",
+            );
+            await expect(rhp.connect(attacker).setFeeCollectBps(500)).to.be.revertedWithCustomError(
+                rhp,
+                "OnlyTimelock",
+            );
         });
     });
 
@@ -157,8 +180,10 @@ describe("RatehopperUniV3Positions - Timelock Bypass Regression", function () {
             const { rhp, timelock, otherTreasury } = await loadFixture(deployFixture);
             // Direct call as the timelock's deployer/proposer signer - msg.sender will be that EOA, not timelock address
             const [deployer] = await ethers.getSigners();
-            await expect(rhp.connect(deployer).setTreasury(otherTreasury.address))
-                .to.be.revertedWithCustomError(rhp, "AccessControlUnauthorizedAccount");
+            await expect(rhp.connect(deployer).setTreasury(otherTreasury.address)).to.be.revertedWithCustomError(
+                rhp,
+                "AccessControlUnauthorizedAccount",
+            );
         });
     });
 });
