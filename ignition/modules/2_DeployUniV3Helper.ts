@@ -9,11 +9,24 @@ import {
     WETH_ADDRESS,
 } from "../../contractAddresses";
 
+const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+
+// Fail fast with a clear, named message instead of a cryptic ethers ABI-encode
+// error deep in execution when a required constructor address is blank/missing.
+function requireAddress(label: string, value: string): void {
+    if (!ADDRESS_RE.test(value)) {
+        throw new Error(
+            `DeployUniV3Helper: ${label} must be a valid address but got "${value}". ` +
+                "Set the corresponding env var in your .env before deploying.",
+        );
+    }
+}
+
 /**
  * Combined deployment module for TimelockController + RatehopperUniV3Positions.
  *
  * The TimelockController is delegated to the shared `TimelockControllerModule`
- * sub-module, which is ALSO consumed by `DeployAll`. Ignition deduplicates the
+ * sub-module, which is ALSO consumed by `DeployCore`. Ignition deduplicates the
  * `TimelockControllerModule#TimelockController` future across runs via the
  * journal, so whichever deploy command runs first owns the deployment and the
  * later command(s) reuse that same address automatically. To bypass the shared
@@ -65,19 +78,19 @@ import {
  *  - DEPLOYER_PRIVATE_KEY:      Deployer key (set in hardhat.config.ts).
  *
  * Usage:
- *   npx hardhat ignition deploy ignition/modules/DeployRatehopperUniV3Positions.ts \
+ *   npx hardhat ignition deploy ignition/modules/2_DeployUniV3Helper.ts \
  *     --network base --verify
  */
-export default buildModule("DeployRatehopperUniV3Positions", (m) => {
+export default buildModule("DeployUniV3Helper", (m) => {
     // ── Timelock ───────────────────────────────────────────────────────────
     // Three modes:
     //   1. `RHP_TIMELOCK` set  → reuse the supplied address (no deploy here).
     //   2. `RHP_TIMELOCK` unset → consume the shared TimelockControllerModule.
     //      Because Ignition keys futures by `<moduleName>#<contractName>`, the
     //      sub-module's `TimelockControllerModule#TimelockController` is the
-    //      same future the `DeployAll` module references. The journal at
+    //      same future the `DeployCore` module references. The journal at
     //      `ignition/deployments/chain-<chainId>/` deduplicates across runs,
-    //      so if `yarn deploy` already deployed it, `yarn deploy:rhp` reuses
+    //      so if `yarn deploy:1_core` already deployed it, `yarn deploy:2_univ3_helper` reuses
     //      that exact address.
     //   3. First-ever run → sub-module deploys it; params (TIMELOCK_ADMIN,
     //      TIMELOCK_DELAY) come from env vars inside TimelockControllerModule.
@@ -91,12 +104,18 @@ export default buildModule("DeployRatehopperUniV3Positions", (m) => {
     const timelockArg: any = timelock ?? reuseTimelockAddr;
 
     // ── RHP ────────────────────────────────────────────────────────────────
-    const registry = m.getParameter<string>("registry", process.env.RHP_REGISTRY ?? PROTOCOL_REGISTRY_ADDRESS);
-    const treasury = m.getParameter<string>("treasury", process.env.RHP_TREASURY ?? "");
-    const initialAdmin = m.getParameter<string>(
-        "initialAdmin",
-        process.env.RHP_INITIAL_ADMIN ?? process.env.ADMIN_ADDRESS ?? "",
-    );
+    const registryAddr = process.env.RHP_REGISTRY ?? PROTOCOL_REGISTRY_ADDRESS;
+    const treasuryAddr = process.env.RHP_TREASURY ?? "";
+    const initialAdminAddr = process.env.RHP_INITIAL_ADMIN ?? process.env.ADMIN_ADDRESS ?? "";
+
+    requireAddress("registry (RHP_REGISTRY / PROTOCOL_REGISTRY_ADDRESS)", registryAddr);
+    requireAddress("treasury (RHP_TREASURY)", treasuryAddr);
+    requireAddress("initialAdmin (RHP_INITIAL_ADMIN / ADMIN_ADDRESS)", initialAdminAddr);
+    if (reuseTimelockAddr) requireAddress("timelock (RHP_TIMELOCK)", reuseTimelockAddr);
+
+    const registry = m.getParameter<string>("registry", registryAddr);
+    const treasury = m.getParameter<string>("treasury", treasuryAddr);
+    const initialAdmin = m.getParameter<string>("initialAdmin", initialAdminAddr);
     const performanceFeeBps = m.getParameter<number>(
         "performanceFeeBps",
         Number(process.env.RHP_PERFORMANCE_FEE_BPS ?? 1000),
@@ -133,5 +152,5 @@ export default buildModule("DeployRatehopperUniV3Positions", (m) => {
         timelock ? { after: [timelock] } : undefined,
     );
 
-    return timelock ? { timelock, ratehopperUniV3Positions } : { ratehopperUniV3Positions };
+    return { ratehopperUniV3Positions, ...(timelock ? { timelock } : {}) };
 });

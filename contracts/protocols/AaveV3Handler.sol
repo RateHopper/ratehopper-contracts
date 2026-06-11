@@ -37,8 +37,6 @@ contract AaveV3Handler is BaseProtocolHandler {
         return currentVariableDebt;
     }
 
-
-
     function switchIn(
         address fromAsset,
         address toAsset,
@@ -119,7 +117,12 @@ contract AaveV3Handler is BaseProtocolHandler {
         aaveV3Pool.borrow(toAsset, amount, 2, 0, onBehalfOf);
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) {
+    function supply(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata /* extraData */
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         IERC20(asset).forceApprove(address(aaveV3Pool), amount);
@@ -127,13 +130,23 @@ contract AaveV3Handler is BaseProtocolHandler {
         IERC20(asset).forceApprove(address(aaveV3Pool), 0);
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) {
+    function borrow(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata /* extraData */
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         aaveV3Pool.borrow(asset, amount, 2, 0, onBehalfOf);
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) public onlyAuthorizedCaller(onBehalfOf) {
+    function repay(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata /* extraData */
+    ) public onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         // Skip repayment if amount is 1 wei or less to prevent Aave v3 InvalidBurnAmount error
@@ -146,7 +159,12 @@ contract AaveV3Handler is BaseProtocolHandler {
         IERC20(asset).forceApprove(address(aaveV3Pool), 0);
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) {
+    function withdraw(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata /* extraData */
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         // Get aToken address for the asset
@@ -174,13 +192,8 @@ contract AaveV3Handler is BaseProtocolHandler {
         address user,
         DataTypes.ReserveData memory reserveData
     ) internal view returns (uint256) {
-        (
-            uint256 totalCollateralBase,
-            uint256 totalDebtBase,
-            ,
-            uint256 currentLiquidationThreshold,
-            ,
-        ) = aaveV3Pool.getUserAccountData(user);
+        (uint256 totalCollateralBase, uint256 totalDebtBase, , uint256 currentLiquidationThreshold, , ) = aaveV3Pool
+            .getUserAccountData(user);
 
         uint256 userATokenBalance = IERC20(reserveData.aTokenAddress).balanceOf(user);
         uint256 availableLiquidity = IERC20(asset).balanceOf(reserveData.aTokenAddress);
@@ -194,7 +207,8 @@ contract AaveV3Handler is BaseProtocolHandler {
         (, , uint256 assetLT, , , , , , , ) = dataProvider.getReserveConfigurationData(asset);
         if (assetLT == 0) return 0;
 
-        uint256 currentWeightedCollateralBase = (totalCollateralBase * currentLiquidationThreshold) / LIQ_THRESHOLD_PRECISION;
+        uint256 currentWeightedCollateralBase = (totalCollateralBase * currentLiquidationThreshold) /
+            LIQ_THRESHOLD_PRECISION;
 
         if (currentWeightedCollateralBase <= totalDebtBase) return 0;
 

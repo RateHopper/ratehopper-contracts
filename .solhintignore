@@ -1,0 +1,4 @@
+# Vendored / external code — third-party libraries and protocol ABIs that we
+# do not control. Lint only first-party contracts.
+contracts/dependencies/
+contracts/interfaces/

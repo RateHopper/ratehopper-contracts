@@ -13,7 +13,6 @@ import "../ProtocolRegistry.sol";
  * @notice This contract provides common functionality and security modifiers for all protocol handlers
  */
 abstract contract BaseProtocolHandler is IProtocolHandler {
-
     /// @notice The Uniswap V3 factory address used for pool validation
     address public immutable uniswapV3Factory;
 
@@ -61,7 +60,7 @@ abstract contract BaseProtocolHandler is IProtocolHandler {
         uniswapV3Factory = _uniswapV3Factory;
         registry = ProtocolRegistry(_registry);
     }
-    
+
     /**
      * @dev Internal function to validate collateral assets array
      * @param collateralAssets Array of collateral assets to validate
@@ -69,10 +68,10 @@ abstract contract BaseProtocolHandler is IProtocolHandler {
     function _validateCollateralAssets(CollateralAsset[] memory collateralAssets) internal pure {
         require(collateralAssets.length > 0, "No collateral assets provided");
         require(collateralAssets.length <= 20, "Too many collateral assets");
-        
+
         for (uint256 i = 0; i < collateralAssets.length; i++) {
             require(collateralAssets[i].asset != address(0), "Invalid collateral asset address");
             require(collateralAssets[i].amount > 0, "Invalid collateral amount");
         }
     }
-} 
+}

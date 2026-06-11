@@ -46,10 +46,14 @@ export const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
 export const ADMIN_ADDRESS = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
 
 // RateHopper canonical Base deployments — referenced by downstream deploys
-// (e.g. DeployRatehopperUniV3Positions reads PROTOCOL_REGISTRY_ADDRESS to wire RHP
-// to the existing registry). Update these here when a new authoritative
-// deployment ships.
-export const PROTOCOL_REGISTRY_ADDRESS = "0xcBf89580f582197450fB40f0313206B3aa82435F";
+// (e.g. 2_DeployUniV3Helper reads PROTOCOL_REGISTRY_ADDRESS to wire RHP
+// to the existing registry).
+//
+// AUTO-MANAGED: `yarn deploy:1_core` runs scripts/syncRegistryAddress.js as its
+// final step, rewriting the address below to the freshly deployed
+// ProtocolRegistry. Commit the resulting diff. Only edit by hand if pointing at
+// a registry deployed outside this repo's Ignition flow.
+export const PROTOCOL_REGISTRY_ADDRESS = "0x20b2003CEF180DBbcca9fAf33Ddb1D635fdD2F6c";
 
 // Protocol enum
 export enum Protocol {

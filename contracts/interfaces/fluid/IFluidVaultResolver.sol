@@ -11,5 +11,7 @@ interface IFluidVaultResolver {
         view
         returns (Structs.UserPosition[] memory userPositions_, Structs.VaultEntireData[] memory vaultsData_);
 
-    function positionByNftId(uint256 nftId) external view returns (Structs.UserPosition memory userPosition_, Structs.VaultEntireData memory vaultData_);
+    function positionByNftId(
+        uint256 nftId
+    ) external view returns (Structs.UserPosition memory userPosition_, Structs.VaultEntireData memory vaultData_);
 }

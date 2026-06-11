@@ -111,7 +111,10 @@ contract ProtocolRegistry is AccessControl {
         return tokenToCContract[token];
     }
 
-    function batchSetTokenMContracts(address[] calldata tokens, address[] calldata mContracts) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function batchSetTokenMContracts(
+        address[] calldata tokens,
+        address[] calldata mContracts
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (tokens.length != mContracts.length) revert ArrayLengthMismatch();
 
         for (uint256 i = 0; i < tokens.length; i++) {
@@ -121,7 +124,10 @@ contract ProtocolRegistry is AccessControl {
         }
     }
 
-    function batchSetTokenCContracts(address[] calldata tokens, address[] calldata cContracts) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function batchSetTokenCContracts(
+        address[] calldata tokens,
+        address[] calldata cContracts
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (tokens.length != cContracts.length) revert ArrayLengthMismatch();
 
         for (uint256 i = 0; i < tokens.length; i++) {

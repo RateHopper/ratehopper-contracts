@@ -56,9 +56,9 @@ import {
  *  - DEPLOYER_PRIVATE_KEY:   Deployer private key (in hardhat.config.ts)
  *
  * Usage:
- *  npx hardhat ignition deploy ignition/modules/DeployAll.ts --network base --verify --reset
+ *  npx hardhat ignition deploy ignition/modules/1_DeployCore.ts --network base --verify --reset
  */
-export default buildModule("DeployAll", (m) => {
+export default buildModule("DeployCore", (m) => {
     // ── Validate env vars ──────────────────────────────────────────────
     const adminAddress = process.env.ADMIN_ADDRESS;
     if (!adminAddress) {
@@ -78,7 +78,7 @@ export default buildModule("DeployAll", (m) => {
     const DEFAULT_ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
     // ── 1. TimelockController (shared sub-module — Ignition deduplicates
-    //       the future across runs, so `yarn deploy:rhp` later reuses this
+    //       the future across runs, so `yarn deploy:2_univ3_helper` later reuses this
     //       same address). Params come from TIMELOCK_ADMIN / TIMELOCK_DELAY
     //       env vars in TimelockControllerModule, both with fallbacks to
     //       ADMIN_ADDRESS / 2 days.

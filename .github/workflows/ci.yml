@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-test-coverage:
+    name: Lint & branch-coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack (Yarn 4)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Lint Solidity (solhint)
+        run: yarn lint:sol
+
+      - name: Check formatting (prettier)
+        run: yarn format:check
+
+      - name: Compile
+        run: yarn compile
+
+      # Coverage is scoped to the RatehopperUniV3Positions suite. The legacy
+      # debt-swap / protocol-handler suites are Base-fork tests that are not
+      # yet fully covered; running them here would fail the step before the
+      # gate. Expand the --testfiles glob (in package.json `coverage:rhp`) as
+      # coverage for those contracts is brought up.
+      #
+      # BASE_RPC_URL is recommended: an archive RPC secret gives reliable
+      # forking. Without it the config falls back to the public
+      # https://mainnet.base.org endpoint.
+      - name: Run coverage (RatehopperUniV3Positions)
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: yarn coverage:rhp
+
+      - name: Enforce branch-coverage gate
+        run: yarn coverage:check

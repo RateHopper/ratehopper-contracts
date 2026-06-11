@@ -72,10 +72,7 @@ interface IMorphoBase {
 
     /// @notice Whether `authorized` is authorized to modify `authorizer`'s position on all markets.
     /// @dev Anyone is authorized to modify their own positions, regardless of this variable.
-    function isAuthorized(
-        address authorizer,
-        address authorized
-    ) external view returns (bool);
+    function isAuthorized(address authorizer, address authorized) external view returns (bool);
 
     /// @notice The `authorizer`'s current nonce. Used to prevent replay attacks with EIP-712 signatures.
     function nonce(address authorizer) external view returns (uint256);
@@ -280,19 +277,12 @@ interface IMorphoBase {
     /// @param token The token to flash loan.
     /// @param assets The amount of assets to flash loan.
     /// @param data Arbitrary data to pass to the `onMorphoFlashLoan` callback.
-    function flashLoan(
-        address token,
-        uint256 assets,
-        bytes calldata data
-    ) external;
+    function flashLoan(address token, uint256 assets, bytes calldata data) external;
 
     /// @notice Sets the authorization for `authorized` to manage `msg.sender`'s positions.
     /// @param authorized The authorized address.
     /// @param newIsAuthorized The new authorization status.
-    function setAuthorization(
-        address authorized,
-        bool newIsAuthorized
-    ) external;
+    function setAuthorization(address authorized, bool newIsAuthorized) external;
 
     /// @notice Sets the authorization for `authorization.authorized` to manage `authorization.authorizer`'s positions.
     /// @dev Warning: Reverts if the signature has already been submitted.
@@ -300,18 +290,13 @@ interface IMorphoBase {
     /// @dev The nonce is passed as argument to be able to revert with a different error message.
     /// @param authorization The `Authorization` struct.
     /// @param signature The signature.
-    function setAuthorizationWithSig(
-        Authorization calldata authorization,
-        Signature calldata signature
-    ) external;
+    function setAuthorizationWithSig(Authorization calldata authorization, Signature calldata signature) external;
 
     /// @notice Accrues interest for the given market `marketParams`.
     function accrueInterest(MarketParams memory marketParams) external;
 
     /// @notice Returns the data stored on the different `slots`.
-    function extSloads(
-        bytes32[] memory slots
-    ) external view returns (bytes32[] memory);
+    function extSloads(bytes32[] memory slots) external view returns (bytes32[] memory);
 }
 
 /// @dev This interface is inherited by Morpho so that function signatures are checked by the compiler.
@@ -323,14 +308,7 @@ interface IMorphoStaticTyping is IMorphoBase {
     function position(
         Id id,
         address user
-    )
-        external
-        view
-        returns (
-            uint256 supplyShares,
-            uint128 borrowShares,
-            uint128 collateral
-        );
+    ) external view returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral);
 
     /// @notice The state of the market corresponding to `id`.
     /// @dev Warning: `totalSupplyAssets` does not contain the accrued interest since the last interest accrual.
@@ -356,16 +334,7 @@ interface IMorphoStaticTyping is IMorphoBase {
     /// 2s by creating a wrapper contract with functions that take `id` as input instead of `marketParams`.
     function idToMarketParams(
         Id id
-    )
-        external
-        view
-        returns (
-            address loanToken,
-            address collateralToken,
-            address oracle,
-            address irm,
-            uint256 lltv
-        );
+    ) external view returns (address loanToken, address collateralToken, address oracle, address irm, uint256 lltv);
 }
 
 /// @title IMorpho
@@ -376,10 +345,7 @@ interface IMorpho is IMorphoBase {
     /// @notice The state of the position of `user` on the market corresponding to `id`.
     /// @dev Warning: For `feeRecipient`, `p.supplyShares` does not contain the accrued shares since the last interest
     /// accrual.
-    function position(
-        Id id,
-        address user
-    ) external view returns (Position memory p);
+    function position(Id id, address user) external view returns (Position memory p);
 
     /// @notice The state of the market corresponding to `id`.
     /// @dev Warning: `m.totalSupplyAssets` does not contain the accrued interest since the last interest accrual.
@@ -391,7 +357,5 @@ interface IMorpho is IMorphoBase {
     /// @notice The market params corresponding to `id`.
     /// @dev This mapping is not used in Morpho. It is there to enable reducing the cost associated to calldata on layer
     /// 2s by creating a wrapper contract with functions that take `id` as input instead of `marketParams`.
-    function idToMarketParams(
-        Id id
-    ) external view returns (MarketParams memory);
+    function idToMarketParams(Id id) external view returns (MarketParams memory);
 }

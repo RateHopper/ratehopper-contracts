@@ -176,13 +176,13 @@ Create a `.env` file with the following required variables (use `.env.sample` as
 
 ```env
 # Core deploy
-ADMIN_ADDRESS=0x...           # Initial admin and timelock proposer/executor (used by DeployAll AND DeployRatehopperUniV3Positions)
+ADMIN_ADDRESS=0x...           # Initial admin and timelock proposer/executor (used by 1_DeployCore AND 2_DeployUniV3Helper)
 SAFE_OPERATOR_ADDRESS=0x...   # Operator address for Safe interactions
 PAUSER_ADDRESS=0x...          # Address that can pause contracts
 DEPLOYER_PRIVATE_KEY=...      # Private key for deployment
 EXPLORER_KEY=...              # Block explorer API key for verification
 
-# Optional — RatehopperUniV3Positions deploy (yarn deploy:rhp)
+# Optional — RatehopperUniV3Positions deploy (yarn deploy:2_univ3_helper)
 RHP_REGISTRY=0x...            # ProtocolRegistry address. Falls back to PROTOCOL_REGISTRY_ADDRESS in contractAddresses.ts
 RHP_TREASURY=0x...            # Treasury that collects feeCollectBps + performanceFeeBps cuts. REQUIRED.
 RHP_INITIAL_ADMIN=0x...       # DEFAULT_ADMIN_ROLE holder (rescueToken etc.). Falls back to ADMIN_ADDRESS
@@ -191,7 +191,7 @@ RHP_PERFORMANCE_FEE_BPS=1000  # Performance fee on profit at closeLp (bps). Defa
 RHP_FEE_COLLECT_BPS=250       # Fee on accrued LP fees harvested via collectLp/closeLp (bps). Default 250 (2.5%)
 RHP_MAX_FEE_BPS=2000          # Hard upper bound on BOTH fees (bps). Default 2000 (20%)
 
-# Optional — TimelockController inside DeployRatehopperUniV3Positions
+# Optional — TimelockController inside 2_DeployUniV3Helper
 TIMELOCK_ADMIN=0x...          # Proposer + executor on the new timelock. Falls back to ADMIN_ADDRESS
 TIMELOCK_DELAY=172800         # Min delay before queued ops execute (seconds). Default 172800 (2 days)
 ```
@@ -254,16 +254,16 @@ Hardhat Ignition is a declarative deployment framework. Instead of writing imper
 - **Supports `--verify`** to automatically submit contracts to Etherscan after deployment
 - **Supports `--reset`** to wipe previous state and redeploy from scratch
 
-All contracts are defined in a single module at `ignition/modules/DeployAll.ts`. Every step is chained sequentially via `after` dependencies to avoid nonce race conditions.
+The core contracts are defined in a single module at `ignition/modules/1_DeployCore.ts`. Every step is chained sequentially via `after` dependencies to avoid nonce race conditions.
 
 ### Deploy All Contracts
 
 Deploy everything in one command:
 
 ```bash
-yarn deploy
+yarn deploy:1_core
 # or equivalently:
-npx hardhat ignition deploy ignition/modules/DeployAll.ts --network base --verify --reset
+npx hardhat ignition deploy ignition/modules/1_DeployCore.ts --network base --verify --reset
 ```
 
 This deploys all contracts sequentially in a single transaction chain:
@@ -282,9 +282,9 @@ This deploys all contracts sequentially in a single transaction chain:
 `RatehopperUniV3Positions` is deployed separately because it sits on top of an existing `ProtocolRegistry` and needs its own TimelockController for fund-impacting setters.
 
 ```bash
-yarn deploy:rhp
+yarn deploy:2_univ3_helper
 # or equivalently:
-npx hardhat ignition deploy ignition/modules/DeployRatehopperUniV3Positions.ts --network base --verify
+npx hardhat ignition deploy ignition/modules/2_DeployUniV3Helper.ts --network base --verify
 ```
 
 This module by default deploys:
@@ -313,7 +313,7 @@ cat ignition/deployments/chain-8453/deployed_addresses.json
 
 ### Contract Verification
 
-The `--verify` flag on `yarn deploy` may fail due to a known `hardhat-verify` v2.x bug with Etherscan's V2 API (the plugin's GET requests strip the `chainid` parameter). Use the standalone verification script instead:
+The `--verify` flag on `yarn deploy:1_core` may fail due to a known `hardhat-verify` v2.x bug with Etherscan's V2 API (the plugin's GET requests strip the `chainid` parameter). Use the standalone verification script instead:
 
 ```bash
 yarn verify

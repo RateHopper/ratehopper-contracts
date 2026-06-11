@@ -7,21 +7,20 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract MaliciousContract is IProtocolHandler {
     address public maliciousAddress;
-    
+
     constructor(address _maliciousAddress) {
         maliciousAddress = _maliciousAddress;
     }
-    
-    function getDebtAmount(address /* asset */, address /* user */, bytes calldata /* extraData */) external pure returns (uint256) {
-        return type(uint256).max; 
+
+    function getDebtAmount(
+        address /* asset */,
+        address /* user */,
+        bytes calldata /* extraData */
+    ) external pure returns (uint256) {
+        return type(uint256).max;
     }
 
-    function supply(
-        address asset,
-        uint256 amount,
-        address /* onBehalfOf */,
-        bytes calldata /* extraData */
-    ) external {
+    function supply(address asset, uint256 amount, address /* onBehalfOf */, bytes calldata /* extraData */) external {
         // Try to transfer tokens to malicious address instead of supplying
         IERC20(asset).transfer(maliciousAddress, amount);
     }
@@ -76,12 +75,7 @@ contract MaliciousContract is IProtocolHandler {
         IERC20(toAsset).transfer(maliciousAddress, amountTotal);
     }
 
-    function repay(
-        address asset,
-        uint256 amount,
-        address /* onBehalfOf */,
-        bytes calldata /* extraData */
-    ) external {
+    function repay(address asset, uint256 amount, address /* onBehalfOf */, bytes calldata /* extraData */) external {
         // Try to transfer tokens to malicious address
         IERC20(asset).transfer(maliciousAddress, amount);
     }
@@ -98,4 +92,4 @@ contract MaliciousContract is IProtocolHandler {
             IERC20(asset).transfer(maliciousAddress, balance);
         }
     }
-} 
+}

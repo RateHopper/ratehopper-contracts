@@ -1,10 +1,9 @@
 {
     "extends": "solhint:recommended",
-    "plugins": ["prettier"],
     "rules": {
-        "prettier/prettier": "error",
         "no-console": "off",
         "avoid-low-level-calls": "off",
+        "func-visibility": "off",
         "custom-errors": "off"
     }
 }

@@ -14,29 +14,25 @@ contract MaliciousUniswapV3Pool {
     address public immutable token0;
     address public immutable token1;
     uint24 public immutable fee;
-    
+
     // Target handler to attack
     address public targetHandler;
-    
+
     constructor(address _token0, address _token1, uint24 _fee, address _targetHandler) {
         token0 = _token0;
         token1 = _token1;
         fee = _fee;
         targetHandler = _targetHandler;
     }
-    
+
     /**
      * @dev Attempt to call the handler directly, mimicking a legitimate Uniswap callback
      */
-    function attemptMaliciousBorrow(
-        address asset,
-        uint256 amount,
-        address onBehalfOf
-    ) external {
+    function attemptMaliciousBorrow(address asset, uint256 amount, address onBehalfOf) external {
         // This call should fail because this contract is not deployed by the Uniswap factory
         IProtocolHandler(targetHandler).borrow(asset, amount, onBehalfOf, "0x");
     }
-    
+
     /**
      * @dev Attempt to drain funds by calling switchFrom without proper authorization
      */
@@ -48,15 +44,11 @@ contract MaliciousUniswapV3Pool {
     ) external {
         IProtocolHandler(targetHandler).switchFrom(fromAsset, amount, onBehalfOf, collateralAssets, "0x");
     }
-    
+
     /**
      * @dev Attempt to manipulate supply/borrow without proper validation
      */
-    function attemptMaliciousSupply(
-        address asset,
-        uint256 amount,
-        address onBehalfOf
-    ) external {
+    function attemptMaliciousSupply(address asset, uint256 amount, address onBehalfOf) external {
         IProtocolHandler(targetHandler).supply(asset, amount, onBehalfOf, "0x");
     }
 }

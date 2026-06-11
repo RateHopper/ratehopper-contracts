@@ -18,7 +18,11 @@ contract MorphoHandler is BaseProtocolHandler {
 
     IMorpho public immutable morpho;
 
-    constructor(address _MORPHO_ADDRESS, address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
+    constructor(
+        address _MORPHO_ADDRESS,
+        address _UNISWAP_V3_FACTORY,
+        address _REGISTRY_ADDRESS
+    ) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
         morpho = IMorpho(_MORPHO_ADDRESS);
     }
 
@@ -106,7 +110,12 @@ contract MorphoHandler is BaseProtocolHandler {
         IERC20(marketParams.collateralToken).forceApprove(address(morpho), 0);
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) {
+    function supply(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata extraData
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
@@ -116,7 +125,12 @@ contract MorphoHandler is BaseProtocolHandler {
         IERC20(asset).forceApprove(address(morpho), 0);
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) {
+    function borrow(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata extraData
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
@@ -124,7 +138,12 @@ contract MorphoHandler is BaseProtocolHandler {
         morpho.borrow(marketParams, amount, 0, onBehalfOf, address(this));
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public onlyAuthorizedCaller(onBehalfOf) {
+    function repay(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata extraData
+    ) public onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(extraData, (MarketParams, uint256));
@@ -135,7 +154,7 @@ contract MorphoHandler is BaseProtocolHandler {
             // https://docs.morpho.org/build/borrow/concepts/market-mechanics#full-repayment-shares-first
             Id marketId = marketParams.id();
             Market memory m = morpho.market(marketId);
-            approvalAmount = borrowShares.toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares) * 120 / 100;
+            approvalAmount = (borrowShares.toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares) * 120) / 100;
         } else {
             approvalAmount = amount;
         }
@@ -152,7 +171,12 @@ contract MorphoHandler is BaseProtocolHandler {
         IERC20(asset).forceApprove(address(morpho), 0);
     }
 
-    function withdraw(address /* asset */, uint256 amount, address onBehalfOf, bytes calldata extraData) external override onlyAuthorizedCaller(onBehalfOf) {
+    function withdraw(
+        address /* asset */,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata extraData
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         // Decode market parameters from extraData
         (MarketParams memory marketParams, ) = abi.decode(extraData, (MarketParams, uint256));
         require(registry.isWhitelisted(marketParams.collateralToken), "Asset is not whitelisted");

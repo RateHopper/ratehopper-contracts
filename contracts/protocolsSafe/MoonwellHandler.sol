@@ -16,7 +16,11 @@ contract MoonwellHandler is BaseProtocolHandler {
 
     address public immutable COMPTROLLER;
 
-    constructor(address _comptroller, address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
+    constructor(
+        address _comptroller,
+        address _UNISWAP_V3_FACTORY,
+        address _REGISTRY_ADDRESS
+    ) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
         COMPTROLLER = _comptroller;
     }
 
@@ -157,7 +161,7 @@ contract MoonwellHandler is BaseProtocolHandler {
     ) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
         _validateCollateralAssets(collateralAssets);
-   
+
         address fromContract = getMContract(fromAsset);
 
         if (fromContract == address(0)) revert TokenNotRegistered();
@@ -238,7 +242,7 @@ contract MoonwellHandler is BaseProtocolHandler {
 
         for (uint256 i = 0; i < collateralAssets.length; i++) {
             require(registry.isWhitelisted(collateralAssets[i].asset), "Collateral asset is not whitelisted");
-            
+
             address collateralContract = getMContract(collateralAssets[i].asset);
             // use balanceOf() because collateral amount is slightly decreased when switching from Fluid
             uint256 currentBalance = IERC20(collateralAssets[i].asset).balanceOf(address(this));
@@ -289,9 +293,14 @@ contract MoonwellHandler is BaseProtocolHandler {
         require(successTransfer, "Transfer transaction failed");
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external onlyAuthorizedCaller(onBehalfOf) {
+    function supply(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata /* extraData */
+    ) external onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-        
+
         address mContract = getMContract(asset);
         if (mContract == address(0)) revert TokenNotRegistered();
 
@@ -323,7 +332,12 @@ contract MoonwellHandler is BaseProtocolHandler {
         );
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external onlyAuthorizedCaller(onBehalfOf) {
+    function borrow(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata /* extraData */
+    ) external onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         address mContract = getMContract(asset);
@@ -346,7 +360,12 @@ contract MoonwellHandler is BaseProtocolHandler {
         require(successTransfer, "Transfer transaction failed");
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) public override onlyAuthorizedCaller(onBehalfOf) {
+    function repay(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata /* extraData */
+    ) public override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         address mContract = getMContract(asset);
@@ -365,7 +384,12 @@ contract MoonwellHandler is BaseProtocolHandler {
         IERC20(asset).forceApprove(address(mContract), 0);
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata /* extraData */) external override onlyAuthorizedCaller(onBehalfOf) {
+    function withdraw(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata /* extraData */
+    ) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         address mTokenAddress = getMContract(asset);
