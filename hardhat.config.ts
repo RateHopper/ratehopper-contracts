@@ -9,6 +9,10 @@ require("@openzeppelin/hardhat-upgrades");
 
 const baseUrl = process.env.BASE_RPC_URL || "https://mainnet.base.org";
 
+// Only configure signing accounts when a deployer key is present. Hardhat rejects
+// `[undefined]`, which breaks `compile`/`coverage` in CI where no key is set.
+const deployerAccounts = process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [];
+
 const config: HardhatUserConfig = {
     solidity: {
         compilers: [
@@ -48,19 +52,19 @@ const config: HardhatUserConfig = {
             url: baseUrl,
             chainId: 8453,
             timeout: 10_000_000,
-            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
+            accounts: deployerAccounts,
             gasPrice: "auto",
             gasMultiplier: 1.2,
         },
         baseSepolia: {
             url: "https://sepolia.base.org",
             chainId: 84532,
-            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
+            accounts: deployerAccounts,
         },
         sepolia: {
             url: "https://eth-sepolia.public.blastapi.io",
             chainId: 11155111,
-            accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
+            accounts: deployerAccounts,
         },
         localhost: {
             url: "http://localhost:8545",
