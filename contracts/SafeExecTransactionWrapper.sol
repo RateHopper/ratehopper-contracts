@@ -12,13 +12,9 @@ import "./interfaces/safe/ISafe.sol";
 contract SafeExecTransactionWrapper {
     error TransactionExecutionFailed();
 
-    event RateHopperSuccess(
-        bytes metadata
-    );
+    event RateHopperSuccess(bytes metadata);
 
-    event RateHopperFailure(
-        bytes metadata
-    );
+    event RateHopperFailure(bytes metadata);
 
     /**
      * @notice Executes a transaction on a Safe wallet and reverts if it fails

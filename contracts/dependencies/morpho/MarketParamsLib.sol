@@ -13,14 +13,9 @@ library MarketParamsLib {
     uint256 internal constant MARKET_PARAMS_BYTES_LENGTH = 5 * 32;
 
     /// @notice Returns the id of the market `marketParams`.
-    function id(
-        MarketParams memory marketParams
-    ) internal pure returns (Id marketParamsId) {
+    function id(MarketParams memory marketParams) internal pure returns (Id marketParamsId) {
         assembly ("memory-safe") {
-            marketParamsId := keccak256(
-                marketParams,
-                MARKET_PARAMS_BYTES_LENGTH
-            )
+            marketParamsId := keccak256(marketParams, MARKET_PARAMS_BYTES_LENGTH)
         }
     }
 }

@@ -294,7 +294,9 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
             uint256 numerator = amountInToAssetDecimals * protocolFee;
             protocolFeeAmount = (numerator + 9999) / 10000; // Ceiling division
         }
-        uint256 amountInMax = decoded.paraswapParams.srcAmount == 0 ? amountInToAssetDecimals : decoded.paraswapParams.srcAmount;
+        uint256 amountInMax = decoded.paraswapParams.srcAmount == 0
+            ? amountInToAssetDecimals
+            : decoded.paraswapParams.srcAmount;
         uint256 amountTotal = amountInMax + flashloanFee + protocolFeeAmount;
 
         address fromHandler = protocolHandlers[decoded.fromProtocol];
@@ -393,7 +395,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         bytes memory _txParams
     ) internal {
         require(_txParams.length >= 4, "Invalid calldata");
-        
+
         IERC20(srcAsset).forceApprove(registry.paraswapV6(), amount);
         (bool success, ) = registry.paraswapV6().call(_txParams);
         require(success, "Token swap by paraSwap failed");
@@ -406,7 +408,6 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         //remove approval
         IERC20(srcAsset).forceApprove(registry.paraswapV6(), 0);
     }
-
 
     /**
      * @notice Exits a position by repaying debt and optionally withdrawing collateral
@@ -430,7 +431,10 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     ) external nonReentrant onlyOwnerOrOperator(_onBehalfOf) whenNotPaused {
         require(_debtAsset != address(0), "Invalid debt asset address");
         // Allow _debtAmount == 0 only when withdrawing collateral (collateral-only withdrawal)
-        require(_debtAmount >= 10000 || (_debtAmount == 0 && _withdrawCollateral), "Debt amount below minimum threshold");
+        require(
+            _debtAmount >= 10000 || (_debtAmount == 0 && _withdrawCollateral),
+            "Debt amount below minimum threshold"
+        );
         if (_withdrawCollateral) {
             require(_collateralAssets.length > 0, "Must withdraw at least one collateral asset");
         }
@@ -458,10 +462,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
             require(transferSuccess, "Transfer debt tokens to contract failed");
 
             (bool repaySuccess, ) = handler.delegatecall(
-                abi.encodeCall(
-                    IProtocolHandler.repay,
-                    (_debtAsset, repayAmount, _onBehalfOf, _extraData)
-                )
+                abi.encodeCall(IProtocolHandler.repay, (_debtAsset, repayAmount, _onBehalfOf, _extraData))
             );
             require(repaySuccess, "Repay failed");
 

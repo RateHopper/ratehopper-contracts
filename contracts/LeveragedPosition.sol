@@ -31,7 +31,10 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     error InvalidOperationType(uint8 operationType);
     error OnlyTimelock();
 
-    enum OperationType { Create, Close }
+    enum OperationType {
+        Create,
+        Close
+    }
 
     modifier onlyOwnerOrOperator(address onBehalfOf) {
         require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
@@ -110,7 +113,12 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
     event ProtocolHandlerUpdated(Protocol indexed protocol, address indexed oldHandler, address indexed newHandler);
 
-    constructor(address _registry, Protocol[] memory protocols, address[] memory handlers, address _pauser) Ownable(msg.sender) {
+    constructor(
+        address _registry,
+        Protocol[] memory protocols,
+        address[] memory handlers,
+        address _pauser
+    ) Ownable(msg.sender) {
         require(protocols.length == handlers.length, "Protocols and handlers length mismatch");
         require(_registry != address(0), "Registry cannot be zero address");
         require(_pauser != address(0), "Pauser cannot be zero address");
@@ -283,7 +291,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     /// @dev Routes to create or close handlers based on operation type. Only callable by valid Uniswap V3 pools.
     function uniswapV3FlashCallback(uint256 fee0, uint256 fee1, bytes calldata data) external whenNotPaused {
         // Decode operation type first
-        (OperationType operationType) = abi.decode(data, (OperationType));
+        OperationType operationType = abi.decode(data, (OperationType));
 
         // Verify callback
         IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
@@ -309,7 +317,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
         // Calculate protocol fee based on borrowed amount
         uint256 borrowAmount = decoded.paraswapParams.srcAmount + 1;
-        
+
         uint256 protocolFeeAmount = (borrowAmount * protocolFee) / 10000;
 
         uint256 amountInMax = borrowAmount + protocolFeeAmount;
@@ -341,11 +349,11 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         uint256 amountToRepay = flashloanBorrowAmount + totalFee;
 
         swapByParaswap(
-                decoded.debtAsset,
-                decoded.collateralAsset,
-                amountInMax,
-                amountToRepay,
-                decoded.paraswapParams.swapData
+            decoded.debtAsset,
+            decoded.collateralAsset,
+            amountInMax,
+            amountToRepay,
+            decoded.paraswapParams.swapData
         );
 
         // repay flashloan
@@ -398,7 +406,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
             )
         );
         require(successWithdraw, "Withdraw failed");
-        
+
         uint256 flashloanRepayAmount = decoded.debtAmount + totalFee;
 
         // Swap collateral to debt asset to repay flash loan
@@ -445,7 +453,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         bytes memory _txParams
     ) internal {
         require(_txParams.length >= 4, "Invalid calldata");
-        
+
         // amount + 1 to avoid rounding errors
         IERC20(srcAsset).forceApprove(registry.paraswapV6(), amount + 1);
 

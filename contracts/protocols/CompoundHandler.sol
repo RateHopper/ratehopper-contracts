@@ -11,8 +11,7 @@ import "./BaseProtocolHandler.sol";
 contract CompoundHandler is BaseProtocolHandler {
     using SafeERC20 for IERC20;
 
-    constructor(address _registry, address _uniswapV3Factory) BaseProtocolHandler(_uniswapV3Factory, _registry) {
-    }
+    constructor(address _registry, address _uniswapV3Factory) BaseProtocolHandler(_uniswapV3Factory, _registry) {}
 
     function getCContract(address token) internal view returns (address) {
         return registry.getCContract(token);
@@ -50,9 +49,9 @@ contract CompoundHandler is BaseProtocolHandler {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata /* extraData */
-    ) public override onlyAuthorizedCaller(onBehalfOf) {       
+    ) public override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(fromAsset), "From asset is not whitelisted");
- 
+
         address cContract = getCContract(fromAsset);
         require(cContract != address(0), "Token not registered");
 
@@ -82,14 +81,14 @@ contract CompoundHandler is BaseProtocolHandler {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets,
         bytes calldata /* extraData */
-    ) public override onlyAuthorizedCaller(onBehalfOf) {        
+    ) public override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(toAsset), "To asset is not whitelisted");
-        
+
         address cContract = getCContract(toAsset);
         require(cContract != address(0), "Token not registered");
 
         IComet toComet = IComet(cContract);
-        
+
         _validateCollateralAssets(collateralAssets);
         for (uint256 i = 0; i < collateralAssets.length; i++) {
             require(registry.isWhitelisted(collateralAssets[i].asset), "Collateral asset is not whitelisted");
@@ -130,7 +129,7 @@ contract CompoundHandler is BaseProtocolHandler {
         bytes calldata /* extraData */
     ) external override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
-        
+
         address cContract = getCContract(asset);
         require(cContract != address(0), "Token not registered");
 
@@ -200,7 +199,9 @@ contract CompoundHandler is BaseProtocolHandler {
             uint128 bal = comet.collateralBalanceOf(user, info.asset);
             if (bal > 0) {
                 uint256 price = comet.getPrice(info.priceFeed);
-                totalCollateralValueBase += (uint256(bal) * price * uint256(info.borrowCollateralFactor)) / (uint256(info.scale) * 1e18);
+                totalCollateralValueBase +=
+                    (uint256(bal) * price * uint256(info.borrowCollateralFactor)) /
+                    (uint256(info.scale) * 1e18);
             }
         }
 
@@ -220,7 +221,8 @@ contract CompoundHandler is BaseProtocolHandler {
 
         if (collateralPrice == 0 || assetInfo.borrowCollateralFactor == 0) return 0;
 
-        uint256 maxWithdraw = (surplusValueBase * uint256(assetInfo.scale) * 1e18) / (collateralPrice * uint256(assetInfo.borrowCollateralFactor));
+        uint256 maxWithdraw = (surplusValueBase * uint256(assetInfo.scale) * 1e18) /
+            (collateralPrice * uint256(assetInfo.borrowCollateralFactor));
 
         if (maxWithdraw > uint256(collateralBalance)) {
             maxWithdraw = uint256(collateralBalance);

@@ -88,7 +88,7 @@ async function main() {
     const journalFile = path.join(deploymentDir, "journal.jsonl");
 
     if (!fs.existsSync(addressesFile)) {
-        throw new Error(`No deployment found at ${addressesFile}. Deploy first with: yarn deploy`);
+        throw new Error(`No deployment found at ${addressesFile}. Deploy first with: yarn deploy:1_core`);
     }
 
     const addresses: Record<string, string> = JSON.parse(fs.readFileSync(addressesFile, "utf-8"));

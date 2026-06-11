@@ -22,8 +22,10 @@ contract FluidSafeHandler is BaseProtocolHandler {
     // This design allows the resolver to be updated without redeploying handlers
     // and works correctly with delegatecall since registry is immutable
 
-    constructor(address _UNISWAP_V3_FACTORY, address _REGISTRY_ADDRESS) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
-    }
+    constructor(
+        address _UNISWAP_V3_FACTORY,
+        address _REGISTRY_ADDRESS
+    ) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {}
 
     function getDebtAmount(
         address /* asset */,
@@ -56,8 +58,8 @@ contract FluidSafeHandler is BaseProtocolHandler {
         }
 
         // Add tiny amount buffer to avoid repay amount slightly increasing and causing revert
-        uint256 bufferAmount = (debtAmount * 10005) / 10000;  // 0.05% buffer
-        uint256 fixedBuffer = 1000;  // Fixed 1000 wei buffer
+        uint256 bufferAmount = (debtAmount * 10005) / 10000; // 0.05% buffer
+        uint256 fixedBuffer = 1000; // Fixed 1000 wei buffer
         return bufferAmount + fixedBuffer;
     }
 
@@ -132,7 +134,13 @@ contract FluidSafeHandler is BaseProtocolHandler {
         // use balanceOf() because collateral amount is slightly decreased when switching from Fluid
         uint256 currentBalance = IERC20(collateralAssets[0].asset).balanceOf(address(this));
 
-        bytes memory returnData = _supplyCollateral(vaultAddress, nftId, collateralAssets[0].asset, currentBalance, onBehalfOf);
+        bytes memory returnData = _supplyCollateral(
+            vaultAddress,
+            nftId,
+            collateralAssets[0].asset,
+            currentBalance,
+            onBehalfOf
+        );
 
         // If nftId is 0, extract new ID from return data, otherwise use the provided ID
         uint256 positionNftId;
@@ -152,7 +160,12 @@ contract FluidSafeHandler is BaseProtocolHandler {
         require(successBorrow, "Fluid borrow failed");
     }
 
-    function repay(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public override onlyAuthorizedCaller(onBehalfOf) {
+    function repay(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata extraData
+    ) public override onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (address vaultAddress, , bool isFullRepay) = abi.decode(extraData, (address, uint256, bool));
@@ -168,7 +181,7 @@ contract FluidSafeHandler is BaseProtocolHandler {
             repayAmount = type(int).min;
 
             // For full repayment, approve a bit more to account for accrued interest
-            approvalAmount = (amount * 10005) / 10000;  // 0.05% buffer
+            approvalAmount = (amount * 10005) / 10000; // 0.05% buffer
         } else {
             repayAmount = -int256(amount);
 
@@ -218,7 +231,13 @@ contract FluidSafeHandler is BaseProtocolHandler {
         require(successRepay, "Repay failed");
     }
 
-    function _supplyCollateral(address vaultAddress, uint256 nftId, address asset, uint256 amount, address onBehalfOf) internal returns (bytes memory) {
+    function _supplyCollateral(
+        address vaultAddress,
+        uint256 nftId,
+        address asset,
+        uint256 amount,
+        address onBehalfOf
+    ) internal returns (bytes memory) {
         bytes memory returnData;
         // Check if asset is WETH
         if (asset == registry.WETH_ADDRESS()) {
@@ -268,7 +287,12 @@ contract FluidSafeHandler is BaseProtocolHandler {
         return returnData;
     }
 
-    function supply(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyAuthorizedCaller(onBehalfOf) {
+    function supply(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata extraData
+    ) external onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (address vaultAddress, uint256 nftId, ) = abi.decode(extraData, (address, uint256, bool));
@@ -276,7 +300,12 @@ contract FluidSafeHandler is BaseProtocolHandler {
         _supplyCollateral(vaultAddress, nftId, asset, amount, onBehalfOf);
     }
 
-    function borrow(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) external onlyAuthorizedCaller(onBehalfOf) {
+    function borrow(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata extraData
+    ) external onlyAuthorizedCaller(onBehalfOf) {
         require(registry.isWhitelisted(asset), "Asset is not whitelisted");
 
         (address vaultAddress, uint256 nftIdFromExtra, ) = abi.decode(extraData, (address, uint256, bool));
@@ -305,7 +334,12 @@ contract FluidSafeHandler is BaseProtocolHandler {
         require(successBorrow, "Fluid borrow failed");
     }
 
-    function withdraw(address asset, uint256 amount, address onBehalfOf, bytes calldata extraData) public override onlyAuthorizedCaller(onBehalfOf) {
+    function withdraw(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        bytes calldata extraData
+    ) public override onlyAuthorizedCaller(onBehalfOf) {
         _withdraw(asset, amount, onBehalfOf, extraData);
     }
 
