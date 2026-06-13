@@ -331,19 +331,31 @@ This script:
 
 ### Timelock Operations
 
-For critical operations (updating Paraswap address):
+Critical `ProtocolRegistry` setters (`setParaswapV6`, `setOperator`) carry `CRITICAL_ROLE` and revert unless `msg.sender` is the timelock, so they must be scheduled and executed through the `TimelockController` (2-day delay). Each script is a two-step flow: schedule, wait for the delay, then re-run with `EXECUTE=true` reusing the same `OPERATION_ID` printed during scheduling.
+
+**Updating the Paraswap address:**
 
 ```bash
 # Schedule operation (requires proposer role)
 TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
-yarn hardhat run scripts/timelock-update-paraswap.ts --network base
+yarn hardhat run scripts/timelockUpdateParaswap.ts --network base
 
 # Wait 2 days, then execute
-EXECUTE=true TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
-yarn hardhat run scripts/timelock-update-paraswap.ts --network base
+EXECUTE=true OPERATION_ID="..." TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
+yarn hardhat run scripts/timelockUpdateParaswap.ts --network base
 ```
 
-> **Note**: Updating the operator address (`setOperator`) also requires the timelock. Create a similar script based on `timelock-update-paraswap.ts` if needed.
+**Updating the operator address:**
+
+```bash
+# Schedule operation (requires proposer role)
+TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_OPERATOR_ADDRESS=0x... \
+yarn hardhat run scripts/timelockUpdateOperator.ts --network base
+
+# Wait 2 days, then execute (reuse the OPERATION_ID printed during scheduling)
+EXECUTE=true OPERATION_ID="..." TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_OPERATOR_ADDRESS=0x... \
+yarn hardhat run scripts/timelockUpdateOperator.ts --network base
+```
 
 
 ## Security Features
