@@ -333,6 +333,31 @@ This script:
 
 Critical `ProtocolRegistry` setters (`setParaswapV6`, `setOperator`) carry `CRITICAL_ROLE` and revert unless `msg.sender` is the timelock, so they must be scheduled and executed through the `TimelockController` (2-day delay). Each script is a two-step flow: schedule, wait for the delay, then re-run with `EXECUTE=true` reusing the same `OPERATION_ID` printed during scheduling.
 
+#### Finding the TimelockController address
+
+`SafeDebtManager` does not store the timelock itself — it only keeps an immutable `registry` reference, and the `TimelockController` address lives on the `ProtocolRegistry` (`timelock()` getter). So given a deployed `SafeDebtManager`, resolve the timelock by hopping through the registry.
+
+**On-chain (authoritative — this is the address the contracts actually enforce):**
+
+```bash
+# 1. Read the registry from the deployed SafeDebtManager
+REGISTRY=$(cast call <SAFE_DEBT_MANAGER_ADDRESS> "registry()(address)" --rpc-url <BASE_RPC_URL>)
+
+# 2. Read the timelock from that registry
+cast call $REGISTRY "timelock()(address)" --rpc-url <BASE_RPC_URL>
+```
+
+`SafeDebtManager.registry()` and `ProtocolRegistry.timelock()` are both public getters, so any RPC reader (cast, ethers, a block explorer's "Read Contract" tab) works.
+
+**Off-chain (from this repo's Ignition deployment):** the address is recorded under the `TimelockControllerModule#TimelockController` key — the timelock is a shared sub-module, so it keeps that stable ID regardless of which top-level module deployed it.
+
+```bash
+cat ignition/deployments/chain-8453/deployed_addresses.json
+# → look for "TimelockControllerModule#TimelockController"
+```
+
+Use the resulting address as `TIMELOCK_ADDRESS` in the commands below.
+
 **Updating the Paraswap address:**
 
 ```bash
