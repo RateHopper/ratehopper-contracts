@@ -1,0 +1,1401 @@
+[
+    {
+        "inputs": [
+            {
+                "internalType": "contract INonfungiblePositionManager",
+                "name": "_positionManager",
+                "type": "address"
+            },
+            {
+                "internalType": "contract IProtocolRegistry",
+                "name": "_registry",
+                "type": "address"
+            },
+            {
+                "internalType": "contract IERC20",
+                "name": "_usdc",
+                "type": "address"
+            },
+            {
+                "internalType": "contract IERC20",
+                "name": "_weth",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "_swapRouter",
+                "type": "address"
+            },
+            {
+                "internalType": "contract IUniswapV3Factory",
+                "name": "_uniswapV3Factory",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "_treasury",
+                "type": "address"
+            },
+            {
+                "internalType": "uint16",
+                "name": "_performanceFeeBps",
+                "type": "uint16"
+            },
+            {
+                "internalType": "uint16",
+                "name": "_feeCollectBps",
+                "type": "uint16"
+            },
+            {
+                "internalType": "uint16",
+                "name": "_maxFeeBps",
+                "type": "uint16"
+            },
+            {
+                "internalType": "address",
+                "name": "_initialAdmin",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "_timelock",
+                "type": "address"
+            },
+            {
+                "internalType": "uint128",
+                "name": "_minPoolLiquidity",
+                "type": "uint128"
+            },
+            {
+                "internalType": "uint128",
+                "name": "_minPositionLiquidity",
+                "type": "uint128"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+    },
+    {
+        "inputs": [],
+        "name": "AccessControlBadConfirmation",
+        "type": "error"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "account",
+                "type": "address"
+            },
+            {
+                "internalType": "bytes32",
+                "name": "neededRole",
+                "type": "bytes32"
+            }
+        ],
+        "name": "AccessControlUnauthorizedAccount",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "DeadlineExpired",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "FeeAboveMax",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "FeeTierNotAllowed",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "InvalidExitBps",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "InvalidExpectedSwapOut",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "InvalidSwapAmountOutMin",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "InvalidTreasury",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "InvalidUsdcAmount",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "LpNotOnSafe",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "MinUsdcOutNotMet",
+        "type": "error"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint8",
+                "name": "step",
+                "type": "uint8"
+            }
+        ],
+        "name": "ModuleCallFailed",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "NotAuthorized",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "OnlyTimelock",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "PoolDoesNotExist",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "PoolNotInitialized",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "PoolTooThin",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "PositionLiquidityTooLow",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "ReentrancyGuardReentrantCall",
+        "type": "error"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint8",
+                "name": "bits",
+                "type": "uint8"
+            },
+            {
+                "internalType": "uint256",
+                "name": "value",
+                "type": "uint256"
+            }
+        ],
+        "name": "SafeCastOverflowedUintDowncast",
+        "type": "error"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+            }
+        ],
+        "name": "SafeERC20FailedOperation",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "SlippageAboveMax",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "SlippageTooLow",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "SwapFailed",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "SwapMinBelowSlippageFloor",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "UnknownPosition",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "WrongTokenOrder",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "WrongTokenPair",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "ZeroAddress",
+        "type": "error"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "onBehalfOf",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "attemptedFee",
+                "type": "uint256"
+            }
+        ],
+        "name": "CollectFeeTransferFailed",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": false,
+                "internalType": "uint16",
+                "name": "previousFeeCollectBps",
+                "type": "uint16"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint16",
+                "name": "newFeeCollectBps",
+                "type": "uint16"
+            }
+        ],
+        "name": "FeeCollectBpsUpdated",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "uint24",
+                "name": "feeTier",
+                "type": "uint24"
+            },
+            {
+                "indexed": false,
+                "internalType": "bool",
+                "name": "previousAllowed",
+                "type": "bool"
+            },
+            {
+                "indexed": false,
+                "internalType": "bool",
+                "name": "newAllowed",
+                "type": "bool"
+            }
+        ],
+        "name": "FeeTierAllowedUpdated",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "onBehalfOf",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "feeUsd6",
+                "type": "uint128"
+            }
+        ],
+        "name": "FeeTransferFailed",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "onBehalfOf",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "address",
+                "name": "token0",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "collected0",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "fee0",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "address",
+                "name": "token1",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "collected1",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "fee1",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "currentValueUsd6",
+                "type": "uint128"
+            }
+        ],
+        "name": "FeesCollected",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": false,
+                "internalType": "uint16",
+                "name": "previousMaxSlippageBps",
+                "type": "uint16"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint16",
+                "name": "newMaxSlippageBps",
+                "type": "uint16"
+            }
+        ],
+        "name": "MaxSlippageBpsUpdated",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "previousMinPoolLiquidity",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "newMinPoolLiquidity",
+                "type": "uint128"
+            }
+        ],
+        "name": "MinPoolLiquidityUpdated",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "previousMinPositionLiquidity",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "newMinPositionLiquidity",
+                "type": "uint128"
+            }
+        ],
+        "name": "MinPositionLiquidityUpdated",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "recipient",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            }
+        ],
+        "name": "NftRescued",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": false,
+                "internalType": "uint16",
+                "name": "previousPerformanceFeeBps",
+                "type": "uint16"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint16",
+                "name": "newPerformanceFeeBps",
+                "type": "uint16"
+            }
+        ],
+        "name": "PerformanceFeeBpsUpdated",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "onBehalfOf",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "basisUsd6",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "currentValueUsd6",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "feeUsd6",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint16",
+                "name": "exitBps",
+                "type": "uint16"
+            }
+        ],
+        "name": "PositionClosed",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "onBehalfOf",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "usdcInput",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "wethToLp",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "usdcToLp",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "currentValueUsd6",
+                "type": "uint128"
+            }
+        ],
+        "name": "PositionOpened",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "bytes32",
+                "name": "role",
+                "type": "bytes32"
+            },
+            {
+                "indexed": true,
+                "internalType": "bytes32",
+                "name": "previousAdminRole",
+                "type": "bytes32"
+            },
+            {
+                "indexed": true,
+                "internalType": "bytes32",
+                "name": "newAdminRole",
+                "type": "bytes32"
+            }
+        ],
+        "name": "RoleAdminChanged",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "bytes32",
+                "name": "role",
+                "type": "bytes32"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "account",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "sender",
+                "type": "address"
+            }
+        ],
+        "name": "RoleGranted",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "bytes32",
+                "name": "role",
+                "type": "bytes32"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "account",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "sender",
+                "type": "address"
+            }
+        ],
+        "name": "RoleRevoked",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "recipient",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "TokenRescued",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "previousTreasury",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "newTreasury",
+                "type": "address"
+            }
+        ],
+        "name": "TreasuryUpdated",
+        "type": "event"
+    },
+    {
+        "inputs": [],
+        "name": "CRITICAL_ROLE",
+        "outputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "DEFAULT_ADMIN_ROLE",
+        "outputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "MAX_FEE_BPS",
+        "outputs": [
+            {
+                "internalType": "uint16",
+                "name": "",
+                "type": "uint16"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "MAX_SETTABLE_SLIPPAGE_BPS",
+        "outputs": [
+            {
+                "internalType": "uint16",
+                "name": "",
+                "type": "uint16"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "POSITION_MANAGER",
+        "outputs": [
+            {
+                "internalType": "contract INonfungiblePositionManager",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "REGISTRY",
+        "outputs": [
+            {
+                "internalType": "contract IProtocolRegistry",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "SWAP_ROUTER",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "UNISWAP_V3_FACTORY",
+        "outputs": [
+            {
+                "internalType": "contract IUniswapV3Factory",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "USDC",
+        "outputs": [
+            {
+                "internalType": "contract IERC20",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "WETH",
+        "outputs": [
+            {
+                "internalType": "contract IERC20",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint24",
+                "name": "feeTier",
+                "type": "uint24"
+            }
+        ],
+        "name": "allowedFeeTier",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_onBehalfOf",
+                "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint24",
+                "name": "swapPoolFeeTier",
+                "type": "uint24"
+            },
+            {
+                "internalType": "uint256",
+                "name": "swapAmountOutMin",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "expectedSwapOut",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint16",
+                "name": "slippageBps",
+                "type": "uint16"
+            },
+            {
+                "internalType": "uint16",
+                "name": "exitBps",
+                "type": "uint16"
+            },
+            {
+                "internalType": "uint256",
+                "name": "decreaseAmount0Min",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "decreaseAmount1Min",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "deadline",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "minUsdcOut",
+                "type": "uint256"
+            }
+        ],
+        "name": "closeLp",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_onBehalfOf",
+                "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            }
+        ],
+        "name": "collectLp",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "feeCollectBps",
+        "outputs": [
+            {
+                "internalType": "uint16",
+                "name": "",
+                "type": "uint16"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "role",
+                "type": "bytes32"
+            }
+        ],
+        "name": "getRoleAdmin",
+        "outputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "role",
+                "type": "bytes32"
+            },
+            {
+                "internalType": "address",
+                "name": "account",
+                "type": "address"
+            }
+        ],
+        "name": "grantRole",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "role",
+                "type": "bytes32"
+            },
+            {
+                "internalType": "address",
+                "name": "account",
+                "type": "address"
+            }
+        ],
+        "name": "hasRole",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "maxSlippageBps",
+        "outputs": [
+            {
+                "internalType": "uint16",
+                "name": "",
+                "type": "uint16"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "minPoolLiquidity",
+        "outputs": [
+            {
+                "internalType": "uint128",
+                "name": "",
+                "type": "uint128"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "minPositionLiquidity",
+        "outputs": [
+            {
+                "internalType": "uint128",
+                "name": "",
+                "type": "uint128"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_onBehalfOf",
+                "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "usdcAmount",
+                "type": "uint256"
+            },
+            {
+                "internalType": "int24",
+                "name": "tickLower",
+                "type": "int24"
+            },
+            {
+                "internalType": "int24",
+                "name": "tickUpper",
+                "type": "int24"
+            },
+            {
+                "internalType": "uint24",
+                "name": "lpPoolFeeTier",
+                "type": "uint24"
+            },
+            {
+                "internalType": "uint256",
+                "name": "mintAmount0Min",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "mintAmount1Min",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint24",
+                "name": "swapPoolFeeTier",
+                "type": "uint24"
+            },
+            {
+                "internalType": "uint256",
+                "name": "swapAmountOutMin",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "expectedSwapOut",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint16",
+                "name": "slippageBps",
+                "type": "uint16"
+            },
+            {
+                "internalType": "uint256",
+                "name": "deadline",
+                "type": "uint256"
+            }
+        ],
+        "name": "openLp",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "performanceFeeBps",
+        "outputs": [
+            {
+                "internalType": "uint16",
+                "name": "",
+                "type": "uint16"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "role",
+                "type": "bytes32"
+            },
+            {
+                "internalType": "address",
+                "name": "callerConfirmation",
+                "type": "address"
+            }
+        ],
+        "name": "renounceRole",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            },
+            {
+                "internalType": "address",
+                "name": "recipient",
+                "type": "address"
+            }
+        ],
+        "name": "rescueERC721",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "recipient",
+                "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "rescueToken",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            }
+        ],
+        "name": "residualBasisUsd6Of",
+        "outputs": [
+            {
+                "internalType": "uint128",
+                "name": "residualBasisUsd6",
+                "type": "uint128"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "role",
+                "type": "bytes32"
+            },
+            {
+                "internalType": "address",
+                "name": "account",
+                "type": "address"
+            }
+        ],
+        "name": "revokeRole",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint16",
+                "name": "newFeeCollectBps",
+                "type": "uint16"
+            }
+        ],
+        "name": "setFeeCollectBps",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint24",
+                "name": "feeTier",
+                "type": "uint24"
+            },
+            {
+                "internalType": "bool",
+                "name": "allowed",
+                "type": "bool"
+            }
+        ],
+        "name": "setFeeTierAllowed",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint16",
+                "name": "newMaxSlippageBps",
+                "type": "uint16"
+            }
+        ],
+        "name": "setMaxSlippageBps",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint128",
+                "name": "newMinPoolLiquidity",
+                "type": "uint128"
+            }
+        ],
+        "name": "setMinPoolLiquidity",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint128",
+                "name": "newMinPositionLiquidity",
+                "type": "uint128"
+            }
+        ],
+        "name": "setMinPositionLiquidity",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint16",
+                "name": "newPerformanceFeeBps",
+                "type": "uint16"
+            }
+        ],
+        "name": "setPerformanceFeeBps",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "newTreasury",
+                "type": "address"
+            }
+        ],
+        "name": "setTreasury",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes4",
+                "name": "interfaceId",
+                "type": "bytes4"
+            }
+        ],
+        "name": "supportsInterface",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "timelock",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "treasury",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    }
+]
