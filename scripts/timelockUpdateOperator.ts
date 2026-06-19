@@ -6,7 +6,7 @@ import { ethers } from "hardhat";
  * `setOperator` is a CRITICAL_ROLE function that can ONLY be called by the timelock,
  * so it must go through the two-step process:
  * 1. Schedule the operation (requires PROPOSER_ROLE)
- * 2. Wait for the timelock delay (2 days)
+ * 2. Wait for the timelock delay (8 hours by default)
  * 3. Execute the operation (requires EXECUTOR_ROLE)
  *
  * Usage:
@@ -14,7 +14,7 @@ import { ethers } from "hardhat";
  * TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_OPERATOR_ADDRESS=0x... \
  * npx hardhat run scripts/timelockUpdateOperator.ts --network base
  *
- * STEP 2 - Execute (run after 2 days, reuse the SAME OPERATION_ID printed in step 1):
+ * STEP 2 - Execute (run after the timelock delay, reuse the SAME OPERATION_ID printed in step 1):
  * EXECUTE=true OPERATION_ID="..." TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_OPERATOR_ADDRESS=0x... \
  * npx hardhat run scripts/timelockUpdateOperator.ts --network base
  */

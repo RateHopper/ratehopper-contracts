@@ -1,37 +1,12 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
-import TimelockControllerModule from "./TimelockControllerModule";
+import DeployRegistryOnlyModule from "./0_DeployRegistryOnly";
 import {
-    getCTokenMappingArrays,
-    getMTokenMappingArrays,
     UNISWAP_V3_FACTORY_ADDRESS,
-    FLUID_VAULT_RESOLVER,
     AAVE_V3_POOL_ADDRESS,
     AAVE_V3_DATA_PROVIDER_ADDRESS,
     MORPHO_ADDRESS,
     COMPTROLLER_ADDRESS,
-    PARASWAP_V6_CONTRACT_ADDRESS,
     Protocol,
-    WETH_ADDRESS,
-    USDC_ADDRESS,
-    USDbC_ADDRESS,
-    cbETH_ADDRESS,
-    cbBTC_ADDRESS,
-    eUSD_ADDRESS,
-    MAI_ADDRESS,
-    DAI_ADDRESS,
-    sUSDS_ADDRESS,
-    AERO_ADDRESS,
-    wstETH_ADDRESS,
-    rETH_ADDRESS,
-    weETH_ADDRESS,
-    EURC_ADDRESS,
-    GHO_ADDRESS,
-    wrsETH_ADDRESS,
-    WELL_ADDRESS,
-    USDS_ADDRESS,
-    tBTC_ADDRESS,
-    LBTC_ADDRESS,
-    VIRTUAL_ADDRESS,
 } from "../../contractAddresses";
 
 /**
@@ -40,14 +15,11 @@ import {
  * All steps are chained sequentially via `after` to avoid nonce race conditions.
  *
  * Deployment order:
- *  1. TimelockController (2-day delay)
- *  2. ProtocolRegistry (with timelock, operator, paraswap set in constructor)
- *  3. Handlers: AaveV3 → Compound → Morpho → FluidSafe → Moonwell
- *  4. Registry config: Moonwell mappings → Compound mappings → Fluid resolver → Whitelist
- *  5. Registry admin transfer: grant ADMIN_ADDRESS → revoke deployer
- *  6. SafeDebtManager → transferOwnership to ADMIN_ADDRESS
- *  7. LeveragedPosition → transferOwnership to ADMIN_ADDRESS
- *  8. SafeExecTransactionWrapper
+ *  1. Deploy/reuse configured ProtocolRegistry from DeployRegistryOnly
+ *  2. Handlers: AaveV3 → Compound → Morpho → FluidSafe → Moonwell
+ *  3. SafeDebtManager → transferOwnership to ADMIN_ADDRESS
+ *  4. LeveragedPosition → transferOwnership to ADMIN_ADDRESS
+ *  5. SafeExecTransactionWrapper
  *
  * Environment Variables Required:
  *  - ADMIN_ADDRESS:          Admin / timelock proposer+executor / final owner
@@ -56,7 +28,7 @@ import {
  *  - DEPLOYER_PRIVATE_KEY:   Deployer private key (in hardhat.config.ts)
  *
  * Usage:
- *  npx hardhat ignition deploy ignition/modules/1_DeployCore.ts --network base --verify --reset
+ *  npx hardhat ignition deploy ignition/modules/1_DeployCore.ts --network base --verify
  */
 export default buildModule("DeployCore", (m) => {
     // ── Validate env vars ──────────────────────────────────────────────
@@ -64,38 +36,18 @@ export default buildModule("DeployCore", (m) => {
     if (!adminAddress) {
         throw new Error("Please set ADMIN_ADDRESS environment variable");
     }
-    const operatorAddress = process.env.SAFE_OPERATOR_ADDRESS;
-    if (!operatorAddress) {
-        throw new Error("Please set SAFE_OPERATOR_ADDRESS environment variable");
-    }
     const pauserAddress = process.env.PAUSER_ADDRESS;
     if (!pauserAddress) {
         throw new Error("Please set PAUSER_ADDRESS environment variable");
     }
 
-    const deployer = m.getAccount(0);
-    const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-    const DEFAULT_ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    const { registry, registryConfigured } = m.useModule(DeployRegistryOnlyModule);
 
-    // ── 1. TimelockController (shared sub-module — Ignition deduplicates
-    //       the future across runs, so `yarn deploy:2_univ3_helper` later reuses this
-    //       same address). Params come from TIMELOCK_ADMIN / TIMELOCK_DELAY
-    //       env vars in TimelockControllerModule, both with fallbacks to
-    //       ADMIN_ADDRESS / 2 days.
-    const { timelock } = m.useModule(TimelockControllerModule);
-
-    // ── 2. ProtocolRegistry ────────────────────────────────────────────
-    const registry = m.contract(
-        "ProtocolRegistry",
-        [WETH_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, deployer, timelock, operatorAddress, PARASWAP_V6_CONTRACT_ADDRESS],
-        { after: [timelock] },
-    );
-
-    // ── 3. Handlers (sequential) ──────────────────────────────────────
+    // ── 1. Handlers (sequential) ──────────────────────────────────────
     const aaveV3Handler = m.contract(
         "AaveV3Handler",
         [AAVE_V3_POOL_ADDRESS, AAVE_V3_DATA_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry],
-        { after: [registry] },
+        { after: [registryConfigured] },
     );
 
     const compoundHandler = m.contract("CompoundHandler", [registry, UNISWAP_V3_FACTORY_ADDRESS], {
@@ -114,76 +66,19 @@ export default buildModule("DeployCore", (m) => {
         after: [fluidSafeHandler],
     });
 
-    // ── 4. Registry configuration ─────────────────────────────────────
-    const [mTokens, mContracts] = getMTokenMappingArrays();
-    const setMoonwellMappings = m.call(registry, "batchSetTokenMContracts", [mTokens, mContracts], {
-        id: "registry_setMoonwellMappings",
-        after: [moonwellHandler],
-    });
-
-    const [cTokens, cContracts] = getCTokenMappingArrays();
-    const setCompoundMappings = m.call(registry, "batchSetTokenCContracts", [cTokens, cContracts], {
-        id: "registry_setCompoundMappings",
-        after: [setMoonwellMappings],
-    });
-
-    const setFluidResolver = m.call(registry, "setFluidVaultResolver", [FLUID_VAULT_RESOLVER], {
-        id: "registry_setFluidVaultResolver",
-        after: [setCompoundMappings],
-    });
-
-    const whitelistTokens = [
-        USDC_ADDRESS,
-        cbETH_ADDRESS,
-        WETH_ADDRESS,
-        USDbC_ADDRESS,
-        cbBTC_ADDRESS,
-        eUSD_ADDRESS,
-        MAI_ADDRESS,
-        DAI_ADDRESS,
-        sUSDS_ADDRESS,
-        AERO_ADDRESS,
-        wstETH_ADDRESS,
-        rETH_ADDRESS,
-        weETH_ADDRESS,
-        EURC_ADDRESS,
-        GHO_ADDRESS,
-        wrsETH_ADDRESS,
-        WELL_ADDRESS,
-        USDS_ADDRESS,
-        tBTC_ADDRESS,
-        LBTC_ADDRESS,
-        VIRTUAL_ADDRESS,
-    ];
-    const addToWhitelist = m.call(registry, "addToWhitelistBatch", [whitelistTokens], {
-        id: "registry_addToWhitelistBatch",
-        after: [setFluidResolver],
-    });
-
-    // ── 5. Transfer registry admin role ────────────────────────────────
-    const grantAdminRole = m.call(registry, "grantRole", [DEFAULT_ADMIN_ROLE, adminAddress], {
-        id: "registry_grantAdminToFinalAdmin",
-        after: [addToWhitelist],
-    });
-
-    const revokeDeployerRole = m.call(registry, "revokeRole", [DEFAULT_ADMIN_ROLE, deployer], {
-        id: "registry_revokeAdminFromDeployer",
-        after: [grantAdminRole],
-    });
-
-    // ── 6. SafeDebtManager ─────────────────────────────────────────────
+    // ── 2. SafeDebtManager ─────────────────────────────────────────────
     const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
     const handlers = [aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler];
 
     const safeDebtManager = m.contract("SafeDebtManager", [registry, protocols, handlers, pauserAddress], {
-        after: [revokeDeployerRole],
+        after: [moonwellHandler],
     });
 
     const safeDebtManagerTransfer = m.call(safeDebtManager, "transferOwnership", [adminAddress], {
         id: "safeDebtManager_transferOwnership",
     });
 
-    // ── 7. LeveragedPosition ───────────────────────────────────────────
+    // ── 3. LeveragedPosition ───────────────────────────────────────────
     const leveragedPosition = m.contract("LeveragedPosition", [registry, protocols, handlers, pauserAddress], {
         after: [safeDebtManagerTransfer],
     });
@@ -192,13 +87,12 @@ export default buildModule("DeployCore", (m) => {
         id: "leveragedPosition_transferOwnership",
     });
 
-    // ── 8. SafeExecTransactionWrapper ──────────────────────────────────
+    // ── 4. SafeExecTransactionWrapper ──────────────────────────────────
     const safeExecTransactionWrapper = m.contract("SafeExecTransactionWrapper", [], {
         after: [leveragedPositionTransfer],
     });
 
     return {
-        timelock,
         registry,
         aaveV3Handler,
         compoundHandler,

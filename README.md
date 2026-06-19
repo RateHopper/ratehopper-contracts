@@ -32,7 +32,7 @@ The system consists of several key components:
 
 1. **Governance & Access Control**:
 
-    - `TimelockController`: OpenZeppelin's timelock implementation with 2-day delay for critical operations
+    - `TimelockController`: OpenZeppelin's timelock implementation with 8-hour delay by default for critical operations
     - `ProtocolRegistry.sol`: Central registry with hybrid access control:
         - `DEFAULT_ADMIN_ROLE`: For routine operations (whitelist, token mappings) - immediate execution
         - `CRITICAL_ROLE`: For critical operations (setParaswapV6, setOperator) - requires timelock
@@ -193,7 +193,7 @@ RHP_MAX_FEE_BPS=2000          # Hard upper bound on BOTH fees (bps). Default 200
 
 # Optional — TimelockController inside 2_DeployUniV3Helper
 TIMELOCK_ADMIN=0x...          # Proposer + executor on the new timelock. Falls back to ADMIN_ADDRESS
-TIMELOCK_DELAY=172800         # Min delay before queued ops execute (seconds). Default 172800 (2 days)
+TIMELOCK_DELAY=28800          # Min delay before queued ops execute (seconds). Default 28800 (8 hours)
 ```
 ## Setup and Development
 
@@ -252,30 +252,54 @@ Hardhat Ignition is a declarative deployment framework. Instead of writing imper
 - **Tracks state** in `ignition/deployments/chain-<chainId>/` so deployments can be resumed if interrupted
 - **Records constructor args** in `journal.jsonl` for reproducibility and verification
 - **Supports `--verify`** to automatically submit contracts to Etherscan after deployment
-- **Supports `--reset`** to wipe previous state and redeploy from scratch
+- **Supports per-future wipes** with `hardhat ignition wipe <deploymentId> <futureId>`
 
 The core contracts are defined in a single module at `ignition/modules/1_DeployCore.ts`. Every step is chained sequentially via `after` dependencies to avoid nonce race conditions.
 
+### Export ABIs
+
+ABI files for the four core integration contracts are exported to `abis/` from Hardhat artifacts:
+
+```bash
+yarn abis
+```
+
+This compiles the contracts and writes:
+
+- `abis/LeveragedPosition.json`
+- `abis/RatehopperUniV3Positions.json`
+- `abis/SafeDebtManager.json`
+- `abis/SafeExecTransactionWrapper.json`
+
+The deploy scripts below run the ABI exporter automatically after a successful deployment.
+
+### Deploy Registry Only
+
+Deploy only `ProtocolRegistry`:
+
+```bash
+yarn deploy:0_registry
+```
+
+This deploys and configures `ProtocolRegistry`, syncs the registry address into `contractAddresses.ts`, and refreshes the ABI files in `abis/`.
+
 ### Deploy All Contracts
 
-Deploy everything in one command:
+Deploy the core debt-management contracts:
 
 ```bash
 yarn deploy:1_core
-# or equivalently:
-npx hardhat ignition deploy ignition/modules/1_DeployCore.ts --network base --verify --reset
 ```
+
+This deploys `ignition/modules/1_DeployCore.ts` to Base with verification enabled, reusing the configured registry from `deploy:0_registry`, syncs the registry address into `contractAddresses.ts`, and refreshes the ABI files in `abis/`.
 
 This deploys all contracts sequentially in a single transaction chain:
 
-1. **TimelockController** (2-day delay)
-2. **ProtocolRegistry** (with timelock, operator, paraswap configured)
-3. **Handlers**: AaveV3 → Compound → Morpho → FluidSafe → Moonwell
-4. **Registry config**: token mappings, Fluid resolver, whitelist
-5. **Admin transfer**: grant `ADMIN_ADDRESS` admin role, revoke deployer
-6. **SafeDebtManager** → `transferOwnership` to `ADMIN_ADDRESS`
-7. **LeveragedPosition** → `transferOwnership` to `ADMIN_ADDRESS`
-8. **SafeExecTransactionWrapper**
+1. **Configured ProtocolRegistry** from `DeployRegistryOnly`
+2. **Handlers**: AaveV3 → Compound → Morpho → FluidSafe → Moonwell
+3. **SafeDebtManager** → `transferOwnership` to `ADMIN_ADDRESS`
+4. **LeveragedPosition** → `transferOwnership` to `ADMIN_ADDRESS`
+5. **SafeExecTransactionWrapper**
 
 ### Deploy RatehopperUniV3Positions (Standalone)
 
@@ -283,13 +307,13 @@ This deploys all contracts sequentially in a single transaction chain:
 
 ```bash
 yarn deploy:2_univ3_helper
-# or equivalently:
-npx hardhat ignition deploy ignition/modules/2_DeployUniV3Helper.ts --network base --verify
 ```
+
+This deploys `ignition/modules/2_DeployUniV3Helper.ts` to Base with verification enabled and refreshes the ABI files in `abis/`.
 
 This module by default deploys:
 
-1. **TimelockController** (proposer + executor = `TIMELOCK_ADMIN` ?? `ADMIN_ADDRESS`; delay = `TIMELOCK_DELAY` ?? 2 days)
+1. **TimelockController** (proposer + executor = `TIMELOCK_ADMIN` ?? `ADMIN_ADDRESS`; delay = `TIMELOCK_DELAY` ?? 8 hours)
 2. **RatehopperUniV3Positions** (wired to the registry from `RHP_REGISTRY` ?? `PROTOCOL_REGISTRY_ADDRESS`; CRITICAL_ROLE granted to the timelock from step 1)
 
 To reuse an existing TimelockController instead of deploying a new one, set `RHP_TIMELOCK=0x...` — the module skips step 1 and points RHP at the supplied address. See `## Environment Variables` for the full list of optional knobs.
@@ -311,6 +335,27 @@ Inspect deployed addresses:
 cat ignition/deployments/chain-8453/deployed_addresses.json
 ```
 
+### Wiping Deployments
+
+Use `wipe:all` when you want to clear all local Ignition state for Base and redeploy everything from scratch:
+
+```bash
+yarn wipe:all
+```
+
+This removes `ignition/deployments/chain-8453`. It does not delete on-chain contracts; it only resets this repo's local Ignition deployment journal and generated deployment artifacts for Base.
+
+Shortcut scripts are available for common futures:
+
+```bash
+yarn wipe:leveraged-position
+yarn wipe:univ3-positions
+yarn wipe:safe-debt-manager
+yarn wipe:safe-wrapper
+```
+
+In short: use `wipe:all` for a clean redeploy of the whole Base deployment, and use `wipe` or a `wipe:*` shortcut only when you intentionally want to rerun one named future.
+
 ### Contract Verification
 
 The `--verify` flag on `yarn deploy:1_core` may fail due to a known `hardhat-verify` v2.x bug with Etherscan's V2 API (the plugin's GET requests strip the `chainid` parameter). Use the standalone verification script instead:
@@ -331,7 +376,7 @@ This script:
 
 ### Timelock Operations
 
-Critical `ProtocolRegistry` setters (`setParaswapV6`, `setOperator`) carry `CRITICAL_ROLE` and revert unless `msg.sender` is the timelock, so they must be scheduled and executed through the `TimelockController` (2-day delay). Each script is a two-step flow: schedule, wait for the delay, then re-run with `EXECUTE=true` reusing the same `OPERATION_ID` printed during scheduling.
+Critical `ProtocolRegistry` setters (`setParaswapV6`, `setOperator`) carry `CRITICAL_ROLE` and revert unless `msg.sender` is the timelock, so they must be scheduled and executed through the `TimelockController` (8-hour delay by default). Each script is a two-step flow: schedule, wait for the delay, then re-run with `EXECUTE=true` reusing the same `OPERATION_ID` printed during scheduling.
 
 #### Finding the TimelockController address
 
@@ -365,7 +410,7 @@ Use the resulting address as `TIMELOCK_ADDRESS` in the commands below.
 TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
 yarn hardhat run scripts/timelockUpdateParaswap.ts --network base
 
-# Wait 2 days, then execute
+# Wait for the timelock delay, then execute
 EXECUTE=true OPERATION_ID="..." TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
 yarn hardhat run scripts/timelockUpdateParaswap.ts --network base
 ```
@@ -377,7 +422,7 @@ yarn hardhat run scripts/timelockUpdateParaswap.ts --network base
 TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_OPERATOR_ADDRESS=0x... \
 yarn hardhat run scripts/timelockUpdateOperator.ts --network base
 
-# Wait 2 days, then execute (reuse the OPERATION_ID printed during scheduling)
+# Wait for the timelock delay, then execute (reuse the OPERATION_ID printed during scheduling)
 EXECUTE=true OPERATION_ID="..." TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_OPERATOR_ADDRESS=0x... \
 yarn hardhat run scripts/timelockUpdateOperator.ts --network base
 ```
@@ -389,7 +434,7 @@ The contracts include several security features:
 
 ### Access Control & Governance
 
-- **Timelock Controller**: 2-day delay for critical operations (Paraswap and operator updates)
+- **Timelock Controller**: 8-hour delay by default for critical operations (Paraswap and operator updates)
 - **Hybrid Access Control**:
     - `DEFAULT_ADMIN_ROLE`: For routine operations (immediate execution)
     - `CRITICAL_ROLE`: For critical operations (requires timelock)

@@ -6,7 +6,7 @@ import { ethers } from "hardhat";
  *
  * This demonstrates the two-step process:
  * 1. Schedule the operation (requires PROPOSER_ROLE)
- * 2. Wait 2 days
+ * 2. Wait for the timelock delay (8 hours by default)
  * 3. Execute the operation (requires EXECUTOR_ROLE)
  *
  * Usage:
@@ -14,7 +14,7 @@ import { ethers } from "hardhat";
  * TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
  * npx hardhat run scripts/timelock-update-paraswap.ts --network base
  *
- * STEP 2 - Execute (run after 2 days):
+ * STEP 2 - Execute (run after the timelock delay):
  * EXECUTE=true TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_PARASWAP_ADDRESS=0x... \
  * npx hardhat run scripts/timelock-update-paraswap.ts --network base
  */

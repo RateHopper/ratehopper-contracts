@@ -1,20 +1,20 @@
 // Post-deploy sync: rewrites PROTOCOL_REGISTRY_ADDRESS in contractAddresses.ts
-// to the ProtocolRegistry address just deployed by 1_DeployCore.ts.
+// to the ProtocolRegistry address deployed by 0_DeployRegistryOnly.ts.
 //
-// Runs automatically as the last step of `yarn deploy:1_core` so the
+// Runs automatically after registry/core deploys so the
 // `yarn deploy:2_univ3_helper` fallback (which reads PROTOCOL_REGISTRY_ADDRESS)
-// always points at the freshly deployed registry — a dev can't forget to bump
+// always points at the configured registry — a dev can't forget to bump
 // it manually.
 //
 // Reads ignition/deployments/chain-<chainId>/deployed_addresses.json (Ignition
 // keys futures as `<ModuleId>#<FutureId>`, so the registry is
-// `DeployCore#ProtocolRegistry`).
+// `DeployRegistryOnly#ProtocolRegistry`).
 
 const fs = require("fs");
 const path = require("path");
 
 const CHAIN_ID = process.env.CHAIN_ID || "8453";
-const REGISTRY_KEY = "DeployCore#ProtocolRegistry";
+const REGISTRY_KEY = "DeployRegistryOnly#ProtocolRegistry";
 
 const ADDRESSES_FILE = path.join(
     __dirname,
