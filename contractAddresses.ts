@@ -49,11 +49,11 @@ export const ADMIN_ADDRESS = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
 // (e.g. 2_DeployUniV3Helper reads PROTOCOL_REGISTRY_ADDRESS to wire RHP
 // to the existing registry).
 //
-// AUTO-MANAGED: `yarn deploy:1_core` runs scripts/syncRegistryAddress.js as its
-// final step, rewriting the address below to the freshly deployed
+// AUTO-MANAGED: registry/core deploy scripts run scripts/syncRegistryAddress.js,
+// rewriting the address below to the configured
 // ProtocolRegistry. Commit the resulting diff. Only edit by hand if pointing at
 // a registry deployed outside this repo's Ignition flow.
-export const PROTOCOL_REGISTRY_ADDRESS = "0x20b2003CEF180DBbcca9fAf33Ddb1D635fdD2F6c";
+export const PROTOCOL_REGISTRY_ADDRESS = "0x2f1331Df43E2f63e01298f570F9e467375077d7d";
 
 // Protocol enum
 export enum Protocol {

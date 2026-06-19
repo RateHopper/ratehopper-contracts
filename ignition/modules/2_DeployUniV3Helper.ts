@@ -49,7 +49,7 @@ function requireAddress(label: string, value: string): void {
  *                               Falls back to ADMIN_ADDRESS. Required when
  *                               RHP_TIMELOCK is unset.
  *  - TIMELOCK_DELAY:            (consumed by TimelockControllerModule) Minimum
- *                               delay in seconds. Defaults to 172800 (2 days).
+ *                               delay in seconds. Defaults to 28800 (8 hours).
  *  - RHP_PERFORMANCE_FEE_BPS:   Performance fee on net profit at closeLp in
  *                               bps. Defaults to 1000 (10%).
  *  - RHP_FEE_COLLECT_BPS:       Fee on harvested LP fees in bps. Defaults to

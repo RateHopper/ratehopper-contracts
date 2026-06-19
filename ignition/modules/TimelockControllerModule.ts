@@ -21,10 +21,10 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  *  - TIMELOCK_ADMIN: EOA / multisig granted BOTH proposer and executor
  *                    roles. Falls back to ADMIN_ADDRESS. REQUIRED.
  *  - TIMELOCK_DELAY: Minimum delay (seconds) before queued ops can execute.
- *                    Defaults to 172800 (2 days). Lower on testnets only.
+ *                    Defaults to 28800 (8 hours).
  */
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-const TWO_DAYS = 2 * 24 * 60 * 60;
+const EIGHT_HOURS = 8 * 60 * 60;
 
 export default buildModule("TimelockControllerModule", (m) => {
     const admin = m.getParameter<string>(
@@ -33,7 +33,7 @@ export default buildModule("TimelockControllerModule", (m) => {
     );
     const delay = m.getParameter<number>(
         "delay",
-        Number(process.env.TIMELOCK_DELAY ?? TWO_DAYS),
+        Number(process.env.TIMELOCK_DELAY ?? EIGHT_HOURS),
     );
 
     const timelock = m.contract("TimelockController", [
