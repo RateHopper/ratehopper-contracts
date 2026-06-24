@@ -148,6 +148,32 @@ function closeLpCall(ctx: Ctx, tokenId: bigint, exitBps = 10_000) {
         .closeLp(ctx.safeAddr, tokenId, 500, 1n, 1n, SLIP, exitBps, 0, 0, DEADLINE, 0);
 }
 
+function collectLpCall(
+    ctx: Ctx,
+    tokenId: bigint,
+    opts: {
+        swap?: boolean;
+        tier?: number;
+        amountOutMin?: bigint;
+        expectedOut?: bigint;
+        slippage?: number;
+        deadline?: bigint;
+    } = {},
+) {
+    return ctx.rhp
+        .connect(ctx.operatorEOA)
+        .collectLp(
+            ctx.safeAddr,
+            tokenId,
+            opts.swap ?? true,
+            opts.tier ?? 500,
+            opts.amountOutMin ?? 1n,
+            opts.expectedOut ?? 1n,
+            opts.slippage ?? SLIP,
+            opts.deadline ?? DEADLINE,
+        );
+}
+
 describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
     // ── _validatePool branches (revert before any Safe interaction) ──────
 
@@ -245,10 +271,9 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         const ctx = await loadFixture(deployMockHarness);
         const tokenId = await openLp(ctx);
         await (await ctx.npm.setTokens(tokenId, ctx.stranger.address, ctx.usdcAddr)).wait();
-        await expect(ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId)).to.be.revertedWithCustomError(
-            ctx.rhp,
-            "WrongTokenPair",
-        );
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE),
+        ).to.be.revertedWithCustomError(ctx.rhp, "WrongTokenPair");
     });
 
     it("collectLp tolerates a token whose fee transfer returns false (non-reverting): fee waived, full amount forwarded", async function () {
@@ -263,7 +288,9 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         const tWeth0 = await ctx.weth.balanceOf(ctx.treasury.address);
         const sWeth0 = await ctx.weth.balanceOf(ctx.safeAddr);
 
-        await expect(ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId))
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE),
+        )
             .to.emit(ctx.rhp, "CollectFeeTransferFailed")
             .withArgs(ctx.safeAddr, tokenId, ctx.wethAddr, (owed0 * COLLECT_FEE_BPS) / 10_000n);
 
@@ -299,7 +326,9 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         const sWeth0 = await ctx.weth.balanceOf(ctx.safeAddr);
         const sUsdc0 = await ctx.usdc.balanceOf(ctx.safeAddr);
 
-        await (await ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId)).wait();
+        await (
+            await ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE)
+        ).wait();
 
         const fee0 = (owed0 * COLLECT_FEE_BPS) / 10_000n;
         const fee1 = (owed1 * COLLECT_FEE_BPS) / 10_000n;
@@ -384,7 +413,9 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
 
         // collectLp with only USDC owed → _collectLp `collected0 == 0` branch.
         await (await ctx.npm.setOwed(tokenId, 0n, 300_000n)).wait();
-        await (await ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId)).wait();
+        await (
+            await ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE)
+        ).wait();
         const cev = (await ctx.rhp.queryFilter(ctx.rhp.filters.FeesCollected(ctx.safeAddr, tokenId), -5)).slice(-1)[0]
             .args;
         expect(cev.collected0).to.equal(0n);
@@ -433,18 +464,16 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
 
     it("collectLp reverts ZeroAddress when _onBehalfOf is the zero address", async function () {
         const ctx = await loadFixture(deployMockHarness);
-        await expect(ctx.rhp.connect(ctx.operatorEOA).collectLp(ZERO, 1n)).to.be.revertedWithCustomError(
-            ctx.rhp,
-            "ZeroAddress",
-        );
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).collectLp(ZERO, 1n, false, 500, 1n, 1n, SLIP, DEADLINE),
+        ).to.be.revertedWithCustomError(ctx.rhp, "ZeroAddress");
     });
 
     it("collectLp reverts NotAuthorized for a caller that is neither operator nor Safe", async function () {
         const ctx = await loadFixture(deployMockHarness);
-        await expect(ctx.rhp.connect(ctx.stranger).collectLp(ctx.safeAddr, 1n)).to.be.revertedWithCustomError(
-            ctx.rhp,
-            "NotAuthorized",
-        );
+        await expect(
+            ctx.rhp.connect(ctx.stranger).collectLp(ctx.safeAddr, 1n, false, 500, 1n, 1n, SLIP, DEADLINE),
+        ).to.be.revertedWithCustomError(ctx.rhp, "NotAuthorized");
     });
 
     // ── Remaining openLp entry guards ───────────────────────────────────
@@ -471,6 +500,18 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
             ctx.rhp
                 .connect(ctx.operatorEOA)
                 .openLp(ctx.safeAddr, USDC_AMOUNT, 0, 0, 10000, 0, 0, 500, 1n, 1n, SLIP, DEADLINE),
+        ).to.be.revertedWithCustomError(ctx.rhp, "FeeTierNotAllowed");
+    });
+
+    it("openLp checks the LP fee tier before swapAmountOutMin (revert-order no-op vs HEAD)", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        // Disallowed LP tier AND swapAmountOutMin == 0: the LP-tier check sits
+        // before the swap-min check, so FeeTierNotAllowed must win — locking the
+        // post-refactor _validateSwapParams ordering to the pre-refactor inline order.
+        await expect(
+            ctx.rhp
+                .connect(ctx.operatorEOA)
+                .openLp(ctx.safeAddr, USDC_AMOUNT, 0, 0, 10000, 0, 0, 500, 0n, 1n, SLIP, DEADLINE),
         ).to.be.revertedWithCustomError(ctx.rhp, "FeeTierNotAllowed");
     });
 
@@ -536,30 +577,27 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
 
     it("collectLp reverts UnknownPosition for a tokenId never opened via this contract", async function () {
         const ctx = await loadFixture(deployMockHarness);
-        await expect(ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, 999n)).to.be.revertedWithCustomError(
-            ctx.rhp,
-            "UnknownPosition",
-        );
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, 999n, false, 500, 1n, 1n, SLIP, DEADLINE),
+        ).to.be.revertedWithCustomError(ctx.rhp, "UnknownPosition");
     });
 
     it("collectLp reverts LpNotOnSafe when the position is owned by another address", async function () {
         const ctx = await loadFixture(deployMockHarness);
         const tokenId = await openLp(ctx);
         await (await ctx.npm.setOwner(tokenId, ctx.stranger.address)).wait();
-        await expect(ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId)).to.be.revertedWithCustomError(
-            ctx.rhp,
-            "LpNotOnSafe",
-        );
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE),
+        ).to.be.revertedWithCustomError(ctx.rhp, "LpNotOnSafe");
     });
 
     it("collectLp reverts WrongTokenPair when only token1 is wrong (second operand)", async function () {
         const ctx = await loadFixture(deployMockHarness);
         const tokenId = await openLp(ctx);
         await (await ctx.npm.setTokens(tokenId, ctx.wethAddr, ctx.stranger.address)).wait();
-        await expect(ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId)).to.be.revertedWithCustomError(
-            ctx.rhp,
-            "WrongTokenPair",
-        );
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE),
+        ).to.be.revertedWithCustomError(ctx.rhp, "WrongTokenPair");
     });
 
     it("closeLp reverts MinUsdcOutNotMet when realized USDC is below minUsdcOut", async function () {
@@ -631,7 +669,9 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         const tokenId = await openLp(ctx);
         await (await ctx.npm.setOwed(tokenId, 1_000_000n, 1_000_000n)).wait();
         await (await ctx.weth.setRevertTransferTo(ctx.treasury.address)).wait();
-        await expect(ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId))
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE),
+        )
             .to.emit(ctx.rhp, "CollectFeeTransferFailed")
             .withArgs(ctx.safeAddr, tokenId, ctx.wethAddr, (1_000_000n * COLLECT_FEE_BPS) / 10_000n);
         const ev = (await ctx.rhp.queryFilter(ctx.rhp.filters.FeesCollected(ctx.safeAddr, tokenId), -5)).slice(-1)[0]
@@ -645,12 +685,120 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         const tokenId = await openLp(ctx);
         await (await ctx.npm.setOwed(tokenId, 800_000n, 400_000n)).wait();
         const tWeth0 = await ctx.weth.balanceOf(ctx.treasury.address);
-        await (await ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId)).wait();
+        await (
+            await ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE)
+        ).wait();
         const ev = (await ctx.rhp.queryFilter(ctx.rhp.filters.FeesCollected(ctx.safeAddr, tokenId), -5)).slice(-1)[0]
             .args;
         expect(ev.fee0).to.equal(0n);
         expect(ev.fee1).to.equal(0n);
         expect((await ctx.weth.balanceOf(ctx.treasury.address)) - tWeth0).to.equal(0n);
+    });
+
+    // ── collectLp swapWethToUsdc flag ───────────────────────────────────
+
+    it("collectLp swap=true: WETH fee→treasury, WETH remainder swapped, USDC = remainder + router output", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
+        const owed0 = 800_000n;
+        const owed1 = 400_000n;
+        const routerOut = 600_000n;
+        await (await ctx.npm.setOwed(tokenId, owed0, owed1)).wait();
+        await (await ctx.router.setOutput(routerOut)).wait();
+
+        const tWeth0 = await ctx.weth.balanceOf(ctx.treasury.address);
+        const sWeth0 = await ctx.weth.balanceOf(ctx.safeAddr);
+        const sUsdc0 = await ctx.usdc.balanceOf(ctx.safeAddr);
+
+        await (await collectLpCall(ctx, tokenId, { swap: true })).wait();
+
+        const fee0 = (owed0 * COLLECT_FEE_BPS) / 10_000n;
+        const fee1 = (owed1 * COLLECT_FEE_BPS) / 10_000n;
+        expect((await ctx.weth.balanceOf(ctx.treasury.address)) - tWeth0).to.equal(fee0);
+        // WETH remainder forwarded to the Safe was fully swapped away.
+        expect((await ctx.weth.balanceOf(ctx.safeAddr)) - sWeth0).to.equal(0n);
+        expect((await ctx.usdc.balanceOf(ctx.safeAddr)) - sUsdc0).to.equal(owed1 - fee1 + routerOut);
+        // Position stays open.
+        expect(await ctx.npm.ownerOf(tokenId)).to.equal(ctx.safeAddr);
+        expect(await ctx.rhp.residualBasisUsd6Of(tokenId)).to.equal(USDC_AMOUNT);
+    });
+
+    it("collectLp swap=false: WETH remainder stays on the Safe, no swap", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
+        const owed0 = 800_000n;
+        const owed1 = 400_000n;
+        await (await ctx.npm.setOwed(tokenId, owed0, owed1)).wait();
+        // Router output set non-zero to prove it is NOT consumed on this path.
+        await (await ctx.router.setOutput(999_999n)).wait();
+
+        const sWeth0 = await ctx.weth.balanceOf(ctx.safeAddr);
+        const sUsdc0 = await ctx.usdc.balanceOf(ctx.safeAddr);
+
+        await (await collectLpCall(ctx, tokenId, { swap: false })).wait();
+
+        const fee0 = (owed0 * COLLECT_FEE_BPS) / 10_000n;
+        const fee1 = (owed1 * COLLECT_FEE_BPS) / 10_000n;
+        expect((await ctx.weth.balanceOf(ctx.safeAddr)) - sWeth0).to.equal(owed0 - fee0);
+        expect((await ctx.usdc.balanceOf(ctx.safeAddr)) - sUsdc0).to.equal(owed1 - fee1);
+        expect(await ctx.npm.ownerOf(tokenId)).to.equal(ctx.safeAddr);
+    });
+
+    it("collectLp swap=true with USDC-only fees (wethDelta == 0): swap skipped, no revert, USDC forwarded", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
+        const owed1 = 300_000n;
+        await (await ctx.npm.setOwed(tokenId, 0n, owed1)).wait();
+        await (await ctx.router.setOutput(0n)).wait();
+
+        const sUsdc0 = await ctx.usdc.balanceOf(ctx.safeAddr);
+        await (await collectLpCall(ctx, tokenId, { swap: true })).wait();
+
+        const fee1 = (owed1 * COLLECT_FEE_BPS) / 10_000n;
+        expect((await ctx.usdc.balanceOf(ctx.safeAddr)) - sUsdc0).to.equal(owed1 - fee1);
+        expect(await ctx.npm.ownerOf(tokenId)).to.equal(ctx.safeAddr);
+    });
+
+    it("collectLp swap=true validates each swap-param guard", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
+        await (await ctx.npm.setOwed(tokenId, 800_000n, 400_000n)).wait();
+
+        await expect(collectLpCall(ctx, tokenId, { swap: true, deadline: 0n })).to.be.revertedWithCustomError(
+            ctx.rhp,
+            "DeadlineExpired",
+        );
+        await expect(collectLpCall(ctx, tokenId, { swap: true, slippage: 9999 })).to.be.revertedWithCustomError(
+            ctx.rhp,
+            "SlippageAboveMax",
+        );
+        await expect(collectLpCall(ctx, tokenId, { swap: true, tier: 10000 })).to.be.revertedWithCustomError(
+            ctx.rhp,
+            "FeeTierNotAllowed",
+        );
+        await expect(collectLpCall(ctx, tokenId, { swap: true, amountOutMin: 0n })).to.be.revertedWithCustomError(
+            ctx.rhp,
+            "InvalidSwapAmountOutMin",
+        );
+        await expect(collectLpCall(ctx, tokenId, { swap: true, expectedOut: 0n })).to.be.revertedWithCustomError(
+            ctx.rhp,
+            "InvalidExpectedSwapOut",
+        );
+        await expect(
+            collectLpCall(ctx, tokenId, { swap: true, amountOutMin: 1n, expectedOut: 1_000_000n }),
+        ).to.be.revertedWithCustomError(ctx.rhp, "SwapMinBelowSlippageFloor");
+    });
+
+    it("collectLp swap=false ignores garbage swap params (validation skipped)", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
+        await (await ctx.npm.setOwed(tokenId, 800_000n, 400_000n)).wait();
+        // Disallowed tier, zero swapAmountOutMin, zero expectedOut, zero slippage,
+        // expired deadline — all meaningless on the no-swap path.
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 10000, 0n, 0n, 0, 0n),
+        ).to.emit(ctx.rhp, "FeesCollected");
+        expect(await ctx.npm.ownerOf(tokenId)).to.equal(ctx.safeAddr);
     });
 
     // ── rescueERC721 ────────────────────────────────────────────────────
