@@ -356,20 +356,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ) external nonReentrant onlyOperatorOrSafe(_onBehalfOf) returns (uint256 tokenId) {
         if (block.timestamp > deadline) revert DeadlineExpired();
         if (usdcAmount == 0) revert InvalidUsdcAmount();
-        if (slippageBps == 0) revert SlippageTooLow();
-        if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
-        if (!allowedFeeTier[lpPoolFeeTier]) revert FeeTierNotAllowed();
-        if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
-        if (swapAmountOutMin == 0) revert InvalidSwapAmountOutMin();
-        if (expectedSwapOut == 0) revert InvalidExpectedSwapOut();
-        // Tie `slippageBps` to the swap min. Without this check `slippageBps`
-        // is only an entry guard — the swap itself uses `swapAmountOutMin`
-        // alone. Forcing the caller-supplied min to honor the quoter-derived
-        // floor means a tight `slippageBps` cannot coexist with a weak
-        // `swapAmountOutMin`.
-        if (swapAmountOutMin < (expectedSwapOut * (10_000 - slippageBps)) / 10_000) {
-            revert SwapMinBelowSlippageFloor();
-        }
+        _validateSwapParams(swapPoolFeeTier, swapAmountOutMin, expectedSwapOut, slippageBps, lpPoolFeeTier, true);
         _validatePool(UNISWAP_V3_FACTORY.getPool(address(USDC), address(WETH), swapPoolFeeTier));
         _validatePool(UNISWAP_V3_FACTORY.getPool(address(WETH), address(USDC), lpPoolFeeTier));
 
@@ -380,28 +367,18 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         // produces (don't drain any pre-existing WETH the Safe held).
         uint256 wethBefore = WETH.balanceOf(_onBehalfOf);
 
-        // 1. Build the swap calldata in-contract — caller controls only the
-        //    fee tier, not the selector / tokens / recipient. `amountOutMinimum`
-        //    is caller-supplied (`swapAmountOutMin`, derived off-chain from a
-        //    quote with a tolerance buffer); spot-price-based fallback is
-        //    intentionally removed to prevent in-block manipulation.
-        bytes memory swapData = abi.encodeWithSelector(
-            EXACT_INPUT_SINGLE_SELECTOR,
-            ExactInputSingleParams({
-                tokenIn: address(USDC),
-                tokenOut: address(WETH),
-                fee: swapPoolFeeTier,
-                recipient: _onBehalfOf,
-                amountIn: halfUsdc,
-                amountOutMinimum: swapAmountOutMin,
-                sqrtPriceLimitX96: 0
-            })
+        // 1. Swap half the USDC to WETH on the pinned SwapRouter02.
+        _swapExactInputSingle(
+            _onBehalfOf,
+            address(USDC),
+            address(WETH),
+            swapPoolFeeTier,
+            halfUsdc,
+            swapAmountOutMin,
+            20,
+            3,
+            21
         );
-
-        // 2. Approve SwapRouter for halfUsdc and run the swap.
-        _safeApprove(_onBehalfOf, address(USDC), SWAP_ROUTER, halfUsdc, 20);
-        _safeExec(_onBehalfOf, SWAP_ROUTER, 0, swapData, 3);
-        _safeApprove(_onBehalfOf, address(USDC), SWAP_ROUTER, 0, 21); // reset
 
         uint128 wethReceived = (WETH.balanceOf(_onBehalfOf) - wethBefore).toUint128();
         // post-swap zero-output guard. Even with caller-supplied
@@ -516,15 +493,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ) external nonReentrant onlyOperatorOrSafe(_onBehalfOf) {
         if (block.timestamp > deadline) revert DeadlineExpired();
         if (exitBps == 0 || exitBps > 10_000) revert InvalidExitBps();
-        if (slippageBps == 0) revert SlippageTooLow();
-        if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
-        if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
-        if (swapAmountOutMin == 0) revert InvalidSwapAmountOutMin();
-        if (expectedSwapOut == 0) revert InvalidExpectedSwapOut();
-        // Tie `slippageBps` to the swap min. See `openLp` for the rationale.
-        if (swapAmountOutMin < (expectedSwapOut * (10_000 - slippageBps)) / 10_000) {
-            revert SwapMinBelowSlippageFloor();
-        }
+        _validateSwapParams(swapPoolFeeTier, swapAmountOutMin, expectedSwapOut, slippageBps, 0, false);
         _validatePool(UNISWAP_V3_FACTORY.getPool(address(WETH), address(USDC), swapPoolFeeTier));
 
         // Read stored basis FIRST so unknown tokenIds revert with the precise
@@ -617,27 +586,20 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
             );
         }
 
-        // 5. Swap the WETH delta on the Safe → USDC, mirroring openLp's
-        //    structure (module-mediated, on-chain calldata). `amountOutMinimum`
-        //    is caller-supplied (`swapAmountOutMin`) — no spot-price-derived
-        //    fallback to prevent in-block manipulation.
+        // 5. Swap the WETH delta on the Safe → USDC.
         uint128 wethToSwap = (WETH.balanceOf(_onBehalfOf) - wethBefore).toUint128();
         if (wethToSwap > 0) {
-            bytes memory swapData = abi.encodeWithSelector(
-                EXACT_INPUT_SINGLE_SELECTOR,
-                ExactInputSingleParams({
-                    tokenIn: address(WETH),
-                    tokenOut: address(USDC),
-                    fee: swapPoolFeeTier,
-                    recipient: _onBehalfOf,
-                    amountIn: uint256(wethToSwap),
-                    amountOutMinimum: swapAmountOutMin,
-                    sqrtPriceLimitX96: 0
-                })
+            _swapExactInputSingle(
+                _onBehalfOf,
+                address(WETH),
+                address(USDC),
+                swapPoolFeeTier,
+                uint256(wethToSwap),
+                swapAmountOutMin,
+                26,
+                10,
+                27
             );
-            _safeApprove(_onBehalfOf, address(WETH), SWAP_ROUTER, uint256(wethToSwap), 26);
-            _safeExec(_onBehalfOf, SWAP_ROUTER, 0, swapData, 10);
-            _safeApprove(_onBehalfOf, address(WETH), SWAP_ROUTER, 0, 27);
         }
 
         uint128 currentValueUsd6 = (USDC.balanceOf(_onBehalfOf) - usdcBefore).toUint128();
@@ -692,7 +654,29 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///         backend operator (`registry.safeOperator()`).
     /// @param  _onBehalfOf     The Safe that owns the LP position.
     /// @param  tokenId  Uniswap V3 LP NFT id (owned by `_onBehalfOf`).
-    function collectLp(address _onBehalfOf, uint256 tokenId) external nonReentrant onlyOperatorOrSafe(_onBehalfOf) {
+    /// @param  swapWethToUsdc When true, the WETH remainder forwarded to the
+    ///                      Safe by the harvest is swapped to USDC on the pinned
+    ///                      SwapRouter02; the remaining swap params are validated
+    ///                      (mirroring `closeLp`'s entry block) and used. When
+    ///                      false, the WETH stays on the Safe and the swap params
+    ///                      are IGNORED — no validation is performed on them.
+    /// @param  swapPoolFeeTier Swap pool fee tier (only used when `swapWethToUsdc`).
+    /// @param  swapAmountOutMin Min USDC out of the WETH→USDC swap (only used
+    ///                      when `swapWethToUsdc`).
+    /// @param  expectedSwapOut Quoter-derived expected swap output binding
+    ///                      `slippageBps` (only used when `swapWethToUsdc`).
+    /// @param  slippageBps  Slippage tolerance in bps (only used when `swapWethToUsdc`).
+    /// @param  deadline     Staleness guard (only used when `swapWethToUsdc`).
+    function collectLp(
+        address _onBehalfOf,
+        uint256 tokenId,
+        bool swapWethToUsdc,
+        uint24 swapPoolFeeTier,
+        uint256 swapAmountOutMin,
+        uint256 expectedSwapOut,
+        uint16 slippageBps,
+        uint256 deadline
+    ) external nonReentrant onlyOperatorOrSafe(_onBehalfOf) {
         // Reject tokenIds the protocol does not manage: only positions opened
         // via `openLp` ever populate `residualBasisUsd6Of`. Without this gate
         // the Safe or `safeOperator` could route any Safe-owned WETH/USDC NPM
@@ -702,7 +686,33 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         // contract (so the pair is already WETH/USDC), but the Safe could have
         // transferred the NFT away afterwards — still verify ownership.
         _requireWethUsdcPositionOwnedBy(_onBehalfOf, tokenId);
-        _collectLp(_onBehalfOf, tokenId);
+
+        if (swapWethToUsdc) {
+            // Validate swap params only on the swap path. On the no-swap path
+            // these params are meaningless and intentionally left unvalidated.
+            if (block.timestamp > deadline) revert DeadlineExpired();
+            _validateSwapParams(swapPoolFeeTier, swapAmountOutMin, expectedSwapOut, slippageBps, 0, false);
+            _validatePool(UNISWAP_V3_FACTORY.getPool(address(WETH), address(USDC), swapPoolFeeTier));
+
+            uint256 wethBefore = WETH.balanceOf(_onBehalfOf);
+            _collectLp(_onBehalfOf, tokenId);
+            uint256 wethDelta = WETH.balanceOf(_onBehalfOf) - wethBefore;
+            if (wethDelta > 0) {
+                _swapExactInputSingle(
+                    _onBehalfOf,
+                    address(WETH),
+                    address(USDC),
+                    swapPoolFeeTier,
+                    wethDelta,
+                    swapAmountOutMin,
+                    26,
+                    10,
+                    27
+                );
+            }
+        } else {
+            _collectLp(_onBehalfOf, tokenId);
+        }
     }
 
     /// @dev Internal collect-and-charge-fee helper. Routes the position's
@@ -768,6 +778,66 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
             ),
             step
         );
+    }
+
+    /// @dev Module-mediated `tokenIn → tokenOut` exact-input swap of `amountIn`
+    ///      on the pinned SwapRouter02, sending the output to `_onBehalfOf`. Swap
+    ///      calldata is built on-chain (selector / tokens / recipient fixed) so
+    ///      the caller cannot inject an alternative route. `approveStep` /
+    ///      `execStep` / `resetStep` are the `ModuleCallFailed` codes for the
+    ///      three sub-calls. Shared by `openLp`, `closeLp` and `collectLp`.
+    function _swapExactInputSingle(
+        address _onBehalfOf,
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint8 approveStep,
+        uint8 execStep,
+        uint8 resetStep
+    ) internal {
+        bytes memory swapData = abi.encodeWithSelector(
+            EXACT_INPUT_SINGLE_SELECTOR,
+            ExactInputSingleParams({
+                tokenIn: tokenIn,
+                tokenOut: tokenOut,
+                fee: fee,
+                recipient: _onBehalfOf,
+                amountIn: amountIn,
+                amountOutMinimum: amountOutMin,
+                sqrtPriceLimitX96: 0
+            })
+        );
+        _safeApprove(_onBehalfOf, tokenIn, SWAP_ROUTER, amountIn, approveStep);
+        _safeExec(_onBehalfOf, SWAP_ROUTER, 0, swapData, execStep);
+        _safeApprove(_onBehalfOf, tokenIn, SWAP_ROUTER, 0, resetStep);
+    }
+
+    /// @dev Shared swap-param validation for `openLp` / `closeLp` / `collectLp`.
+    ///      `deadline` and each function's own guards stay inline at the call
+    ///      site. Ties `slippageBps` to the swap min: forcing the caller-supplied
+    ///      `swapAmountOutMin` to honor the quoter-derived floor means a tight
+    ///      `slippageBps` cannot coexist with a weak `swapAmountOutMin`.
+    function _validateSwapParams(
+        uint24 swapPoolFeeTier,
+        uint256 swapAmountOutMin,
+        uint256 expectedSwapOut,
+        uint16 slippageBps,
+        uint24 lpPoolFeeTier,
+        bool checkLpPoolFeeTier
+    ) internal view {
+        if (slippageBps == 0) revert SlippageTooLow();
+        if (slippageBps > maxSlippageBps) revert SlippageAboveMax();
+        // openLp's LP-pool tier, kept in its original slot (before the swap
+        // tier) so the revert order matches the pre-refactor inline checks.
+        if (checkLpPoolFeeTier && !allowedFeeTier[lpPoolFeeTier]) revert FeeTierNotAllowed();
+        if (!allowedFeeTier[swapPoolFeeTier]) revert FeeTierNotAllowed();
+        if (swapAmountOutMin == 0) revert InvalidSwapAmountOutMin();
+        if (expectedSwapOut == 0) revert InvalidExpectedSwapOut();
+        if (swapAmountOutMin < (expectedSwapOut * (10_000 - slippageBps)) / 10_000) {
+            revert SwapMinBelowSlippageFloor();
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
