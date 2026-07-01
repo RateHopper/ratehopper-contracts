@@ -26,6 +26,8 @@ RateHopper Contracts is a smart contract system that enables users to automatica
 
 - **Uniswap V3 LP Lifecycle**: `RatehopperUniV3Positions` is a Gnosis Safe module that opens, harvests fees from, and closes WETH/USDC LP positions atomically. Charges a configurable performance fee on profit at close, plus a separate fee on accrued LP fees. Critical setters are timelock-gated.
 
+- **Aerodrome Slipstream LP Lifecycle**: `RatehopperAerodromePositions` is a sibling Safe module providing the same `openLp`/`closeLp`/`collectLp` surface for Aerodrome's concentrated-liquidity (CL) WETH/USDC pools. Positions run **unstaked** (the NFT stays with the Safe; no gauge staking or AERO emissions). Differs from the Uniswap helper only in the Slipstream deltas: pools are keyed by `int24 tickSpacing` (not `uint24 fee`), the mint/swap structs carry `tickSpacing` + a `deadline`, and the swap-router selector is recomputed (`0xa026383e`).
+
 ## Architecture
 
 The system consists of several key components:
@@ -66,7 +68,9 @@ The system consists of several key components:
 
     Caller passes per-call `swapAmountOutMin` and `deadline` (audit fixes C-01 / H-02). The constructor rejects any non-WETH/USDC token pair (M-08). Performance fee is charged on net profit (`currentValueUsd6 - basisUsd6`); fee-collect is charged on accrued fees only. All fee setters are gated by `CRITICAL_ROLE` on a TimelockController (H-04); `rescueToken` and similar emergency ops are gated by `DEFAULT_ADMIN_ROLE`.
 
-7. **Morpho Libraries**: Supporting libraries for the Morpho protocol:
+7. **RatehopperAerodromePositions.sol**: Sibling Safe module to (6) for Aerodrome Slipstream (CL) WETH/USDC LPs, run **unstaked**. Same `openLp()`/`closeLp()`/`collectLp()` surface, same fee/basis logic, same access-control model. The only differences are the Slipstream deltas: the allow-list is keyed by `int24 tickSpacing` (`allowedTickSpacing`, defaults `{100, 200}`) instead of `uint24 fee`; `ICLFactory.getPool(t0,t1,tickSpacing)` resolves pools; the `MintParams` struct carries `tickSpacing` + a trailing `sqrtPriceX96`; `slot0` has no `feeProtocol` field; and the swap-router `exactInputSingle` struct carries `tickSpacing` + `deadline`, so its selector is recomputed to `0xa026383e`.
+
+8. **Morpho Libraries**: Supporting libraries for the Morpho protocol:
 
     - `MathLib.sol`: Provides fixed-point arithmetic operations for the Morpho protocol
     - `SharesMathLib.sol`: Handles share-to-asset conversion with virtual shares to protect against share price manipulations
@@ -268,6 +272,7 @@ This compiles the contracts and writes:
 
 - `abis/LeveragedPosition.json`
 - `abis/RatehopperUniV3Positions.json`
+- `abis/RatehopperAerodromePositions.json`
 - `abis/SafeDebtManager.json`
 - `abis/SafeExecTransactionWrapper.json`
 
