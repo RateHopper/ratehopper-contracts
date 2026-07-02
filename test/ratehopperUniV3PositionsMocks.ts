@@ -175,6 +175,46 @@ function collectLpCall(
 }
 
 describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
+
+    it("openLp reverts on reentrancy", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const rhpAddr = await ctx.rhp.getAddress();
+        const callData = ctx.rhp.interface.encodeFunctionData("openLp", [
+            ctx.safeAddr, USDC_AMOUNT, 0, 0, 500, 0n, 0n, 500, 1n, 1n, SLIP, DEADLINE
+        ]);
+        await (await ctx.router.setCallback(rhpAddr, callData)).wait();
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).openLp(ctx.safeAddr, USDC_AMOUNT, 0, 0, 500, 0n, 0n, 500, 1n, 1n, SLIP, DEADLINE)
+        ).to.be.revertedWithCustomError(ctx.rhp, "ReentrancyGuardReentrantCall");
+    });
+
+    it("closeLp reverts on reentrancy", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
+        const rhpAddr = await ctx.rhp.getAddress();
+        const callData = ctx.rhp.interface.encodeFunctionData("closeLp", [
+            ctx.safeAddr, tokenId, 500, 1n, 1n, SLIP, 10_000, 0, 0, DEADLINE, 0
+        ]);
+        await (await ctx.router.setCallback(rhpAddr, callData)).wait();
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).closeLp(ctx.safeAddr, tokenId, 500, 1n, 1n, SLIP, 10_000, 0, 0, DEADLINE, 0)
+        ).to.be.revertedWithCustomError(ctx.rhp, "ReentrancyGuardReentrantCall");
+    });
+
+    it("collectLp reverts on reentrancy", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
+        await (await ctx.npm.setOwed(tokenId, 100n, 100n)).wait();
+        const rhpAddr = await ctx.rhp.getAddress();
+        const callData = ctx.rhp.interface.encodeFunctionData("collectLp", [
+            ctx.safeAddr, tokenId, true, 500, 1n, 1n, SLIP, DEADLINE
+        ]);
+        await (await ctx.router.setCallback(rhpAddr, callData)).wait();
+        await expect(
+            ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, true, 500, 1n, 1n, SLIP, DEADLINE)
+        ).to.be.revertedWithCustomError(ctx.rhp, "ReentrancyGuardReentrantCall");
+    });
+
     // ── _validatePool branches (revert before any Safe interaction) ──────
 
     it("openLp reverts PoolDoesNotExist when the factory returns address(0)", async function () {
@@ -431,6 +471,39 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
     });
 
     // ── Access-control modifier branches ────────────────────────────────
+
+
+    it("onlyOperatorOrSafe allows the Safe itself to call the functions directly", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        
+        const safeSigner = await ethers.getImpersonatedSigner(ctx.safeAddr);
+        await ctx.deployer.sendTransaction({ to: ctx.safeAddr, value: ethers.parseEther("1") });
+        
+        // openLp
+        await (await ctx.router.setOutput(WETH_OUT)).wait();
+        await (
+            await ctx.rhp
+                .connect(safeSigner)
+                .openLp(ctx.safeAddr, USDC_AMOUNT, 0, 0, 500, 0n, 0n, 500, 1n, 1n, SLIP, DEADLINE)
+        ).wait();
+        const opened = await ctx.rhp.queryFilter(ctx.rhp.filters.PositionOpened(ctx.safeAddr), -1);
+        const tokenId = opened[0].args.tokenId;
+
+        // collectLp
+        await (await ctx.npm.setOwed(tokenId, 100n, 100n)).wait();
+        await (
+            await ctx.rhp
+                .connect(safeSigner)
+                .collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE)
+        ).wait();
+
+        // closeLp
+        await (
+            await ctx.rhp
+                .connect(safeSigner)
+                .closeLp(ctx.safeAddr, tokenId, 500, 1n, 1n, SLIP, 10_000, 0, 0, DEADLINE, 0)
+        ).wait();
+    });
 
     it("openLp reverts ZeroAddress when _onBehalfOf is the zero address", async function () {
         const ctx = await loadFixture(deployMockHarness);
@@ -742,6 +815,60 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         expect((await ctx.weth.balanceOf(ctx.safeAddr)) - sWeth0).to.equal(owed0 - fee0);
         expect((await ctx.usdc.balanceOf(ctx.safeAddr)) - sUsdc0).to.equal(owed1 - fee1);
         expect(await ctx.npm.ownerOf(tokenId)).to.equal(ctx.safeAddr);
+    });
+
+
+    it("_chargeCollectFee with feeCollectBps = 10000 takes 100% of fees and forwards 0 to Safe", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        
+        // Deploy a new RHP with MAX_FEE_BPS = 10000
+        const RHP = await ethers.getContractFactory("RatehopperUniV3Positions");
+        const rhp100 = await RHP.deploy(
+            await ctx.npm.getAddress(),
+            await ctx.reg.getAddress(),
+            ctx.usdcAddr,
+            ctx.wethAddr,
+            await ctx.router.getAddress(),
+            await ctx.factory.getAddress(),
+            ctx.treasury.address,
+            10000, // perf fee
+            10000, // collect fee
+            10000, // max fee
+            ctx.deployer.address,
+            ctx.deployer.address,
+            0,
+            0
+        );
+        await rhp100.waitForDeployment();
+        await (await ctx.reg.connect(ctx.deployer).setOperator(ctx.operatorEOA.address)).wait();
+
+        // Impersonate Safe to approve USDC
+        const safeSigner = await ethers.getImpersonatedSigner(ctx.safeAddr);
+        await ctx.deployer.sendTransaction({ to: ctx.safeAddr, value: ethers.parseEther("1") });
+        await (await ctx.usdc.connect(safeSigner).approve(await rhp100.getAddress(), USDC_AMOUNT)).wait();
+
+        await (await ctx.router.setOutput(WETH_OUT)).wait();
+        await (
+            await rhp100
+                .connect(ctx.operatorEOA)
+                .openLp(ctx.safeAddr, USDC_AMOUNT, 0, 0, 500, 0n, 0n, 500, 1n, 1n, SLIP, DEADLINE)
+        ).wait();
+        const opened = await rhp100.queryFilter(rhp100.filters.PositionOpened(ctx.safeAddr), -1);
+        const tokenId = opened[0].args.tokenId;
+
+        const owed0 = 800_000n;
+        const owed1 = 400_000n;
+        await (await ctx.npm.setOwed(tokenId, owed0, owed1)).wait();
+
+        const tWeth0 = await ctx.weth.balanceOf(ctx.treasury.address);
+        const sWeth0 = await ctx.weth.balanceOf(ctx.safeAddr);
+        const sUsdc0 = await ctx.usdc.balanceOf(ctx.safeAddr);
+
+        await (await rhp100.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE)).wait();
+
+        expect((await ctx.weth.balanceOf(ctx.treasury.address)) - tWeth0).to.equal(owed0);
+        expect((await ctx.weth.balanceOf(ctx.safeAddr)) - sWeth0).to.equal(0n);
+        expect((await ctx.usdc.balanceOf(ctx.safeAddr)) - sUsdc0).to.equal(0n);
     });
 
     it("collectLp swap=true with USDC-only fees (wethDelta == 0): swap skipped, no revert, USDC forwarded", async function () {

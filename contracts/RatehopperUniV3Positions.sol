@@ -226,9 +226,9 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     ///         it is NOT this contract.
     modifier onlyOperatorOrSafe(address _onBehalfOf) {
         if (_onBehalfOf == address(0)) revert ZeroAddress();
-        if (msg.sender != REGISTRY.safeOperator() && msg.sender != _onBehalfOf) {
-            revert NotAuthorized();
-        }
+        bool isOperator = msg.sender == REGISTRY.safeOperator();
+        bool isSafe = msg.sender == _onBehalfOf;
+        if (!isOperator && !isSafe) revert NotAuthorized();
         _;
     }
 
@@ -419,9 +419,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
         // instead of a separate oracle / slot0 read — same data, no extra gas.
         uint128 currentValueUsd6;
         {
-            uint256 wethValueInUsdc = wethReceived > 0
-                ? Math.mulDiv(uint256(usedWeth), halfUsdc, uint256(wethReceived))
-                : 0;
+            uint256 wethValueInUsdc = Math.mulDiv(uint256(usedWeth), halfUsdc, uint256(wethReceived));
             currentValueUsd6 = (wethValueInUsdc + uint256(usedUsdc)).toUint128();
         }
 
