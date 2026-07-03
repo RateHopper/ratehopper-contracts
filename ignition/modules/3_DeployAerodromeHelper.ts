@@ -75,8 +75,8 @@ export default buildModule("DeployAerodromeHelper", (m) => {
     const timelockArg: any = timelock ?? reuseTimelockAddr;
 
     // ── RHA ────────────────────────────────────────────────────────────────
-    const registryAddr = process.env.RHA_REGISTRY ?? PROTOCOL_REGISTRY_ADDRESS;
-    const treasuryAddr = process.env.RHA_TREASURY ?? "";
+    const registryAddr = process.env.RHP_TREASURY ?? PROTOCOL_REGISTRY_ADDRESS;
+    const treasuryAddr = process.env.RHP_TREASURY ?? "";
     const initialAdminAddr = process.env.RHA_INITIAL_ADMIN ?? process.env.ADMIN_ADDRESS ?? "";
 
     requireAddress("registry (RHA_REGISTRY / PROTOCOL_REGISTRY_ADDRESS)", registryAddr);

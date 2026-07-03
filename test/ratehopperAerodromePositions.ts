@@ -198,6 +198,29 @@ describe("RatehopperAerodromePositions - mock harness (no fork)", function () {
         expect(await ctx.rha.allowedTickSpacing(60)).to.equal(false);
     });
 
+    it("constructor rejects maxFeeBps above 100%", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const RHA = await ethers.getContractFactory("RatehopperAerodromePositions");
+        await expect(
+            RHA.deploy(
+                await ctx.npm.getAddress(),
+                await ctx.reg.getAddress(),
+                ctx.usdcAddr,
+                ctx.wethAddr,
+                await ctx.router.getAddress(),
+                await ctx.factory.getAddress(),
+                ctx.treasury.address,
+                Number(PERF_FEE_BPS),
+                Number(COLLECT_FEE_BPS),
+                10_001,
+                ctx.deployer.address,
+                ctx.deployer.address,
+                0,
+                0,
+            ),
+        ).to.be.revertedWithCustomError(ctx.rha, "FeeAboveMax");
+    });
+
     // ── _validatePool branches (revert before any Safe interaction) ──────
 
     it("openLp reverts PoolDoesNotExist when the factory returns address(0)", async function () {
@@ -445,8 +468,13 @@ describe("RatehopperAerodromePositions - mock harness (no fork)", function () {
         expect(cev.collected1).to.equal(300_000n);
 
         // closeLp full → no WETH collected → `wethToSwap == 0` (swap skipped).
+        // Garbage swap params are ignored when no swap is needed.
         await (await ctx.router.setOutput(0n)).wait();
-        await (await closeLpCall(ctx, tokenId)).wait();
+        await (
+            await ctx.rha
+                .connect(ctx.operatorEOA)
+                .closeLp(ctx.safeAddr, tokenId, BAD_TS, 0n, 0n, 0, 10_000, 0, 0, DEADLINE, 0)
+        ).wait();
         const ev = (await ctx.rha.queryFilter(ctx.rha.filters.PositionClosed(ctx.safeAddr, tokenId), -5)).slice(-1)[0]
             .args;
         expect(Number(ev.exitBps)).to.equal(10_000);
@@ -571,22 +599,27 @@ describe("RatehopperAerodromePositions - mock harness (no fork)", function () {
 
     it("closeLp reverts SlippageAboveMax when slippageBps exceeds maxSlippageBps", async function () {
         const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
         await expect(
-            ctx.rha.connect(ctx.operatorEOA).closeLp(ctx.safeAddr, 1n, TS, 1n, 1n, 9999, 5_000, 0, 0, DEADLINE, 0),
+            ctx.rha.connect(ctx.operatorEOA).closeLp(ctx.safeAddr, tokenId, TS, 1n, 1n, 9999, 5_000, 0, 0, DEADLINE, 0),
         ).to.be.revertedWithCustomError(ctx.rha, "SlippageAboveMax");
     });
 
     it("closeLp reverts TickSpacingNotAllowed for a disallowed swap tick spacing", async function () {
         const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
         await expect(
-            ctx.rha.connect(ctx.operatorEOA).closeLp(ctx.safeAddr, 1n, BAD_TS, 1n, 1n, SLIP, 5_000, 0, 0, DEADLINE, 0),
+            ctx.rha
+                .connect(ctx.operatorEOA)
+                .closeLp(ctx.safeAddr, tokenId, BAD_TS, 1n, 1n, SLIP, 5_000, 0, 0, DEADLINE, 0),
         ).to.be.revertedWithCustomError(ctx.rha, "TickSpacingNotAllowed");
     });
 
     it("closeLp reverts InvalidSwapAmountOutMin when swapAmountOutMin == 0", async function () {
         const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
         await expect(
-            ctx.rha.connect(ctx.operatorEOA).closeLp(ctx.safeAddr, 1n, TS, 0n, 1n, SLIP, 5_000, 0, 0, DEADLINE, 0),
+            ctx.rha.connect(ctx.operatorEOA).closeLp(ctx.safeAddr, tokenId, TS, 0n, 1n, SLIP, 5_000, 0, 0, DEADLINE, 0),
         ).to.be.revertedWithCustomError(ctx.rha, "InvalidSwapAmountOutMin");
     });
 
@@ -842,7 +875,32 @@ describe("RatehopperAerodromePositions - mock harness (no fork)", function () {
         );
     });
 
-    // ── rescueERC721 ────────────────────────────────────────────────────
+    // ── rescue helpers ──────────────────────────────────────────────────
+
+    it("rescueToken transfers stranded ERC20s and rejects zero addresses / non-admin", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const rhaAddr = await ctx.rha.getAddress();
+        const amount = 123_456n;
+        await (await ctx.usdc.mint(rhaAddr, amount)).wait();
+
+        const recipientBefore = await ctx.usdc.balanceOf(ctx.stranger.address);
+        await expect(ctx.rha.connect(ctx.deployer).rescueToken(ctx.usdcAddr, ctx.stranger.address, amount))
+            .to.emit(ctx.rha, "TokenRescued")
+            .withArgs(ctx.usdcAddr, ctx.stranger.address, amount);
+        expect((await ctx.usdc.balanceOf(ctx.stranger.address)) - recipientBefore).to.equal(amount);
+        expect(await ctx.usdc.balanceOf(rhaAddr)).to.equal(0n);
+
+        await expect(
+            ctx.rha.connect(ctx.deployer).rescueToken(ZERO, ctx.stranger.address, 1n),
+        ).to.be.revertedWithCustomError(ctx.rha, "ZeroAddress");
+        await expect(ctx.rha.connect(ctx.deployer).rescueToken(ctx.usdcAddr, ZERO, 1n)).to.be.revertedWithCustomError(
+            ctx.rha,
+            "ZeroAddress",
+        );
+        await expect(
+            ctx.rha.connect(ctx.stranger).rescueToken(ctx.usdcAddr, ctx.stranger.address, 1n),
+        ).to.be.revertedWithCustomError(ctx.rha, "AccessControlUnauthorizedAccount");
+    });
 
     it("rescueERC721 transfers a stranded NFT and rejects zero addresses / non-admin", async function () {
         const ctx = await loadFixture(deployMockHarness);
