@@ -30,6 +30,26 @@ const CHAIN_CONFIG: Record<number, { chainid: number; browserURL: string }> = {
 /**
  * Parse the Ignition journal to extract constructor args for each deployed contract.
  */
+/**
+ * Ignition serializes `bigint` constructor args in the journal as tagged objects
+ * (`{ _kind: "bigint", value: "10000" }`) rather than JSON numbers. Passing those
+ * straight to hardhat-verify's ABI encoder throws "invalid BigNumber value" /
+ * "[object Object] cannot be encoded". Recursively rehydrate them to native
+ * bigints (and walk arrays/objects) so numeric uint256 args encode correctly.
+ */
+function reviveIgnitionValues(value: any): any {
+    if (Array.isArray(value)) return value.map(reviveIgnitionValues);
+    if (value && typeof value === "object") {
+        if (value._kind === "bigint" && typeof value.value === "string") {
+            return BigInt(value.value);
+        }
+        const out: Record<string, any> = {};
+        for (const [k, v] of Object.entries(value)) out[k] = reviveIgnitionValues(v);
+        return out;
+    }
+    return value;
+}
+
 async function getConstructorArgsFromJournal(journalPath: string): Promise<Record<string, any[]>> {
     const result: Record<string, any[]> = {};
     const fileStream = fs.createReadStream(journalPath);
@@ -40,7 +60,7 @@ async function getConstructorArgsFromJournal(journalPath: string): Promise<Recor
         try {
             const entry = JSON.parse(line);
             if (entry.type === "DEPLOYMENT_EXECUTION_STATE_INITIALIZE" && entry.constructorArgs) {
-                result[entry.futureId] = entry.constructorArgs;
+                result[entry.futureId] = reviveIgnitionValues(entry.constructorArgs);
             }
         } catch {
             // skip malformed lines
