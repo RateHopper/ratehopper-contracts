@@ -142,9 +142,16 @@ contract MockSwapRouter {
 
     uint256 public output;
     bool public pullInput = true;
+    address public callbackTarget;
+    bytes public callbackData;
 
     function setOutput(uint256 newOutput) external {
         output = newOutput;
+    }
+
+    function setCallback(address target, bytes calldata data) external {
+        callbackTarget = target;
+        callbackData = data;
     }
 
     function setPullInput(bool enabled) external {
@@ -152,6 +159,14 @@ contract MockSwapRouter {
     }
 
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
+        if (callbackTarget != address(0)) {
+            (bool success, bytes memory ret) = callbackTarget.call(callbackData);
+            if (!success) {
+                assembly {
+                    revert(add(ret, 32), mload(ret))
+                }
+            }
+        }
         if (pullInput && params.amountIn > 0) {
             IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
         }

@@ -1200,7 +1200,16 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                     {
                         to: rhpAddress,
                         value: "0",
-                        data: rhp.interface.encodeFunctionData("collectLp", [safeAddress, tokenId]),
+                        data: rhp.interface.encodeFunctionData("collectLp", [
+                            safeAddress,
+                            tokenId,
+                            false,
+                            500,
+                            1n,
+                            1n,
+                            SLIPPAGE_BPS,
+                            FAR_DEADLINE,
+                        ]),
                         operation: OperationType.Call,
                     },
                 ],
@@ -1267,7 +1276,16 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                     {
                         to: rhpAddress,
                         value: "0",
-                        data: rhp.interface.encodeFunctionData("collectLp", [safeAddress, tokenId]),
+                        data: rhp.interface.encodeFunctionData("collectLp", [
+                            safeAddress,
+                            tokenId,
+                            false,
+                            500,
+                            1n,
+                            1n,
+                            SLIPPAGE_BPS,
+                            FAR_DEADLINE,
+                        ]),
                         operation: OperationType.Call,
                     },
                 ],
@@ -1321,6 +1339,117 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
 
         // Position stays OPEN: collectLp neither changed liquidity nor burned.
         expect((await npm.positions(tokenId)).liquidity).to.equal(liqAfterDecrease);
+        expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
+    });
+
+    it("collectLp swap=true harvests fees then swaps the WETH leg to USDC for the Safe", async function () {
+        const { rhp, treasury } = await deployFixture();
+        const rhpAddress = await rhp.getAddress();
+        const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_VIEW_ABI, ethers.provider);
+        const wethCx = new ethers.Contract(WETH_ADDRESS, ERC20_VIEW_ABI, ethers.provider);
+        const npm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, ethers.provider);
+
+        await safeWallet.executeTransaction(await safeWallet.createEnableModuleTx(rhpAddress));
+        await supplyAndBorrowOnFluid(
+            signer,
+            safeWallet,
+            FLUID_WETH_USDC_VAULT,
+            ethers.parseEther("0.01"),
+            ethers.parseUnits("10", 6),
+        );
+        const usdcAmount = await usdc.balanceOf(safeAddress);
+        const { tickLower, tickUpper } = await wideTicksAroundSpot();
+
+        await safeWallet.executeTransaction(
+            await safeWallet.createTransaction({
+                transactions: [
+                    {
+                        to: rhpAddress,
+                        value: "0",
+                        data: rhp.interface.encodeFunctionData("openLp", [
+                            safeAddress,
+                            usdcAmount,
+                            tickLower,
+                            tickUpper,
+                            500,
+                            0,
+                            0,
+                            500,
+                            1n,
+                            EXPECTED_SWAP_OUT,
+                            SLIPPAGE_BPS,
+                            FAR_DEADLINE,
+                        ]),
+                        operation: OperationType.Call,
+                    },
+                ],
+            }),
+        );
+        const opened = await rhp.queryFilter(rhp.filters.PositionOpened(safeAddress), -10);
+        const tokenId = opened[opened.length - 1].args.tokenId as bigint;
+
+        // Stage owed amounts on both legs via a partial decreaseLiquidity.
+        const liquidity: bigint = (await npm.positions(tokenId)).liquidity;
+        await safeWallet.executeTransaction(
+            await safeWallet.createTransaction({
+                transactions: [
+                    {
+                        to: UNISWAP_V3_NPM_ADDRESS,
+                        value: "0",
+                        data: npm.interface.encodeFunctionData("decreaseLiquidity", [
+                            {
+                                tokenId,
+                                liquidity: liquidity / 2n,
+                                amount0Min: 0n,
+                                amount1Min: 0n,
+                                deadline: Math.floor(Date.now() / 1000) + 3_600,
+                            },
+                        ]),
+                        operation: OperationType.Call,
+                    },
+                ],
+            }),
+        );
+
+        const sWeth0 = await wethCx.balanceOf(safeAddress);
+        const sUsdc0 = await usdc.balanceOf(safeAddress);
+        const tWeth0 = await wethCx.balanceOf(treasury.address);
+
+        await safeWallet.executeTransaction(
+            await safeWallet.createTransaction({
+                transactions: [
+                    {
+                        to: rhpAddress,
+                        value: "0",
+                        data: rhp.interface.encodeFunctionData("collectLp", [
+                            safeAddress,
+                            tokenId,
+                            true, // swapWethToUsdc
+                            500,
+                            1n,
+                            EXPECTED_SWAP_OUT,
+                            SLIPPAGE_BPS,
+                            FAR_DEADLINE,
+                        ]),
+                        operation: OperationType.Call,
+                    },
+                ],
+            }),
+        );
+
+        const ev = (await rhp.queryFilter(rhp.filters.FeesCollected(safeAddress, tokenId), -10)).slice(-1)[0].args;
+        // Both legs were owed, so the WETH leg was collected and swapped.
+        expect(ev.collected0).to.be.gt(0n);
+        // WETH remainder forwarded to the Safe was fully swapped away → net 0.
+        expect((await wethCx.balanceOf(safeAddress)) - sWeth0).to.equal(0n);
+        // Treasury still skimmed the WETH fee in-kind.
+        expect((await wethCx.balanceOf(treasury.address)) - tWeth0).to.equal(ev.fee0);
+        // Safe USDC grew by the collected-USDC remainder PLUS the swap output.
+        expect((await usdc.balanceOf(safeAddress)) - sUsdc0).to.be.gt(ev.collected1 - ev.fee1);
+        // RHP keeps no residual.
+        expect(await wethCx.balanceOf(rhpAddress)).to.equal(0n);
+        expect(await usdc.balanceOf(rhpAddress)).to.equal(0n);
+        // Position stays open.
         expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
     });
 
@@ -1829,10 +1958,9 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         const [, operatorEOA] = await ethers.getSigners();
         await (await protocolRegistry.connect(deployer).setOperator(operatorEOA.address)).wait();
 
-        await expect(rhp.connect(operatorEOA).collectLp(safeAddress, 999_999n)).to.be.revertedWithCustomError(
-            rhp,
-            "UnknownPosition",
-        );
+        await expect(
+            rhp.connect(operatorEOA).collectLp(safeAddress, 999_999n, false, 500, 1n, 1n, SLIPPAGE_BPS, FAR_DEADLINE),
+        ).to.be.revertedWithCustomError(rhp, "UnknownPosition");
     });
 
     it("closeLp rejects exitBps == 0 and exitBps > 10_000 with InvalidExitBps", async function () {
@@ -2194,10 +2322,9 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                 .closeLp(safeAddress, tokenId, 500, 1n, EXPECTED_SWAP_OUT, SLIPPAGE_BPS, 10_000, 0, 0, FAR_DEADLINE, 0),
         ).to.be.revertedWithCustomError(rhp, "LpNotOnSafe");
 
-        await expect(rhp.connect(operatorEOA).collectLp(safeAddress, tokenId)).to.be.revertedWithCustomError(
-            rhp,
-            "LpNotOnSafe",
-        );
+        await expect(
+            rhp.connect(operatorEOA).collectLp(safeAddress, tokenId, false, 500, 1n, 1n, SLIPPAGE_BPS, FAR_DEADLINE),
+        ).to.be.revertedWithCustomError(rhp, "LpNotOnSafe");
     });
 
     it("collectLp tolerates a blacklisted treasury: USDC fee leg waived, full amount forwarded to the Safe (L-3)", async function () {
@@ -2250,7 +2377,16 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                     {
                         to: rhpAddress,
                         value: "0",
-                        data: rhp.interface.encodeFunctionData("collectLp", [safeAddress, tokenId]),
+                        data: rhp.interface.encodeFunctionData("collectLp", [
+                            safeAddress,
+                            tokenId,
+                            false,
+                            500,
+                            1n,
+                            1n,
+                            SLIPPAGE_BPS,
+                            FAR_DEADLINE,
+                        ]),
                         operation: OperationType.Call,
                     },
                 ],
@@ -2364,7 +2500,16 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                     {
                         to: rhpAddress,
                         value: "0",
-                        data: rhp.interface.encodeFunctionData("collectLp", [safeAddress, tokenId]),
+                        data: rhp.interface.encodeFunctionData("collectLp", [
+                            safeAddress,
+                            tokenId,
+                            false,
+                            500,
+                            1n,
+                            1n,
+                            SLIPPAGE_BPS,
+                            FAR_DEADLINE,
+                        ]),
                         operation: OperationType.Call,
                     },
                 ],
@@ -2457,7 +2602,16 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
                     {
                         to: rhpAddress,
                         value: "0",
-                        data: rhp.interface.encodeFunctionData("collectLp", [safeAddress, tokenId]),
+                        data: rhp.interface.encodeFunctionData("collectLp", [
+                            safeAddress,
+                            tokenId,
+                            false,
+                            500,
+                            1n,
+                            1n,
+                            SLIPPAGE_BPS,
+                            FAR_DEADLINE,
+                        ]),
                         operation: OperationType.Call,
                     },
                 ],
