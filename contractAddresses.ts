@@ -53,7 +53,7 @@ export const ADMIN_ADDRESS = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
 // rewriting the address below to the configured
 // ProtocolRegistry. Commit the resulting diff. Only edit by hand if pointing at
 // a registry deployed outside this repo's Ignition flow.
-export const PROTOCOL_REGISTRY_ADDRESS = "0x2f1331Df43E2f63e01298f570F9e467375077d7d";
+export const PROTOCOL_REGISTRY_ADDRESS = "0x8a179bBc024D52acF0E281019Cd1A4216D042Ef6";
 
 // Protocol enum
 export enum Protocol {
