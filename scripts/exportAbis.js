@@ -7,6 +7,7 @@ const contracts = [
     "RatehopperAerodromePositions",
     "SafeDebtManager",
     "SafeExecTransactionWrapper",
+    "SafeYieldManager",
 ];
 
 const rootDir = path.join(__dirname, "..");

@@ -28,13 +28,15 @@
         "deploy:1_core": "npx hardhat ignition deploy ignition/modules/1_DeployCore.ts --network base --verify && node scripts/syncRegistryAddress.js && node scripts/exportAbis.js",
         "deploy:2_univ3_helper": "npx hardhat ignition deploy ignition/modules/2_DeployUniV3Helper.ts --network base --verify && node scripts/exportAbis.js",
         "deploy:3_aerodrome_helper": "npx hardhat ignition deploy ignition/modules/3_DeployAerodromeHelper.ts --network base --verify && node scripts/exportAbis.js",
+        "deploy:4_yield_manager": "npx hardhat ignition deploy ignition/modules/4_DeployYieldManager.ts --network base --verify && node scripts/exportAbis.js",
         "verify": "npx hardhat run scripts/verifyAll.ts --network base",
         "wipe:all": "rm -rf ignition/deployments/chain-8453",
         "wipe:leveraged-position": "npx hardhat ignition wipe chain-8453 DeployCore#LeveragedPosition",
         "wipe:univ3-positions": "npx hardhat ignition wipe chain-8453 DeployUniV3Helper#RatehopperUniV3Positions",
         "wipe:aerodrome-positions": "npx hardhat ignition wipe chain-8453 DeployAerodromeHelper#RatehopperAerodromePositions",
         "wipe:safe-debt-manager": "npx hardhat ignition wipe chain-8453 DeployCore#SafeDebtManager",
-        "wipe:safe-wrapper": "npx hardhat ignition wipe chain-8453 DeployCore#SafeExecTransactionWrapper"
+        "wipe:safe-wrapper": "npx hardhat ignition wipe chain-8453 DeployCore#SafeExecTransactionWrapper",
+        "wipe:yield-manager": "npx hardhat ignition wipe chain-8453 DeployYieldManager#SafeYieldManager"
     },
     "author": "Ratehopper AI",
     "license": "BUSL-1.1",

@@ -16,14 +16,22 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 ### Core Contracts
 
 - **SafeDebtManager.sol**: Main entry point for debt swaps via Gnosis Safe
+- **SafeYieldManager.sol**: Single Safe-module entry point for yield (LP) protocols; delegatecalls stateless yield handlers, shared state in ERC-7201 namespace (`YieldStorage`)
 - **LeveragedPosition.sol**: Creates leveraged positions across protocols
 - **ProtocolRegistry.sol**: Central registry for token mappings, operator, and protocol configs
-- **Types.sol**: Shared type definitions
+- **Types.sol**: Shared type definitions (`Protocol`, `YieldProtocol` enums)
+- **RatehopperUniV3Positions.sol** / **RatehopperAerodromePositions.sol**: Legacy standalone yield modules, deployed and serving existing positions; superseded by SafeYieldManager for new positions (coexistence — do not modify)
 
 ### Protocol Handlers (`contracts/protocols/`, `contracts/protocolsSafe/`)
 
 - **AaveV3Handler.sol**, **CompoundHandler.sol**, **MoonwellHandler.sol**, **FluidSafeHandler.sol**
 - Each implements: `getDebtAmount`, `switchIn`, `switchFrom`, `switchTo`, `repay`
+
+### Yield Handlers (`contracts/protocolsYield/`)
+
+- **UniV3YieldHandler.sol**, **AerodromeYieldHandler.sol** extend **BaseYieldHandler.sol** (shared LP flow, protocol diffs in 5 virtual hooks)
+- Stateless delegatecall targets: MUST NOT declare storage variables; mutable state only via `YieldStorage._yieldStorage()`
+- Pool selection params are ABI-encoded bytes (`uint24` feeTier / `int24` tickSpacing) for forward compatibility (e.g. Uniswap V4 `PoolKey`)
 
 ### Access Control
 

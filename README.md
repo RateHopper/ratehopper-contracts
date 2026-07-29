@@ -28,6 +28,8 @@ RateHopper Contracts is a smart contract system that enables users to automatica
 
 - **Aerodrome Slipstream LP Lifecycle**: `RatehopperAerodromePositions` is a sibling Safe module providing the same `openLp`/`closeLp`/`collectLp` surface for Aerodrome's concentrated-liquidity (CL) WETH/USDC pools. Positions run **unstaked** (the NFT stays with the Safe; no gauge staking or AERO emissions). Differs from the Uniswap helper only in the Slipstream deltas: pools are keyed by `int24 tickSpacing` (not `uint24 fee`), the mint/swap structs carry `tickSpacing` + a `deadline`, and the swap-router selector is recomputed (`0xa026383e`).
 
+- **Unified Yield Module (SafeYieldManager)**: `SafeYieldManager` is the single Safe module for all yield (LP) protocols — the yield-side counterpart of `SafeDebtManager`. Users enable this ONE contract as a module; per-protocol mechanics live in stateless handlers (`UniV3YieldHandler`, `AerodromeYieldHandler`) invoked via delegatecall. Adding a protocol (e.g. Uniswap V4) is a handler deployment + timelocked `setYieldHandler`, not a new module every user must enable. The standalone `RatehopperUniV3Positions` / `RatehopperAerodromePositions` modules above are **legacy**: they keep serving positions opened through them (coexistence, no state migration), while new positions open through `SafeYieldManager`.
+
 ## Architecture
 
 The system consists of several key components:
@@ -70,7 +72,14 @@ The system consists of several key components:
 
 7. **RatehopperAerodromePositions.sol**: Sibling Safe module to (6) for Aerodrome Slipstream (CL) WETH/USDC LPs, run **unstaked**. Same `openLp()`/`closeLp()`/`collectLp()` surface, same fee/basis logic, same access-control model. The only differences are the Slipstream deltas: the allow-list is keyed by `int24 tickSpacing` (`allowedTickSpacing`, defaults `{100, 200}`) instead of `uint24 fee`; `ICLFactory.getPool(t0,t1,tickSpacing)` resolves pools; the `MintParams` struct carries `tickSpacing` + a trailing `sqrtPriceX96`; `slot0` has no `feeProtocol` field; and the swap-router `exactInputSingle` struct carries `tickSpacing` + `deadline`, so its selector is recomputed to `0xa026383e`.
 
-8. **Morpho Libraries**: Supporting libraries for the Morpho protocol:
+8. **SafeYieldManager.sol + Yield Handlers** (`contracts/protocolsYield/`): Adapter-pattern successor to (6) and (7). `SafeYieldManager` is the single Safe module users enable; it owns basis bookkeeping (`residualBasisUsd6Of`, keyed by `(YieldProtocol, tokenId)`), the performance fee, pause / per-protocol disable switches, and the timelocked setter surface. Protocol mechanics live in stateless handlers executed via delegatecall:
+
+    - `BaseYieldHandler.sol` — the shared `openLp`/`closeLp`/`collectLp` flow for V3-style CL protocols; protocol diffs are isolated in five virtual hooks (pool resolution, `slot0` read, swap calldata, mint calldata, `positions` decoding).
+    - `UniV3YieldHandler.sol` / `AerodromeYieldHandler.sol` — concrete adapters holding protocol immutables.
+    - Shared mutable state lives in an ERC-7201 namespace (`YieldStorage`, `ratehopper.storage.yield`), so handler delegatecode can never collide with the manager's inherited storage. Handlers MUST NOT declare storage variables.
+    - Pool selection params are ABI-encoded bytes (`abi.encode(uint24 feeTier)` for Uniswap V3, `abi.encode(int24 tickSpacing)` for Aerodrome), allow-listed by `keccak256(poolParam)` — richer identifiers (e.g. a Uniswap V4 `PoolKey`) fit without interface changes. A protocol whose mechanics don't fit `BaseYieldHandler` implements `IYieldHandler` directly.
+
+9. **Morpho Libraries**: Supporting libraries for the Morpho protocol:
 
     - `MathLib.sol`: Provides fixed-point arithmetic operations for the Morpho protocol
     - `SharesMathLib.sol`: Handles share-to-asset conversion with virtual shares to protect against share price manipulations
@@ -198,6 +207,20 @@ RHP_MAX_FEE_BPS=2000          # Hard upper bound on BOTH fees (bps). Default 200
 # Optional — TimelockController inside 2_DeployUniV3Helper
 TIMELOCK_ADMIN=0x...          # Proposer + executor on the new timelock. Falls back to ADMIN_ADDRESS
 TIMELOCK_DELAY=28800          # Min delay before queued ops execute (seconds). Default 28800 (8 hours)
+
+# Optional — SafeYieldManager deploy (yarn deploy:4_yield_manager)
+# Every SYM_* variable falls back to its RHP_* equivalent, so a .env already
+# configured for the standalone helpers keeps working unchanged.
+SYM_REGISTRY=0x...            # ProtocolRegistry address. Falls back to RHP_REGISTRY, then contractAddresses.ts
+SYM_TREASURY=0x...            # Fee treasury. Falls back to RHP_TREASURY. REQUIRED (directly or via fallback)
+SYM_INITIAL_ADMIN=0x...       # DEFAULT_ADMIN_ROLE holder. Falls back to RHP_INITIAL_ADMIN, then ADMIN_ADDRESS
+SYM_PAUSER=0x...              # Pauser (pause / per-protocol disable). Falls back to RHP_PAUSER, then ADMIN_ADDRESS
+SYM_TIMELOCK=0x...            # Reuse an existing TimelockController. Falls back to RHP_TIMELOCK
+SYM_PERFORMANCE_FEE_BPS=1000  # Performance fee on profit at closeLp (bps). Default 1000 (10%)
+SYM_FEE_COLLECT_BPS=250       # Fee on accrued LP fees (bps). Default 250 (2.5%)
+SYM_MAX_FEE_BPS=2000          # Hard upper bound on BOTH fees (bps). Default 2000 (20%)
+SYM_MIN_POSITION_LIQUIDITY=10000  # Per-protocol mint-liquidity floor. Default 10000
+SYM_MIN_POOL_LIQUIDITY=0      # Per-protocol pool-liquidity floor. Default 0 (disabled); tune via setMinPoolLiquidity
 ```
 ## Setup and Development
 
@@ -275,6 +298,7 @@ This compiles the contracts and writes:
 - `abis/RatehopperAerodromePositions.json`
 - `abis/SafeDebtManager.json`
 - `abis/SafeExecTransactionWrapper.json`
+- `abis/SafeYieldManager.json`
 
 The deploy scripts below run the ABI exporter automatically after a successful deployment.
 
@@ -322,6 +346,24 @@ This module by default deploys:
 2. **RatehopperUniV3Positions** (wired to the registry from `RHP_REGISTRY` ?? `PROTOCOL_REGISTRY_ADDRESS`; CRITICAL_ROLE granted to the timelock from step 1)
 
 To reuse an existing TimelockController instead of deploying a new one, set `RHP_TIMELOCK=0x...` — the module skips step 1 and points RHP at the supplied address. See `## Environment Variables` for the full list of optional knobs.
+
+### Deploy SafeYieldManager (Unified Yield Stack)
+
+Deploys the adapter-pattern yield stack: `UniV3YieldHandler` + `AerodromeYieldHandler` + `SafeYieldManager`.
+
+```bash
+yarn deploy:4_yield_manager
+```
+
+This deploys `ignition/modules/4_DeployYieldManager.ts` to Base with verification enabled and refreshes the ABI files in `abis/`.
+
+The module by default deploys:
+
+1. **TimelockController** (shared `TimelockControllerModule`; skipped when `SYM_TIMELOCK` / `RHP_TIMELOCK` is set)
+2. **UniV3YieldHandler** and **AerodromeYieldHandler** (stateless delegatecall targets pinned to the canonical Base NPM / factory / router / WETH / USDC addresses)
+3. **SafeYieldManager** with both handlers registered, protocols enabled, and default pool-param allow-lists seeded (Uniswap V3 fee tiers `{100, 500, 3000}`, Aerodrome tick spacings `{100, 200}`)
+
+Coexistence note: the standalone `RatehopperUniV3Positions` / `RatehopperAerodromePositions` deployments keep serving positions opened through them. `SafeYieldManager` rejects those tokenIds (`UnknownPosition`) and vice versa — there is no basis migration; legacy positions drain naturally via the legacy modules.
 
 ### Deployment Output
 

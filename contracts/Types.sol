@@ -12,6 +12,14 @@ enum Protocol {
     MOONWELL
 }
 
+// Yield (LP) protocols managed by SafeYieldManager. Append-only: new
+// protocols (e.g. UNISWAP_V4) must be added at the end so existing
+// handler registrations and stored basis keys keep their meaning.
+enum YieldProtocol {
+    UNISWAP_V3,
+    AERODROME
+}
+
 struct CollateralAsset {
     address asset;
     uint256 amount;
