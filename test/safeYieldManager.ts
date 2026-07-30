@@ -2,6 +2,7 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
+import { YieldProtocol } from "../contractAddresses";
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Mock-driven suite for SafeYieldManager + UniV3YieldHandler /
@@ -23,8 +24,8 @@ const COLLECT_FEE_BPS = 250n; // 2.5%
 const MAX_FEE_BPS = 2000;
 const Q96 = 1n << 96n;
 
-const UNISWAP_V3 = 0;
-const AERODROME = 1;
+const UNISWAP_V3 = YieldProtocol.UNISWAP_V3;
+const AERODROME = YieldProtocol.AERODROME;
 
 const FEE_TIER = abi.encode(["uint24"], [500]);
 const BAD_FEE_TIER = abi.encode(["uint24"], [10000]);
@@ -492,6 +493,21 @@ describe("SafeYieldManager", function () {
                     .connect(operatorEOA)
                     .closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER, { minUsdcOut: 2_000_000n })),
             ).to.be.revertedWithCustomError(manager, "MinUsdcOutNotMet");
+        });
+
+        it("waives the performance fee when the transfer returns false without reverting", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, usdc, uniRouter } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(600_000n)).wait();
+            await (await usdc.setFalseTransferTo(treasury.address)).wait();
+
+            const tx = manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER));
+            await expect(tx).to.emit(manager, "FeeTransferFailed").withArgs(safeAddr, 1n, 10_000n);
+            await expect(tx)
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 1_100_000n, 0n, 10_000);
+            expect(await usdc.balanceOf(treasury.address)).to.equal(0);
         });
 
         it("waives the performance fee when the treasury transfer fails", async function () {

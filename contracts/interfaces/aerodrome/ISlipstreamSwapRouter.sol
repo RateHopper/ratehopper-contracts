@@ -15,9 +15,10 @@ pragma solidity ^0.8.28;
  *          "exactInputSingle((address,address,int24,address,uint256,uint256,uint256,uint160))"))
  *          = 0xa026383e
  *
- *      RatehopperAerodromePositions builds the swap calldata on-chain via that
- *      pinned selector (see `EXACT_INPUT_SINGLE_SELECTOR`); this interface is
- *      kept for documentation and test mocks.
+ *      The legacy RatehopperAerodromePositions builds the swap calldata
+ *      on-chain via that pinned selector (see `EXACT_INPUT_SINGLE_SELECTOR`);
+ *      AerodromeYieldHandler derives it from this interface via
+ *      `abi.encodeCall`.
  *
  *      Canonical implementation:
  *        https://github.com/aerodrome-finance/slipstream/blob/main/contracts/periphery/SwapRouter.sol

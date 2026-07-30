@@ -8,10 +8,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import "../Types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ProtocolRegistry} from "../ProtocolRegistry.sol";
-import "../protocols/BaseProtocolHandler.sol";
+import "../protocolsDebt/BaseDebtHandler.sol";
 import "../interfaces/IWETH9.sol";
 
-contract MoonwellHandler is BaseProtocolHandler {
+contract MoonwellDebtHandler is BaseDebtHandler {
     using SafeERC20 for IERC20;
 
     address public immutable COMPTROLLER;
@@ -20,7 +20,7 @@ contract MoonwellHandler is BaseProtocolHandler {
         address _comptroller,
         address _UNISWAP_V3_FACTORY,
         address _REGISTRY_ADDRESS
-    ) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
+    ) BaseDebtHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
         COMPTROLLER = _comptroller;
     }
 

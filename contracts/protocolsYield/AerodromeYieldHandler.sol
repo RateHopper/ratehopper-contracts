@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISlipstreamNonfungiblePositionManager} from "../interfaces/aerodrome/ISlipstreamNonfungiblePositionManager.sol";
 import {ICLFactory} from "../interfaces/aerodrome/ICLFactory.sol";
 import {ICLPool} from "../interfaces/aerodrome/ICLPool.sol";
+import {ISlipstreamSwapRouter} from "../interfaces/aerodrome/ISlipstreamSwapRouter.sol";
 import {BaseYieldHandler} from "./BaseYieldHandler.sol";
 import "../Types.sol";
 
@@ -14,22 +15,6 @@ import "../Types.sol";
 ///         delegatecall from the manager.
 contract AerodromeYieldHandler is BaseYieldHandler {
     ICLFactory public immutable CL_FACTORY;
-
-    /// @dev Slipstream SwapRouter `ExactInputSingleParams` (has a deadline,
-    ///      unlike Uniswap's SwapRouter02).
-    struct ExactInputSingleParams {
-        address tokenIn;
-        address tokenOut;
-        int24 tickSpacing;
-        address recipient;
-        uint256 deadline;
-        uint256 amountIn;
-        uint256 amountOutMinimum;
-        uint160 sqrtPriceLimitX96;
-    }
-
-    // Slipstream exactInputSingle((address,address,int24,address,uint256,uint256,uint256,uint160)) = 0xa026383e
-    bytes4 private constant EXACT_INPUT_SINGLE_SELECTOR = 0xa026383e;
 
     constructor(
         address _positionManager,
@@ -62,18 +47,20 @@ contract AerodromeYieldHandler is BaseYieldHandler {
     ) internal pure override returns (bytes memory) {
         int24 tickSpacing = abi.decode(poolParam, (int24));
         return
-            abi.encodeWithSelector(
-                EXACT_INPUT_SINGLE_SELECTOR,
-                ExactInputSingleParams({
-                    tokenIn: tokenIn,
-                    tokenOut: tokenOut,
-                    tickSpacing: tickSpacing,
-                    recipient: recipient,
-                    deadline: deadline,
-                    amountIn: amountIn,
-                    amountOutMinimum: amountOutMin,
-                    sqrtPriceLimitX96: 0
-                })
+            abi.encodeCall(
+                ISlipstreamSwapRouter.exactInputSingle,
+                (
+                    ISlipstreamSwapRouter.ExactInputSingleParams({
+                        tokenIn: tokenIn,
+                        tokenOut: tokenOut,
+                        tickSpacing: tickSpacing,
+                        recipient: recipient,
+                        deadline: deadline,
+                        amountIn: amountIn,
+                        amountOutMinimum: amountOutMin,
+                        sqrtPriceLimitX96: 0
+                    })
+                )
             );
     }
 

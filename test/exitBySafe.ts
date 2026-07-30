@@ -2,16 +2,16 @@ import { ethers } from "hardhat";
 import dotenv from "dotenv";
 dotenv.config();
 import Safe from "@safe-global/protocol-kit";
-import { cbETH_ADDRESS, DEFAULT_SUPPLY_AMOUNT, Protocols, USDC_ADDRESS, WETH_ADDRESS } from "./constants";
+import { cbETH_ADDRESS, DEFAULT_SUPPLY_AMOUNT, DebtProtocols, USDC_ADDRESS, WETH_ADDRESS } from "./constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { eip1193Provider, fundETH, fundSignerWithETH } from "./utils";
-import { FLUID_cbETH_USDC_VAULT, FLUID_WETH_USDC_VAULT, FluidHelper } from "./protocols/fluid";
-import { CompoundHelper, USDC_COMET_ADDRESS } from "./protocols/compound";
-import { morphoMarket1Id, MorphoHelper } from "./protocols/morpho";
-import { AaveV3Helper } from "./protocols/aaveV3";
-import { MoonwellHelper } from "./protocols/moonwell";
+import { FLUID_cbETH_USDC_VAULT, FLUID_WETH_USDC_VAULT, FluidHelper } from "./protocolsDebt/fluid";
+import { CompoundHelper, USDC_COMET_ADDRESS } from "./protocolsDebt/compound";
+import { morphoMarket1Id, MorphoHelper } from "./protocolsDebt/morpho";
+import { AaveV3Helper } from "./protocolsDebt/aaveV3";
+import { MoonwellHelper } from "./protocolsDebt/moonwell";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect } from "chai";
 import { deploySafeContractFixture } from "./deployUtils";
@@ -98,7 +98,7 @@ describe("Safe wallet exit function tests", function () {
         const fluidHelper = new FluidHelper(signer);
 
         return {
-            protocol: Protocols.FLUID,
+            protocol: DebtProtocols.FLUID,
             debtAsset: USDC_ADDRESS,
             debtDecimals: 6,
             collateralAsset: collateral,
@@ -130,13 +130,13 @@ describe("Safe wallet exit function tests", function () {
         const aaveHelper = new AaveV3Helper(signer);
 
         return {
-            protocol: Protocols.AAVE_V3,
+            protocol: DebtProtocols.AAVE_V3,
             debtAsset: USDC_ADDRESS,
             debtDecimals: 6,
             collateralAsset: cbETH_ADDRESS,
             collateralDecimals: 18,
             setupPosition: async () => {
-                await supplyAndBorrow(Protocols.AAVE_V3);
+                await supplyAndBorrow(DebtProtocols.AAVE_V3);
                 await approveAaveAToken(opts?.approvalAmount ?? ethers.parseEther("1"));
             },
             getDebtAmount: () => aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress),
@@ -154,13 +154,13 @@ describe("Safe wallet exit function tests", function () {
         const morphoHelper = new MorphoHelper(signer);
 
         return {
-            protocol: Protocols.MORPHO,
+            protocol: DebtProtocols.MORPHO,
             debtAsset: USDC_ADDRESS,
             debtDecimals: 6,
             collateralAsset: cbETH_ADDRESS,
             collateralDecimals: 18,
             setupPosition: async () => {
-                await supplyAndBorrow(Protocols.MORPHO);
+                await supplyAndBorrow(DebtProtocols.MORPHO);
                 await morphoAuthorizeTxBySafe();
             },
             getDebtAmount: () => morphoHelper.getDebtAmount(marketId, safeAddress),
@@ -184,13 +184,13 @@ describe("Safe wallet exit function tests", function () {
         const compoundHelper = new CompoundHelper(signer);
 
         return {
-            protocol: Protocols.COMPOUND,
+            protocol: DebtProtocols.COMPOUND,
             debtAsset: USDC_ADDRESS,
             debtDecimals: 6,
             collateralAsset: cbETH_ADDRESS,
             collateralDecimals: 18,
             setupPosition: async () => {
-                await supplyAndBorrow(Protocols.COMPOUND);
+                await supplyAndBorrow(DebtProtocols.COMPOUND);
                 await compoundAllowTxBySafe(USDC_ADDRESS);
             },
             getDebtAmount: () => compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress),
@@ -207,13 +207,13 @@ describe("Safe wallet exit function tests", function () {
         const moonwellHelper = new MoonwellHelper(signer);
 
         return {
-            protocol: Protocols.MOONWELL,
+            protocol: DebtProtocols.MOONWELL,
             debtAsset: USDC_ADDRESS,
             debtDecimals: 6,
             collateralAsset: WETH_ADDRESS,
             collateralDecimals: 18,
             setupPosition: async () => {
-                await supplyAndBorrow(Protocols.MOONWELL, USDC_ADDRESS, WETH_ADDRESS);
+                await supplyAndBorrow(DebtProtocols.MOONWELL, USDC_ADDRESS, WETH_ADDRESS);
             },
             getDebtAmount: () => moonwellHelper.getDebtAmount(USDC_ADDRESS, safeAddress),
             getCollateralAmount: () => moonwellHelper.getCollateralAmount(WETH_ADDRESS, safeAddress),
@@ -228,7 +228,7 @@ describe("Safe wallet exit function tests", function () {
     // ─── Main test helper ───
 
     async function testExitPosition(options: {
-        protocol: Protocols;
+        protocol: DebtProtocols;
         debtAsset: string;
         debtDecimals: number;
         collateralAsset: string;
@@ -503,7 +503,7 @@ describe("Safe wallet exit function tests", function () {
                 await time.increaseTo((await time.latest()) + 3600);
                 await fundSignerWithETH(operator.address, "0.01");
 
-                await supplyAndBorrow(Protocols.COMPOUND);
+                await supplyAndBorrow(DebtProtocols.COMPOUND);
                 await compoundAllowTxBySafe(USDC_ADDRESS);
 
                 const debtBefore = await compoundHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
@@ -525,7 +525,7 @@ describe("Safe wallet exit function tests", function () {
 
                 await expect(
                     moduleContract.exit(
-                        Protocols.COMPOUND,
+                        DebtProtocols.COMPOUND,
                         USDC_ADDRESS,
                         debtBefore,
                         [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
@@ -543,7 +543,7 @@ describe("Safe wallet exit function tests", function () {
 
                 await expect(
                     moduleContract.exit(
-                        Protocols.COMPOUND,
+                        DebtProtocols.COMPOUND,
                         USDC_ADDRESS,
                         debtBefore,
                         [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
@@ -556,7 +556,7 @@ describe("Safe wallet exit function tests", function () {
 
                 const validExtraData = compoundHelper.encodeExtraData(USDC_COMET_ADDRESS);
                 await moduleContract.exit(
-                    Protocols.COMPOUND,
+                    DebtProtocols.COMPOUND,
                     USDC_ADDRESS,
                     debtBefore,
                     [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
@@ -600,7 +600,7 @@ describe("Safe wallet exit function tests", function () {
 
                 await expect(
                     moduleContract.exit(
-                        Protocols.FLUID,
+                        DebtProtocols.FLUID,
                         USDC_ADDRESS,
                         ethers.MaxUint256,
                         [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
@@ -618,7 +618,7 @@ describe("Safe wallet exit function tests", function () {
                 await time.increaseTo((await time.latest()) + 3600);
                 await fundSignerWithETH(operator.address, "0.01");
 
-                await supplyAndBorrow(Protocols.AAVE_V3);
+                await supplyAndBorrow(DebtProtocols.AAVE_V3);
                 await approveAaveAToken(ethers.parseEther("1"));
 
                 const debtBefore = await aaveHelper.getDebtAmount(USDC_ADDRESS, safeAddress);
@@ -631,7 +631,7 @@ describe("Safe wallet exit function tests", function () {
                 const collateralAmount = await aaveHelper.getCollateralAmount(cbETH_ADDRESS, safeAddress);
 
                 const exitTx = await moduleContract.exit(
-                    Protocols.AAVE_V3,
+                    DebtProtocols.AAVE_V3,
                     USDC_ADDRESS,
                     ethers.MaxUint256,
                     [{ asset: cbETH_ADDRESS, amount: collateralAmount }],
@@ -652,7 +652,7 @@ describe("Safe wallet exit function tests", function () {
                 const collateralBalanceBefore = await collateralContract.balanceOf(safeAddress);
 
                 const withdrawTx = await moduleContract.exit(
-                    Protocols.AAVE_V3,
+                    DebtProtocols.AAVE_V3,
                     USDC_ADDRESS,
                     0n,
                     [{ asset: cbETH_ADDRESS, amount: collateralInProtocol }],
@@ -703,7 +703,7 @@ describe("Safe wallet exit function tests", function () {
 
                 await expect(
                     moduleContract.exit(
-                        Protocols.FLUID,
+                        DebtProtocols.FLUID,
                         USDC_ADDRESS,
                         0n,
                         [{ asset: cbETH_ADDRESS, amount: collateralAmount }],

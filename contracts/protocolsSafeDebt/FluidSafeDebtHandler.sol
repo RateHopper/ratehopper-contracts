@@ -9,13 +9,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {DataTypes} from "../interfaces/aaveV3/DataTypes.sol";
 import "../interfaces/fluid/IFluidVault.sol";
 import "../interfaces/fluid/IFluidVaultResolver.sol";
-import "../interfaces/IProtocolHandler.sol";
+import "../interfaces/IDebtHandler.sol";
 import {Structs} from "../dependencies/fluid/structs.sol";
-import "../protocols/BaseProtocolHandler.sol";
+import "../protocolsDebt/BaseDebtHandler.sol";
 import "../ProtocolRegistry.sol";
 import "../interfaces/IWETH9.sol";
 
-contract FluidSafeHandler is BaseProtocolHandler {
+contract FluidSafeDebtHandler is BaseDebtHandler {
     using SafeERC20 for IERC20;
 
     // Note: The registry contract holds configuration data including the Fluid vault resolver address and WETH address
@@ -25,7 +25,7 @@ contract FluidSafeHandler is BaseProtocolHandler {
     constructor(
         address _UNISWAP_V3_FACTORY,
         address _REGISTRY_ADDRESS
-    ) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {}
+    ) BaseDebtHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {}
 
     function getDebtAmount(
         address /* asset */,

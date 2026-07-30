@@ -8,10 +8,10 @@ import "../interfaces/morpho/IMorpho.sol";
 import {IMorphoOracle} from "../interfaces/morpho/IMorphoOracle.sol";
 import {MarketParamsLib} from "../dependencies/morpho/MarketParamsLib.sol";
 import {SharesMathLib} from "../dependencies/morpho/SharesMathLib.sol";
-import "./BaseProtocolHandler.sol";
+import "./BaseDebtHandler.sol";
 import "../ProtocolRegistry.sol";
 
-contract MorphoHandler is BaseProtocolHandler {
+contract MorphoDebtHandler is BaseDebtHandler {
     using MarketParamsLib for MarketParams;
     using SafeERC20 for IERC20;
     using SharesMathLib for uint256;
@@ -22,7 +22,7 @@ contract MorphoHandler is BaseProtocolHandler {
         address _MORPHO_ADDRESS,
         address _UNISWAP_V3_FACTORY,
         address _REGISTRY_ADDRESS
-    ) BaseProtocolHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
+    ) BaseDebtHandler(_UNISWAP_V3_FACTORY, _REGISTRY_ADDRESS) {
         morpho = IMorpho(_MORPHO_ADDRESS);
     }
 

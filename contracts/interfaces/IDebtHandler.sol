@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import "../Types.sol";
 
-interface IProtocolHandler {
+interface IDebtHandler {
     function getDebtAmount(address asset, address onBehalfOf, bytes calldata extraData) external returns (uint256);
 
     function switchIn(

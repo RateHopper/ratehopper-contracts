@@ -29,12 +29,12 @@ describe("Handler contracts should", function () {
             .reverted;
     });
 
-    it("CompoundHandler should revert when calling borrow directly with default signer", async function () {
+    it("CompoundDebtHandler should revert when calling borrow directly with default signer", async function () {
         await expect(compoundHandler.borrow(USDC_ADDRESS, ethers.parseUnits("1", 6), TEST_ADDRESS, "0x")).to.be
             .reverted;
     });
 
-    it("CompoundHandler should revert when calling borrow directly with another signer", async function () {
+    it("CompoundDebtHandler should revert when calling borrow directly with another signer", async function () {
         const [, signer1] = await ethers.getSigners();
         const compoundHandlerWithSigner1 = compoundHandler.connect(signer1);
 
@@ -42,7 +42,7 @@ describe("Handler contracts should", function () {
             .be.reverted;
     });
 
-    it("MoonwellHandler should revert when calling borrow directly with default signer", async function () {
+    it("MoonwellDebtHandler should revert when calling borrow directly with default signer", async function () {
         await expect(moonwellHandler.borrow(USDC_ADDRESS, ethers.parseUnits("1", 6), TEST_ADDRESS, "0x")).to.be
             .reverted;
     });
@@ -51,7 +51,7 @@ describe("Handler contracts should", function () {
         await expect(fluidHandler.borrow(USDC_ADDRESS, ethers.parseUnits("1", 6), TEST_ADDRESS, "0x")).to.be.reverted;
     });
 
-    it("MorphoHandler should revert when calling borrow directly with default signer", async function () {
+    it("MorphoDebtHandler should revert when calling borrow directly with default signer", async function () {
         await expect(morphoHandler.borrow(USDC_ADDRESS, ethers.parseUnits("1", 6), TEST_ADDRESS, "0x")).to.be.reverted;
     });
 
@@ -73,7 +73,7 @@ describe("Handler contracts should", function () {
             await expect(maliciousPool.attemptMaliciousBorrow(USDC_ADDRESS, 1000, TEST_ADDRESS)).to.be.reverted;
         });
 
-        it("should revert malicious pool attempting CompoundHandler borrow", async function () {
+        it("should revert malicious pool attempting CompoundDebtHandler borrow", async function () {
             expect(await maliciousPoolCompound.token0()).to.equal(USDC_ADDRESS);
             expect(await maliciousPoolCompound.fee()).to.equal(3000);
             expect(await maliciousPoolCompound.targetHandler()).to.equal(await compoundHandler.getAddress());
@@ -81,7 +81,7 @@ describe("Handler contracts should", function () {
             await expect(maliciousPoolCompound.attemptMaliciousBorrow(USDC_ADDRESS, 1000, TEST_ADDRESS)).to.be.reverted;
         });
 
-        it("should revert malicious pool attempting CompoundHandler borrow with unregistered token", async function () {
+        it("should revert malicious pool attempting CompoundDebtHandler borrow with unregistered token", async function () {
             // Try to borrow MAI which is not registered in Compound protocol
             await expect(maliciousPoolCompound.attemptMaliciousBorrow(MAI_ADDRESS, 1000, TEST_ADDRESS)).to.be.reverted;
         });

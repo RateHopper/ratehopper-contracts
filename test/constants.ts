@@ -45,7 +45,7 @@ export const ETH_USDC_POOL = "0xb4CB800910B228ED3d0834cF79D697127BBB00e5"; // 0.
 export const DAI_USDC_POOL = "0xC18F50d6A832f12F6DcAaeEe8D0c87A65B96787E";
 export const MAI_USDC_POOL = "0x903318Ca6d0d4059840cbfA3FC2891d04Ba1Ee12"; // 0.05% fee
 
-export enum Protocols {
+export enum DebtProtocols {
     AAVE_V3 = 0,
     COMPOUND = 1,
     MORPHO = 2,

@@ -11,7 +11,7 @@ import {
     USDC_ADDRESS,
     cbETH_ADDRESS,
     TEST_ADDRESS,
-    Protocols,
+    DebtProtocols,
     WETH_ADDRESS,
     DEFAULT_SUPPLY_AMOUNT,
     cbETH_ETH_POOL,
@@ -22,10 +22,10 @@ import {
 } from "./constants";
 import { MaxUint256 } from "ethers";
 import { deployLeveragedPositionContractFixture } from "./deployUtils";
-import { mContractAddressMap, MoonwellHelper, COMPTROLLER_ADDRESS } from "./protocols/moonwell";
+import { mContractAddressMap, MoonwellHelper, COMPTROLLER_ADDRESS } from "./protocolsDebt/moonwell";
 import { safeAddress } from "./safeTestContext";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { fluidVaultMap, FluidHelper } from "./protocols/fluid";
+import { fluidVaultMap, FluidHelper } from "./protocolsDebt/fluid";
 
 describe("Create leveraged position by Safe", function () {
     this.timeout(3000000); // 50 minutes
@@ -79,7 +79,7 @@ describe("Create leveraged position by Safe", function () {
 
     async function createLeveragedPosition(
         flashloanPool: string,
-        protocol: Protocols,
+        protocol: DebtProtocols,
         collateralAddress = cbETH_ADDRESS,
         debtAddress = USDC_ADDRESS,
         principleAmount = Number(DEFAULT_SUPPLY_AMOUNT),
@@ -98,7 +98,7 @@ describe("Create leveraged position by Safe", function () {
         let extraData = "0x";
 
         switch (protocol) {
-            case Protocols.FLUID:
+            case DebtProtocols.FLUID:
                 const vaultAddress = fluidVaultMap.get(collateralAddress)!;
                 // Encode with isFullRepay = false for Fluid create operation
                 extraData = ethers.AbiCoder.defaultAbiCoder().encode(
@@ -163,14 +163,14 @@ describe("Create leveraged position by Safe", function () {
         });
         console.log(safeTxHash);
 
-        const addressForDebtAmount = protocol === Protocols.FLUID ? fluidVaultMap.get(collateralAddress)! : debtAddress;
+        const addressForDebtAmount = protocol === DebtProtocols.FLUID ? fluidVaultMap.get(collateralAddress)! : debtAddress;
 
         const debtAmount = await protocolHelper.getDebtAmount(addressForDebtAmount, safeAddress);
 
         const collateralAmount = await protocolHelper.getCollateralAmount(collateralAddress, safeAddress);
 
         // For Fluid protocol, get and log the nftId
-        if (protocol === Protocols.FLUID) {
+        if (protocol === DebtProtocols.FLUID) {
             const fluidHelper = new FluidHelper(impersonatedSigner);
             const vaultAddress = fluidVaultMap.get(collateralAddress)!;
             const nftId = await fluidHelper.getNftId(vaultAddress, safeAddress);
@@ -192,7 +192,7 @@ describe("Create leveraged position by Safe", function () {
 
     async function deleveragePosition(
         flashloanPool: string,
-        protocol: Protocols,
+        protocol: DebtProtocols,
         collateralAddress = cbETH_ADDRESS,
         debtAddress = USDC_ADDRESS,
         callViaOperator = false,
@@ -209,7 +209,7 @@ describe("Create leveraged position by Safe", function () {
         const debtDecimals = await getDecimals(debtAddress);
 
         // Get current debt and collateral amounts before closing
-        const addressForDebtAmount = protocol === Protocols.FLUID ? fluidVaultMap.get(collateralAddress)! : debtAddress;
+        const addressForDebtAmount = protocol === DebtProtocols.FLUID ? fluidVaultMap.get(collateralAddress)! : debtAddress;
         const debtAmountBefore = await protocolHelper.getDebtAmount(addressForDebtAmount, safeAddress);
         console.log("Debt amount before closing: ", ethers.formatUnits(debtAmountBefore, debtDecimals));
 
@@ -221,7 +221,7 @@ describe("Create leveraged position by Safe", function () {
 
         let extraData = "0x";
         switch (protocol) {
-            case Protocols.FLUID:
+            case DebtProtocols.FLUID:
                 const fluidHelper = new FluidHelper(impersonatedSigner);
                 const vaultAddress = fluidVaultMap.get(collateralAddress)!;
                 const nftIdBefore = await fluidHelper.getNftId(vaultAddress, safeAddress);
@@ -298,7 +298,7 @@ describe("Create leveraged position by Safe", function () {
             // For Moonwell, we need to approve the mToken
             const transactions: MetaTransactionData[] = [];
 
-            if (protocol === Protocols.MOONWELL) {
+            if (protocol === DebtProtocols.MOONWELL) {
                 const mTokenAddress = mContractAddressMap.get(collateralAddress)!;
                 transactions.push({
                     to: mTokenAddress,
@@ -377,7 +377,7 @@ describe("Create leveraged position by Safe", function () {
             await fundSignerWithETH(impersonatedSigner.address, "0.5");
 
             // Create position first using Safe
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.FLUID);
+            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.FLUID);
 
             // Wait for some time to accrue interest
             await time.increaseTo((await time.latest()) + 600); // 10 minutes
@@ -385,7 +385,7 @@ describe("Create leveraged position by Safe", function () {
             console.log("Operator wallet address:", operator.address);
 
             // Close position via operator
-            await deleveragePosition(ETH_USDC_POOL, Protocols.FLUID, cbETH_ADDRESS, USDC_ADDRESS, true);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.FLUID, cbETH_ADDRESS, USDC_ADDRESS, true);
         });
     });
 
@@ -393,7 +393,7 @@ describe("Create leveraged position by Safe", function () {
         it("create normal position and partially deleverage (repay 20%)", async function () {
             // Step 1: Create a normal (non-leveraged) position
             await createNormalPosition(
-                Protocols.MOONWELL,
+                DebtProtocols.MOONWELL,
                 cbETH_ADDRESS,
                 USDC_ADDRESS,
                 "0.002", // supply 0.002 cbETH
@@ -406,7 +406,7 @@ describe("Create leveraged position by Safe", function () {
             // Step 2: Partially deleverage - repay 20% of debt
             await partialDeleveragePosition(
                 ETH_USDC_POOL,
-                Protocols.MOONWELL,
+                DebtProtocols.MOONWELL,
                 cbETH_ADDRESS,
                 USDC_ADDRESS,
                 20n, // repay 20%
@@ -415,19 +415,19 @@ describe("Create leveraged position by Safe", function () {
         });
 
         it("create and close position with cbETH collateral", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.MOONWELL);
+            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.MOONWELL);
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await deleveragePosition(ETH_USDC_POOL, Protocols.MOONWELL);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.MOONWELL);
         });
 
         it("create and close position with WETH collateral", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.MOONWELL, WETH_ADDRESS, USDC_ADDRESS);
+            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.MOONWELL, WETH_ADDRESS, USDC_ADDRESS);
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await deleveragePosition(ETH_USDC_POOL, Protocols.MOONWELL, WETH_ADDRESS, USDC_ADDRESS);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.MOONWELL, WETH_ADDRESS, USDC_ADDRESS);
         });
 
         it("with cbBTC collateral", async function () {
@@ -435,7 +435,7 @@ describe("Create leveraged position by Safe", function () {
             const targetAmount = cbBTCPrincipleAmount * 2;
             await createLeveragedPosition(
                 cbBTC_USDC_POOL,
-                Protocols.MOONWELL,
+                DebtProtocols.MOONWELL,
                 cbBTC_ADDRESS,
                 USDC_ADDRESS,
                 cbBTCPrincipleAmount,
@@ -449,7 +449,7 @@ describe("Create leveraged position by Safe", function () {
 
             await createLeveragedPosition(
                 cbBTC_USDC_POOL,
-                Protocols.MOONWELL,
+                DebtProtocols.MOONWELL,
                 USDC_ADDRESS,
                 cbETH_ADDRESS,
                 principleAmount,
@@ -459,7 +459,7 @@ describe("Create leveraged position by Safe", function () {
     });
 
     async function createNormalPosition(
-        protocol: Protocols,
+        protocol: DebtProtocols,
         collateralAddress: string,
         debtAddress: string,
         supplyAmountStr: string,
@@ -479,7 +479,7 @@ describe("Create leveraged position by Safe", function () {
         await transferTx.wait();
         console.log("Transferred collateral to Safe");
 
-        if (protocol === Protocols.FLUID) {
+        if (protocol === DebtProtocols.FLUID) {
             const vaultAddress = fluidVaultMap.get(collateralAddress)!;
 
             // Approve and supply collateral via Safe transaction
@@ -537,7 +537,7 @@ describe("Create leveraged position by Safe", function () {
             console.log("Collateral amount:", ethers.formatUnits(collateralAmountAfter, collateralDecimals));
             expect(debtAmountAfter).to.be.gt(0);
             expect(collateralAmountAfter).to.be.gt(0);
-        } else if (protocol === Protocols.MOONWELL) {
+        } else if (protocol === DebtProtocols.MOONWELL) {
             const mCollateralAddress = mContractAddressMap.get(collateralAddress)!;
             const mDebtAddress = mContractAddressMap.get(debtAddress)!;
 
@@ -599,7 +599,7 @@ describe("Create leveraged position by Safe", function () {
 
     async function partialDeleveragePosition(
         flashloanPool: string,
-        protocol: Protocols,
+        protocol: DebtProtocols,
         collateralAddress: string,
         debtAddress: string,
         repayPercentage: bigint,
@@ -613,7 +613,7 @@ describe("Create leveraged position by Safe", function () {
         let collateralAmountBefore: bigint;
         let extraData: string;
 
-        if (protocol === Protocols.FLUID) {
+        if (protocol === DebtProtocols.FLUID) {
             const vaultAddress = fluidVaultMap.get(collateralAddress)!;
             const fluidHelper = new FluidHelper(impersonatedSigner);
 
@@ -628,7 +628,7 @@ describe("Create leveraged position by Safe", function () {
                 ["address", "uint256", "bool"],
                 [vaultAddress, nftId, false],
             );
-        } else if (protocol === Protocols.MOONWELL) {
+        } else if (protocol === DebtProtocols.MOONWELL) {
             const moonwellHelper = new MoonwellHelper(impersonatedSigner);
 
             debtAmountBefore = await moonwellHelper.getDebtAmount(debtAddress, safeAddress);
@@ -723,7 +723,7 @@ describe("Create leveraged position by Safe", function () {
         let debtAmountAfter: bigint;
         let collateralAmountAfter: bigint;
 
-        if (protocol === Protocols.FLUID) {
+        if (protocol === DebtProtocols.FLUID) {
             const vaultAddress = fluidVaultMap.get(collateralAddress)!;
             const fluidHelper = new FluidHelper(impersonatedSigner);
             debtAmountAfter = await fluidHelper.getDebtAmount(vaultAddress, safeAddress);
@@ -765,7 +765,7 @@ describe("Create leveraged position by Safe", function () {
         it("create normal position and partially deleverage (repay 20%)", async function () {
             // Step 1: Create a normal (non-leveraged) position
             await createNormalPosition(
-                Protocols.FLUID,
+                DebtProtocols.FLUID,
                 cbETH_ADDRESS,
                 USDC_ADDRESS,
                 "0.002", // supply 0.002 cbETH
@@ -778,7 +778,7 @@ describe("Create leveraged position by Safe", function () {
             // Step 2: Partially deleverage - repay 20% of debt
             await partialDeleveragePosition(
                 ETH_USDC_POOL,
-                Protocols.FLUID,
+                DebtProtocols.FLUID,
                 cbETH_ADDRESS,
                 USDC_ADDRESS,
                 20n, // repay 20%
@@ -787,19 +787,19 @@ describe("Create leveraged position by Safe", function () {
         });
 
         it("create and close position with WETH collateral", async function () {
-            await createLeveragedPosition(ETH_USDbC_POOL, Protocols.FLUID, WETH_ADDRESS, USDC_ADDRESS);
+            await createLeveragedPosition(ETH_USDbC_POOL, DebtProtocols.FLUID, WETH_ADDRESS, USDC_ADDRESS);
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await deleveragePosition(ETH_USDC_POOL, Protocols.FLUID, WETH_ADDRESS, USDC_ADDRESS);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.FLUID, WETH_ADDRESS, USDC_ADDRESS);
         });
 
         it("create and close position with cbETH collateral", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.FLUID);
+            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.FLUID);
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await deleveragePosition(ETH_USDC_POOL, Protocols.FLUID);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.FLUID);
         });
 
         it("with cbBTC collateral", async function () {
@@ -807,7 +807,7 @@ describe("Create leveraged position by Safe", function () {
             const targetAmount = cbBTCPrincipleAmount * 2;
             await createLeveragedPosition(
                 cbBTC_USDC_POOL,
-                Protocols.FLUID,
+                DebtProtocols.FLUID,
                 cbBTC_ADDRESS,
                 USDC_ADDRESS,
                 cbBTCPrincipleAmount,

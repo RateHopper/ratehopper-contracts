@@ -216,21 +216,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         }
 
         // Swap the WETH this close produced back to USDC.
-        uint128 wethToSwap = (WETH.balanceOf(p.onBehalfOf) - wethBefore).toUint128();
-        if (wethToSwap > 0) {
-            _swapViaSafe(
-                p.onBehalfOf,
-                address(WETH),
-                address(USDC),
-                p.swapPoolParam,
-                uint256(wethToSwap),
-                p.swapAmountOutMin,
-                p.deadline,
-                26,
-                10,
-                27
-            );
-        }
+        _swapWethDeltaToUsdc(p.onBehalfOf, wethBefore, p.swapPoolParam, p.swapAmountOutMin, p.deadline);
 
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
         // Caller's final-value guard on gross realized USDC.
@@ -241,32 +227,18 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     function collectLp(CollectLpParams calldata p) external onlyDelegatecall {
         _requireWethUsdcPositionOwnedBy(p.onBehalfOf, p.tokenId);
 
+        // Swap params are validated only on the swap path; the no-swap
+        // path intentionally ignores them.
         if (p.swapWethToUsdc) {
-            // Swap params are validated only on the swap path; the no-swap
-            // path intentionally ignores them.
             if (block.timestamp > p.deadline) revert DeadlineExpired();
             _validateSwapParams(p.swapPoolParam, p.swapAmountOutMin, p.expectedSwapOut, p.slippageBps);
             _validatePool(_getPool(p.swapPoolParam));
+        }
 
-            uint256 wethBefore = WETH.balanceOf(p.onBehalfOf);
-            _collectLpFees(p.onBehalfOf, p.tokenId);
-            uint256 wethDelta = WETH.balanceOf(p.onBehalfOf) - wethBefore;
-            if (wethDelta > 0) {
-                _swapViaSafe(
-                    p.onBehalfOf,
-                    address(WETH),
-                    address(USDC),
-                    p.swapPoolParam,
-                    wethDelta,
-                    p.swapAmountOutMin,
-                    p.deadline,
-                    26,
-                    10,
-                    27
-                );
-            }
-        } else {
-            _collectLpFees(p.onBehalfOf, p.tokenId);
+        uint256 wethBefore = WETH.balanceOf(p.onBehalfOf);
+        _collectLpFees(p.onBehalfOf, p.tokenId);
+        if (p.swapWethToUsdc) {
+            _swapWethDeltaToUsdc(p.onBehalfOf, wethBefore, p.swapPoolParam, p.swapAmountOutMin, p.deadline);
         }
     }
 
@@ -386,6 +358,20 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         _safeApprove(_onBehalfOf, tokenIn, SWAP_ROUTER, 0, resetStep);
     }
 
+    /// @dev Swap the WETH the Safe accrued since `wethBefore` back to USDC.
+    function _swapWethDeltaToUsdc(
+        address _onBehalfOf,
+        uint256 wethBefore,
+        bytes memory swapPoolParam,
+        uint256 swapAmountOutMin,
+        uint256 deadline
+    ) internal {
+        uint256 wethDelta = WETH.balanceOf(_onBehalfOf) - wethBefore;
+        if (wethDelta > 0) {
+            _swapViaSafe(_onBehalfOf, address(WETH), address(USDC), swapPoolParam, wethDelta, swapAmountOutMin, deadline, 26, 10, 27);
+        }
+    }
+
     /// @dev Ties `slippageBps` to the caller's quoter-derived min-out and
     ///      checks the swap pool param against the allow-list.
     function _validateSwapParams(
@@ -432,31 +418,19 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev Module-mediated ERC20 approve from the Safe. Raw `approve` is
     ///      fine for canonical WETH/USDC (no USDT-style two-step approvals).
     function _safeApprove(address _onBehalfOf, address token, address spender, uint256 amount, uint8 step) internal {
-        bytes memory approveCall = abi.encodeCall(IERC20.approve, (spender, amount));
-        (bool ok, bytes memory ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(
-            token,
-            0,
-            approveCall,
-            ISafe.Operation.Call
-        );
-        if (!ok) {
-            if (ret.length > 0) {
-                assembly ("memory-safe") {
-                    revert(add(ret, 0x20), mload(ret))
-                }
-            }
-            revert ModuleCallFailed(step);
-        }
+        _safeExec(_onBehalfOf, token, 0, abi.encodeCall(IERC20.approve, (spender, amount)), step);
     }
 
     /// @dev Module-mediated Safe call with inner-revert bubbling.
-    function _safeExec(address _onBehalfOf, address target, uint256 value, bytes memory data, uint8 step) internal {
-        (bool ok, bytes memory ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(
-            target,
-            value,
-            data,
-            ISafe.Operation.Call
-        );
+    function _safeExec(
+        address _onBehalfOf,
+        address target,
+        uint256 value,
+        bytes memory data,
+        uint8 step
+    ) internal returns (bytes memory ret) {
+        bool ok;
+        (ok, ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(target, value, data, ISafe.Operation.Call);
         if (!ok) {
             if (ret.length > 0) {
                 assembly ("memory-safe") {
@@ -485,13 +459,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             p.onBehalfOf,
             p.deadline
         );
-        (bool ok, bytes memory ret) = ISafe(p.onBehalfOf).execTransactionFromModuleReturnData(
-            POSITION_MANAGER,
-            0,
-            mintCall,
-            ISafe.Operation.Call
-        );
-        if (!ok) revert ModuleCallFailed(4);
+        bytes memory ret = _safeExec(p.onBehalfOf, POSITION_MANAGER, 0, mintCall, 4);
 
         uint256 amount0Out;
         uint256 amount1Out;

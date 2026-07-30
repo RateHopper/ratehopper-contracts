@@ -6,12 +6,12 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ProtocolRegistry} from "../ProtocolRegistry.sol";
 import {CollateralAsset} from "../Types.sol";
-import "./BaseProtocolHandler.sol";
+import "./BaseDebtHandler.sol";
 
-contract CompoundHandler is BaseProtocolHandler {
+contract CompoundDebtHandler is BaseDebtHandler {
     using SafeERC20 for IERC20;
 
-    constructor(address _registry, address _uniswapV3Factory) BaseProtocolHandler(_uniswapV3Factory, _registry) {}
+    constructor(address _registry, address _uniswapV3Factory) BaseDebtHandler(_uniswapV3Factory, _registry) {}
 
     function getCContract(address token) internal view returns (address) {
         return registry.getCContract(token);

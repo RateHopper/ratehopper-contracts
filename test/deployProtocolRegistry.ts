@@ -1,5 +1,5 @@
 import { ethers } from "hardhat";
-import { mcbETH, mUSDC, mDAI } from "./protocols/moonwell";
+import { mcbETH, mUSDC, mDAI } from "./protocolsDebt/moonwell";
 import {
     cbETH_ADDRESS,
     USDC_ADDRESS,
@@ -14,10 +14,10 @@ import {
     PARASWAP_V6_CONTRACT_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
 } from "./constants";
-import { USDC_COMET_ADDRESS, WETH_COMET_ADDRESS } from "./protocols/compound";
+import { USDC_COMET_ADDRESS, WETH_COMET_ADDRESS } from "./protocolsDebt/compound";
 import { mAERO, mcbBTC, mEURC, mWeETH, mWETH, mwstETH, USDS_COMET_ADDRESS } from "../contractAddresses";
 import { getGasOptions } from "./deployUtils";
-import { FLUID_VAULT_RESOLVER } from "./protocols/fluid";
+import { FLUID_VAULT_RESOLVER } from "./protocolsDebt/fluid";
 
 export async function deployProtocolRegistry() {
     const signers = await ethers.getSigners();

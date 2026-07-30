@@ -7,13 +7,13 @@ import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 
 import {
     PARASWAP_V6_CONTRACT_ADDRESS,
-    Protocols,
+    DebtProtocols,
     UNISWAP_V3_FACTORY_ADDRESS,
     UNISWAP_V3_SWAP_ROUTER_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
 } from "./constants";
-import { FLUID_VAULT_RESOLVER, FLUID_WETH_USDC_VAULT, FluidHelper } from "./protocols/fluid";
+import { FLUID_VAULT_RESOLVER, FLUID_WETH_USDC_VAULT, FluidHelper } from "./protocolsDebt/fluid";
 import { eip1193Provider, fundSignerWithETH } from "./utils";
 import FluidVaultAbi from "../externalAbi/fluid/fluidVaultT1.json";
 
@@ -85,7 +85,7 @@ const UNISWAP_V3_POOL_ABI = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
-//  Fixture — deploys ProtocolRegistry + FluidSafeHandler + SafeDebtManager +
+//  Fixture — deploys ProtocolRegistry + FluidSafeDebtHandler + SafeDebtManager +
 //  RatehopperUniV3Positions. RHP gates openLp/closeLp/collectLp on
 //  `onlyOperatorOrSafe` (Safe self-call OR the registry's `safeOperator`).
 //  All NPM/SwapRouter calls inside RHP are module-mediated via the Safe, so
@@ -113,14 +113,14 @@ async function deployFixture() {
     await (await protocolRegistry.addToWhitelistBatch([WETH_ADDRESS, USDC_ADDRESS])).wait();
     await (await protocolRegistry.setFluidVaultResolver(FLUID_VAULT_RESOLVER)).wait();
 
-    const FluidSafeHandler = await ethers.getContractFactory("FluidSafeHandler");
-    const fluidHandler = await FluidSafeHandler.deploy(UNISWAP_V3_FACTORY_ADDRESS, await protocolRegistry.getAddress());
+    const FluidSafeDebtHandler = await ethers.getContractFactory("FluidSafeDebtHandler");
+    const fluidHandler = await FluidSafeDebtHandler.deploy(UNISWAP_V3_FACTORY_ADDRESS, await protocolRegistry.getAddress());
     await fluidHandler.waitForDeployment();
 
     const SafeDebtManager = await ethers.getContractFactory("SafeDebtManager");
     const safeDebtManager = await SafeDebtManager.deploy(
         await protocolRegistry.getAddress(),
-        [Protocols.FLUID],
+        [DebtProtocols.FLUID],
         [await fluidHandler.getAddress()],
         pauser.address,
     );

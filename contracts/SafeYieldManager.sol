@@ -72,7 +72,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     /// @notice Allows only the registry operator or the Safe itself.
     modifier onlyOperatorOrSafe(address _onBehalfOf) {
         if (_onBehalfOf == address(0)) revert ZeroAddress();
-        if (msg.sender != REGISTRY.safeOperator() && msg.sender != _onBehalfOf) revert NotAuthorized();
+        if (msg.sender != _onBehalfOf && msg.sender != REGISTRY.safeOperator()) revert NotAuthorized();
         _;
     }
 
@@ -182,11 +182,11 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         if (!protocolEnabledForOpen[protocol]) revert ProtocolDisabled();
 
         bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.openLp, (params)));
-        (uint256 mintedTokenId, uint128 basisUsd6, uint128 usedWeth, uint128 usedUsdc) = abi.decode(
-            ret,
-            (uint256, uint128, uint128, uint128)
-        );
-        tokenId = mintedTokenId;
+        uint128 basisUsd6;
+        uint128 usedWeth;
+        uint128 usedUsdc;
+        (tokenId, basisUsd6, usedWeth, usedUsdc) = abi.decode(ret, (uint256, uint128, uint128, uint128));
+
 
         // Persist the open-time basis so closes always price against an
         // on-chain value neither the Safe nor the operator can attest, and
@@ -216,10 +216,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         if (!protocolEnabledForClose[protocol]) revert ProtocolDisabled();
 
         YieldLayout storage $ = _yieldStorage();
-        uint128 residualBasis = $.residualBasisUsd6Of[protocol][params.tokenId];
-        if (residualBasis == 0) revert UnknownPosition();
-        address handler = $.positionHandlerOf[protocol][params.tokenId];
-        if (handler == address(0)) revert HandlerNotSet();
+        (uint128 residualBasis, address handler) = _pinnedPosition($, protocol, params.tokenId);
 
         uint128 basisForExit = params.exitBps == 10_000
             ? residualBasis
@@ -241,13 +238,31 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             uint256 profit = uint256(currentValueUsd6) - uint256(basisForExit);
             feeUsd6 = ((profit * $.performanceFeeBps) / 10_000).toUint128();
             if (feeUsd6 > 0) {
-                (bool ok, ) = ISafe(params.onBehalfOf).execTransactionFromModuleReturnData(
+                (bool ok, bytes memory feeRet) = ISafe(params.onBehalfOf).execTransactionFromModuleReturnData(
                     address(USDC),
                     0,
                     abi.encodeCall(IERC20.transfer, ($.treasury, uint256(feeUsd6))),
                     ISafe.Operation.Call
                 );
-                if (!ok) {
+                // The module call succeeding is not enough: a non-reverting
+                // token can return false. Treat the fee as collected only
+                // when the inner transfer returned no data (non-standard
+                // token) or its first return word is exactly 1. Read the
+                // word in assembly instead of abi.decode so a malformed
+                // return value cannot revert and block the exit.
+                bool transferred;
+                if (ok) {
+                    if (feeRet.length == 0) {
+                        transferred = true;
+                    } else if (feeRet.length >= 32) {
+                        uint256 word;
+                        assembly ("memory-safe") {
+                            word := mload(add(feeRet, 0x20))
+                        }
+                        transferred = word == 1;
+                    }
+                }
+                if (!transferred) {
                     emit FeeTransferFailed(params.onBehalfOf, params.tokenId, feeUsd6);
                     feeUsd6 = 0;
                 }
@@ -275,12 +290,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         CollectLpParams calldata params
     ) external nonReentrant onlyOperatorOrSafe(params.onBehalfOf) {
         if (!protocolEnabledForClose[protocol]) revert ProtocolDisabled();
-        YieldLayout storage $ = _yieldStorage();
         // Only harvest positions this contract manages; otherwise any
         // Safe-owned NFT could be routed through to skim feeCollectBps.
-        if ($.residualBasisUsd6Of[protocol][params.tokenId] == 0) revert UnknownPosition();
-        address handler = $.positionHandlerOf[protocol][params.tokenId];
-        if (handler == address(0)) revert HandlerNotSet();
+        (, address handler) = _pinnedPosition(_yieldStorage(), protocol, params.tokenId);
 
         _delegateToHandler(handler, abi.encodeCall(IYieldHandler.collectLp, (params)));
     }
@@ -457,6 +469,21 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     // ─────────────────────────────────────────────────────────────────────
     //  Internals
     // ─────────────────────────────────────────────────────────────────────
+
+    /// @dev Basis and open-time handler of a position this contract manages.
+    ///      Both are written together at open and deleted together at full
+    ///      close, so a nonzero basis implies a pinned handler; the second
+    ///      check is a defensive invariant.
+    function _pinnedPosition(
+        YieldLayout storage $,
+        YieldProtocol protocol,
+        uint256 tokenId
+    ) internal view returns (uint128 residualBasis, address handler) {
+        residualBasis = $.residualBasisUsd6Of[protocol][tokenId];
+        if (residualBasis == 0) revert UnknownPosition();
+        handler = $.positionHandlerOf[protocol][tokenId];
+        if (handler == address(0)) revert HandlerNotSet();
+    }
 
     /// @dev Delegatecall into a handler, bubbling its revert data.
     function _delegateToHandler(address handler, bytes memory data) internal returns (bytes memory) {

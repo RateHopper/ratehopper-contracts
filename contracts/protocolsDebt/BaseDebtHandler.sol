@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
-import "../interfaces/IProtocolHandler.sol";
+import "../interfaces/IDebtHandler.sol";
 import {PoolAddress} from "../dependencies/uniswapV3/PoolAddress.sol";
 import "../dependencies/uniswapV3/CallbackValidation.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "../ProtocolRegistry.sol";
 
 /**
- * @title BaseProtocolHandler
+ * @title BaseDebtHandler
  * @dev Base abstract contract for protocol handlers with Uniswap V3 pool validation
  * @notice This contract provides common functionality and security modifiers for all protocol handlers
  */
-abstract contract BaseProtocolHandler is IProtocolHandler {
+abstract contract BaseDebtHandler is IDebtHandler {
     /// @notice The Uniswap V3 factory address used for pool validation
     address public immutable uniswapV3Factory;
 

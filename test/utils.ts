@@ -1,24 +1,24 @@
 import { ethers } from "hardhat";
 import { Eip1193Provider, RequestArguments } from "@safe-global/protocol-kit";
-import { Protocols, WETH_ADDRESS } from "./constants";
+import { DebtProtocols, WETH_ADDRESS } from "./constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MaxUint256 } from "ethers";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import WETH_ABI from "../externalAbi/weth.json";
 
-import { AaveV3Helper } from "./protocols/aaveV3";
-import { CompoundHelper } from "./protocols/compound";
-import { MorphoHelper } from "./protocols/morpho";
-import { MoonwellHelper } from "./protocols/moonwell";
-import { FluidHelper } from "./protocols/fluid";
+import { AaveV3Helper } from "./protocolsDebt/aaveV3";
+import { CompoundHelper } from "./protocolsDebt/compound";
+import { MorphoHelper } from "./protocolsDebt/morpho";
+import { MoonwellHelper } from "./protocolsDebt/moonwell";
+import { FluidHelper } from "./protocolsDebt/fluid";
 import axios from "axios";
 
-export const protocolHelperMap = new Map<Protocols, any>([
-    [Protocols.AAVE_V3, AaveV3Helper],
-    [Protocols.COMPOUND, CompoundHelper],
-    [Protocols.MORPHO, MorphoHelper],
-    [Protocols.FLUID, FluidHelper],
-    [Protocols.MOONWELL, MoonwellHelper],
+export const protocolHelperMap = new Map<DebtProtocols, any>([
+    [DebtProtocols.AAVE_V3, AaveV3Helper],
+    [DebtProtocols.COMPOUND, CompoundHelper],
+    [DebtProtocols.MORPHO, MorphoHelper],
+    [DebtProtocols.FLUID, FluidHelper],
+    [DebtProtocols.MOONWELL, MoonwellHelper],
 ]);
 
 export const defaultProvider = new ethers.JsonRpcProvider(process.env.BASE_RPC_URL || "https://mainnet.base.org");

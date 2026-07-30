@@ -63,13 +63,19 @@ export const ADMIN_ADDRESS = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
 // a registry deployed outside this repo's Ignition flow.
 export const PROTOCOL_REGISTRY_ADDRESS = "0x2f1331Df43E2f63e01298f570F9e467375077d7d";
 
-// Protocol enum
-export enum Protocol {
+// DebtProtocol enum
+export enum DebtProtocol {
     AAVE_V3,
     COMPOUND,
     MORPHO,
     FLUID,
     MOONWELL,
+}
+
+// Mirrors the YieldProtocol enum in contracts/Types.sol (append-only)
+export enum YieldProtocol {
+    UNISWAP_V3,
+    AERODROME,
 }
 
 export const USDC_COMET_ADDRESS = "0xb125E6687d4313864e53df431d5425969c15Eb2F";

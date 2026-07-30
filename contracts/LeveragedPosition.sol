@@ -6,7 +6,7 @@ import {PoolAddress} from "./dependencies/uniswapV3/PoolAddress.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {IProtocolHandler} from "./interfaces/IProtocolHandler.sol";
+import {IDebtHandler} from "./interfaces/IDebtHandler.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
@@ -24,7 +24,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     uint8 public protocolFee;
     address public feeBeneficiary;
     ProtocolRegistry public immutable registry;
-    mapping(Protocol => address) public protocolHandlers;
+    mapping(DebtProtocol => address) public protocolHandlers;
     address public pauser;
 
     error InsufficientTokenBalanceAfterSwap(uint256 expected, uint256 actual);
@@ -62,7 +62,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
     struct CreateCallbackData {
         address flashloanPool;
-        Protocol protocol;
+        DebtProtocol protocol;
         address collateralAsset;
         address debtAsset;
         uint256 principleCollateralAmount;
@@ -74,7 +74,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
     struct CloseCallbackData {
         address flashloanPool;
-        Protocol protocol;
+        DebtProtocol protocol;
         address collateralAsset;
         address debtAsset;
         uint256 debtAmount;
@@ -86,7 +86,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
     event LeveragedPositionCreated(
         address indexed onBehalfOf,
-        Protocol protocol,
+        DebtProtocol protocol,
         address collateralAsset,
         uint256 principleCollateralAmount,
         uint256 targetCollateralAmount,
@@ -95,7 +95,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
     event LeveragedPositionClosed(
         address indexed onBehalfOf,
-        Protocol protocol,
+        DebtProtocol protocol,
         address collateralAsset,
         uint256 collateralAmount,
         address debtAsset,
@@ -111,11 +111,11 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
     event EmergencyETHWithdrawn(uint256 amount, address indexed to);
 
-    event ProtocolHandlerUpdated(Protocol indexed protocol, address indexed oldHandler, address indexed newHandler);
+    event ProtocolHandlerUpdated(DebtProtocol indexed protocol, address indexed oldHandler, address indexed newHandler);
 
     constructor(
         address _registry,
-        Protocol[] memory protocols,
+        DebtProtocol[] memory protocols,
         address[] memory handlers,
         address _pauser
     ) Ownable(msg.sender) {
@@ -157,7 +157,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     /// @param _handler The new handler address
     /// @dev Only callable via the registry's immutable timelock and must also hold CRITICAL_ROLE.
     /// @dev Allows updating handlers if a bug is found or handler needs upgrade.
-    function setProtocolHandler(Protocol _protocol, address _handler) external onlyTimelockCriticalRole {
+    function setProtocolHandler(DebtProtocol _protocol, address _handler) external onlyTimelockCriticalRole {
         require(_handler != address(0), "Invalid handler address");
         address oldHandler = protocolHandlers[_protocol];
         protocolHandlers[_protocol] = _handler;
@@ -177,7 +177,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     /// @dev Flash loans collateral difference, supplies to protocol, borrows debt, swaps back to repay flash loan
     function createLeveragedPosition(
         address _flashloanPool,
-        Protocol _protocol,
+        DebtProtocol _protocol,
         address _collateralAsset,
         uint256 _principleCollateralAmount,
         uint256 _targetCollateralAmount,
@@ -236,7 +236,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     /// @dev Flash loans debt amount, repays debt, withdraws collateral, swaps to repay flash loan
     function deleveragePosition(
         address _flashloanPool,
-        Protocol _protocol,
+        DebtProtocol _protocol,
         address _collateralAsset,
         uint256 _collateralAmount,
         address _debtAsset,
@@ -327,7 +327,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
         (bool successSupply, ) = handler.delegatecall(
             abi.encodeCall(
-                IProtocolHandler.supply,
+                IDebtHandler.supply,
                 (decoded.collateralAsset, decoded.targetCollateralAmount, decoded.onBehalfOf, decoded.extraData)
             )
         );
@@ -335,7 +335,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
         (bool successBorrow, ) = handler.delegatecall(
             abi.encodeCall(
-                IProtocolHandler.borrow,
+                IDebtHandler.borrow,
                 (decoded.debtAsset, amountInMax, decoded.onBehalfOf, decoded.extraData)
             )
         );
@@ -369,7 +369,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         if (remainingBalance > 0) {
             (bool successRepay, ) = handler.delegatecall(
                 abi.encodeCall(
-                    IProtocolHandler.repay,
+                    IDebtHandler.repay,
                     (decoded.debtAsset, remainingBalance, decoded.onBehalfOf, decoded.extraData)
                 )
             );
@@ -393,7 +393,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         // Flash loan borrowed the full debt amount - repay the debt
         (bool successRepay, ) = handler.delegatecall(
             abi.encodeCall(
-                IProtocolHandler.repay,
+                IDebtHandler.repay,
                 (decoded.debtAsset, decoded.debtAmount, decoded.onBehalfOf, decoded.extraData)
             )
         );
@@ -401,7 +401,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
 
         (bool successWithdraw, ) = handler.delegatecall(
             abi.encodeCall(
-                IProtocolHandler.withdraw,
+                IDebtHandler.withdraw,
                 (decoded.collateralAsset, decoded.collateralAmount, decoded.onBehalfOf, decoded.extraData)
             )
         );

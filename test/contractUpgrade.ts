@@ -8,7 +8,7 @@ import { LeveragedPosition } from "../typechain-types";
 import morphoAbi from "../externalAbi/morpho/morpho.json";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { approve, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
-import { Protocols } from "./constants";
+import { DebtProtocols } from "./constants";
 
 describe.skip("Upgrade contract", function () {
     let impersonatedSigner: HardhatEthersSigner;
@@ -19,7 +19,7 @@ describe.skip("Upgrade contract", function () {
         const SafeDebtManager = await ethers.getContractFactory("SafeDebtManagerUpgradeable");
 
         // Prepare constructor arguments for initialize
-        const protocols = [Protocols.AAVE_V3];
+        const protocols = [DebtProtocols.AAVE_V3];
         const handlers = ["0x123"];
 
         // Deploy as upgradeable using UUPS proxy

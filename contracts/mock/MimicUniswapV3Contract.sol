@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import "../interfaces/IProtocolHandler.sol";
+import "../interfaces/IDebtHandler.sol";
 import "../Types.sol";
 
 /**
@@ -30,7 +30,7 @@ contract MaliciousUniswapV3Pool {
      */
     function attemptMaliciousBorrow(address asset, uint256 amount, address onBehalfOf) external {
         // This call should fail because this contract is not deployed by the Uniswap factory
-        IProtocolHandler(targetHandler).borrow(asset, amount, onBehalfOf, "0x");
+        IDebtHandler(targetHandler).borrow(asset, amount, onBehalfOf, "0x");
     }
 
     /**
@@ -42,13 +42,13 @@ contract MaliciousUniswapV3Pool {
         address onBehalfOf,
         CollateralAsset[] memory collateralAssets
     ) external {
-        IProtocolHandler(targetHandler).switchFrom(fromAsset, amount, onBehalfOf, collateralAssets, "0x");
+        IDebtHandler(targetHandler).switchFrom(fromAsset, amount, onBehalfOf, collateralAssets, "0x");
     }
 
     /**
      * @dev Attempt to manipulate supply/borrow without proper validation
      */
     function attemptMaliciousSupply(address asset, uint256 amount, address onBehalfOf) external {
-        IProtocolHandler(targetHandler).supply(asset, amount, onBehalfOf, "0x");
+        IDebtHandler(targetHandler).supply(asset, amount, onBehalfOf, "0x");
     }
 }

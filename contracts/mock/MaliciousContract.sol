@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import "../interfaces/IProtocolHandler.sol";
+import "../interfaces/IDebtHandler.sol";
 import "../Types.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract MaliciousContract is IProtocolHandler {
+contract MaliciousContract is IDebtHandler {
     address public maliciousAddress;
 
     constructor(address _maliciousAddress) {

@@ -41,19 +41,19 @@ The system consists of several key components:
         - `DEFAULT_ADMIN_ROLE`: For routine operations (whitelist, token mappings) - immediate execution
         - `CRITICAL_ROLE`: For critical operations (setParaswapV6, setOperator) - requires timelock
 
-2. **DebtSwap.sol**: The main contract that orchestrates the debt switching process using flash loans.
+2. **SafeDebtManager.sol**: The main contract that orchestrates the debt switching process using flash loans.
 
-3. **Protocol Handlers**: Individual handlers for each supported lending protocol:
+3. **Debt Handlers**: Individual handlers for each supported lending protocol, all implementing `IDebtHandler`:
 
-    - In `contracts/protocols/` directory:
+    - In `contracts/protocolsDebt/` directory (extend `BaseDebtHandler.sol`):
 
-        - `AaveV3Handler.sol`: Handles interactions with Aave V3 protocol
-        - `CompoundHandler.sol`: Handles interactions with Compound protocol
-        - `MorphoHandler.sol`: Handles interactions with Morpho protocol
+        - `AaveV3DebtHandler.sol`: Handles interactions with Aave V3 protocol
+        - `CompoundDebtHandler.sol`: Handles interactions with Compound protocol
+        - `MorphoDebtHandler.sol`: Handles interactions with Morpho protocol
 
-    - In `contracts/protocolsSafe/` directory:
-        - `MoonwellHandler.sol`: Handles interactions with Moonwell protocol
-        - `FluidSafeHandler.sol`: Handles interactions with Fluid protocol through Safe
+    - In `contracts/protocolsSafeDebt/` directory:
+        - `MoonwellDebtHandler.sol`: Handles interactions with Moonwell protocol
+        - `FluidSafeDebtHandler.sol`: Handles interactions with Fluid protocol through Safe
 
 4. **Safe Modules**: Modules for Gnosis Safe integration:
 
@@ -96,12 +96,12 @@ The system consists of several key components:
 
 **Compound V3:**
 
-- Call `allow()` to authorize DebtSwap contract
+- Call `allow()` to authorize the SafeDebtManager contract
 - Extra data: `"0x"`
 
 **Morpho:**
 
-- Call `setAuthorization(debtSwapContract, true)`
+- Call `setAuthorization(safeDebtManager, true)`
 - Extra data: Encode `(MarketParams, borrowShares)` - **REQUIRED**
 
 **Moonwell:**
@@ -124,7 +124,7 @@ The system consists of several key components:
 
 ## Key Functions
 
-### DebtSwap Contract
+### SafeDebtManager Contract
 
 - `executeDebtSwap`: Main entry point for initiating a debt position transfer
 - `uniswapV3FlashCallback`: Handles the flash loan callback from Uniswap V3
@@ -133,9 +133,9 @@ The system consists of several key components:
 - `getHandler`: Retrieves the handler address for a specific protocol
 - `emergencyWithdraw`: Allows the owner to withdraw tokens in case of emergency
 
-### Protocol Handlers
+### Debt Handlers
 
-Each protocol handler implements the following key functions:
+Each debt handler implements the following key functions:
 
 - `getDebtAmount`: Retrieves current debt amount for a user
 - `switchIn`: Handles debt switching within the same protocol
@@ -152,14 +152,14 @@ To execute a debt swap, you'll need to provide the following parameters:
 ```solidity
 function executeDebtSwap(
     address _flashloanPool,       // Uniswap V3 pool address for flash loan
-    Protocol _fromProtocol,       // Source protocol enum (COMPOUND, AAVE_V3, MORPHO, FLUID, MOONWELL)
-    Protocol _toProtocol,         // Destination protocol enum
+    DebtProtocol _fromProtocol,   // Source protocol enum (AAVE_V3, COMPOUND, MORPHO, FLUID, MOONWELL)
+    DebtProtocol _toProtocol,     // Destination protocol enum
     address _fromDebtAsset,       // Debt asset address on source protocol
     address _toDebtAsset,         // Debt asset address on destination protocol
     uint256 _amount,              // Amount to swap (use type(uint256).max for full debt)
     CollateralAsset[] calldata _collateralAssets,  // Array of collateral assets
-    bytes calldata _fromExtraData,  // Extra data for source protocol
-    bytes calldata _toExtraData,    // Extra data for destination protocol
+    address _onBehalfOf,          // Safe address the swap is executed for
+    bytes[2] calldata _extraData, // [fromExtraData, toExtraData] for the two protocols
     ParaswapParams calldata _paraswapParams  // Paraswap parameters for token swaps
 )
 ```

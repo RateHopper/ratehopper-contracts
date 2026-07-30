@@ -716,6 +716,12 @@
             },
             {
                 "indexed": false,
+                "internalType": "string",
+                "name": "operationType",
+                "type": "string"
+            },
+            {
+                "indexed": false,
                 "internalType": "bool",
                 "name": "enabled",
                 "type": "bool"
@@ -1366,11 +1372,54 @@
         "inputs": [
             {
                 "internalType": "enum YieldProtocol",
+                "name": "protocol",
+                "type": "uint8"
+            },
+            {
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            }
+        ],
+        "name": "positionHandlerOf",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "enum YieldProtocol",
                 "name": "",
                 "type": "uint8"
             }
         ],
-        "name": "protocolEnabled",
+        "name": "protocolEnabledForClose",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "enum YieldProtocol",
+                "name": "",
+                "type": "uint8"
+            }
+        ],
+        "name": "protocolEnabledForOpen",
         "outputs": [
             {
                 "internalType": "bool",
@@ -1611,7 +1660,25 @@
                 "type": "bool"
             }
         ],
-        "name": "setProtocolEnabled",
+        "name": "setProtocolEnabledForClose",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "enum YieldProtocol",
+                "name": "protocol",
+                "type": "uint8"
+            },
+            {
+                "internalType": "bool",
+                "name": "enabled",
+                "type": "bool"
+            }
+        ],
+        "name": "setProtocolEnabledForOpen",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"

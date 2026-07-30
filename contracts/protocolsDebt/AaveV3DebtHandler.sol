@@ -9,10 +9,10 @@ import {DataTypes} from "../interfaces/aaveV3/DataTypes.sol";
 import {IAaveProtocolDataProvider} from "../interfaces/aaveV3/IAaveProtocolDataProvider.sol";
 import {IAaveOracle} from "../interfaces/aaveV3/IAaveOracle.sol";
 import {IPoolAddressesProvider} from "../interfaces/aaveV3/IPoolAddressesProvider.sol";
-import "./BaseProtocolHandler.sol";
+import "./BaseDebtHandler.sol";
 import "../ProtocolRegistry.sol";
 
-contract AaveV3Handler is BaseProtocolHandler {
+contract AaveV3DebtHandler is BaseDebtHandler {
     using SafeERC20 for IERC20;
 
     IPoolV3 public immutable aaveV3Pool;
@@ -23,7 +23,7 @@ contract AaveV3Handler is BaseProtocolHandler {
         address _AAVE_V3_DATA_PROVIDER_ADDRESS,
         address _UNISWAP_V3_FACTORY_ADDRESS,
         address _REGISTRY_ADDRESS
-    ) BaseProtocolHandler(_UNISWAP_V3_FACTORY_ADDRESS, _REGISTRY_ADDRESS) {
+    ) BaseDebtHandler(_UNISWAP_V3_FACTORY_ADDRESS, _REGISTRY_ADDRESS) {
         aaveV3Pool = IPoolV3(_AAVE_V3_POOL_ADDRESS);
         dataProvider = IAaveProtocolDataProvider(_AAVE_V3_DATA_PROVIDER_ADDRESS);
     }

@@ -10,7 +10,7 @@ import {
     GHO_ADDRESS,
     MAI_ADDRESS,
     PARASWAP_V6_CONTRACT_ADDRESS,
-    Protocols,
+    DebtProtocols,
     sUSDS_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
     USDbC_ADDRESS,
@@ -19,8 +19,8 @@ import {
     WETH_ADDRESS,
     wstETH_ADDRESS,
 } from "./constants";
-import { MORPHO_ADDRESS } from "./protocols/morpho";
-import { COMPTROLLER_ADDRESS } from "./protocols/moonwell";
+import { MORPHO_ADDRESS } from "./protocolsDebt/morpho";
+import { COMPTROLLER_ADDRESS } from "./protocolsDebt/moonwell";
 import { deployProtocolRegistry } from "./deployProtocolRegistry";
 
 export async function deployMaliciousUniswapV3Pool(targetHandler: string) {
@@ -44,8 +44,8 @@ export async function deployHandlers() {
 
     const gasOptions = await getGasOptions();
 
-    const AaveV3Handler = await hre.ethers.getContractFactory("AaveV3Handler");
-    const aaveV3Handler = await AaveV3Handler.deploy(
+    const AaveV3DebtHandler = await hre.ethers.getContractFactory("AaveV3DebtHandler");
+    const aaveV3Handler = await AaveV3DebtHandler.deploy(
         AAVE_V3_POOL_ADDRESS,
         AAVE_V3_DATA_PROVIDER_ADDRESS,
         UNISWAP_V3_FACTORY_ADDRESS,
@@ -53,37 +53,37 @@ export async function deployHandlers() {
         gasOptions,
     );
     await aaveV3Handler.waitForDeployment();
-    console.log("AaveV3Handler deployed to:", await aaveV3Handler.getAddress());
+    console.log("AaveV3DebtHandler deployed to:", await aaveV3Handler.getAddress());
 
-    const CompoundHandler = await hre.ethers.getContractFactory("CompoundHandler");
-    const compoundHandler = await CompoundHandler.deploy(registryAddress, UNISWAP_V3_FACTORY_ADDRESS, gasOptions);
+    const CompoundDebtHandler = await hre.ethers.getContractFactory("CompoundDebtHandler");
+    const compoundHandler = await CompoundDebtHandler.deploy(registryAddress, UNISWAP_V3_FACTORY_ADDRESS, gasOptions);
     await compoundHandler.waitForDeployment();
-    console.log("CompoundHandler deployed to:", await compoundHandler.getAddress());
+    console.log("CompoundDebtHandler deployed to:", await compoundHandler.getAddress());
 
-    const MoonwellHandler = await hre.ethers.getContractFactory("MoonwellHandler");
-    const moonwellHandler = await MoonwellHandler.deploy(
+    const MoonwellDebtHandler = await hre.ethers.getContractFactory("MoonwellDebtHandler");
+    const moonwellHandler = await MoonwellDebtHandler.deploy(
         COMPTROLLER_ADDRESS,
         UNISWAP_V3_FACTORY_ADDRESS,
         registryAddress,
         gasOptions,
     );
     await moonwellHandler.waitForDeployment();
-    console.log("MoonwellHandler deployed to:", await moonwellHandler.getAddress());
+    console.log("MoonwellDebtHandler deployed to:", await moonwellHandler.getAddress());
 
-    const FluidHandler = await hre.ethers.getContractFactory("FluidSafeHandler");
+    const FluidHandler = await hre.ethers.getContractFactory("FluidSafeDebtHandler");
     const fluidHandler = await FluidHandler.deploy(UNISWAP_V3_FACTORY_ADDRESS, registryAddress, gasOptions);
     await fluidHandler.waitForDeployment();
     console.log("FluidHandler deployed to:", await fluidHandler.getAddress());
 
-    const MorphoHandler = await hre.ethers.getContractFactory("MorphoHandler");
-    const morphoHandler = await MorphoHandler.deploy(
+    const MorphoDebtHandler = await hre.ethers.getContractFactory("MorphoDebtHandler");
+    const morphoHandler = await MorphoDebtHandler.deploy(
         MORPHO_ADDRESS,
         UNISWAP_V3_FACTORY_ADDRESS,
         registryAddress,
         gasOptions,
     );
     await morphoHandler.waitForDeployment();
-    console.log("MorphoHandler deployed to:", await morphoHandler.getAddress());
+    console.log("MorphoDebtHandler deployed to:", await morphoHandler.getAddress());
 
     const whitelistTokens = [
         USDC_ADDRESS,
@@ -127,7 +127,7 @@ export async function deployLeveragedPositionContractFixture() {
     const LeveragedPosition = await hre.ethers.getContractFactory("LeveragedPosition");
     const leveragedPosition = await LeveragedPosition.deploy(
         await protocolRegistry.getAddress(),
-        [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO, Protocols.MOONWELL, Protocols.FLUID],
+        [DebtProtocols.AAVE_V3, DebtProtocols.COMPOUND, DebtProtocols.MORPHO, DebtProtocols.MOONWELL, DebtProtocols.FLUID],
         [
             await aaveV3Handler.getAddress(),
             await compoundHandler.getAddress(),
@@ -155,7 +155,7 @@ export async function deploySafeContractFixture() {
     const SafeModule = await hre.ethers.getContractFactory("SafeDebtManager");
     const safeModule = await SafeModule.deploy(
         await protocolRegistry.getAddress(),
-        [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO, Protocols.MOONWELL, Protocols.FLUID],
+        [DebtProtocols.AAVE_V3, DebtProtocols.COMPOUND, DebtProtocols.MORPHO, DebtProtocols.MOONWELL, DebtProtocols.FLUID],
         [
             await aaveV3Handler.getAddress(),
             await compoundHandler.getAddress(),

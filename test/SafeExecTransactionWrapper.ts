@@ -5,7 +5,7 @@ import Safe from "@safe-global/protocol-kit";
 import {
     cbETH_ADDRESS,
     DEFAULT_SUPPLY_AMOUNT,
-    Protocols,
+    DebtProtocols,
     USDC_ADDRESS,
     WETH_ADDRESS,
     cbETH_ETH_POOL,
@@ -13,7 +13,7 @@ import {
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import { eip1193Provider, fundETH, fundSignerWithETH, getDecimals, getParaswapData } from "./utils";
-import { FLUID_cbETH_USDC_VAULT, FluidHelper, fluidVaultMap } from "./protocols/fluid";
+import { FLUID_cbETH_USDC_VAULT, FluidHelper, fluidVaultMap } from "./protocolsDebt/fluid";
 import FluidVaultAbi from "../externalAbi/fluid/fluidVaultT1.json";
 import { expect } from "chai";
 import { getGasOptions, deployLeveragedPositionContractFixture } from "./deployUtils";
@@ -60,8 +60,8 @@ describe("SafeExecTransactionWrapper", function () {
         await new Promise((resolve) => setTimeout(resolve, 100));
     });
 
-    async function sendCollateralToSafe(tokenAddress = cbETH_ADDRESS, protocol?: Protocols) {
-        if (tokenAddress === WETH_ADDRESS && protocol === Protocols.FLUID) {
+    async function sendCollateralToSafe(tokenAddress = cbETH_ADDRESS, protocol?: DebtProtocols) {
+        if (tokenAddress === WETH_ADDRESS && protocol === DebtProtocols.FLUID) {
             // Send ETH directly to Safe for WETH only for Fluid protocol
             const tx = await signer.sendTransaction({
                 to: safeAddress,
@@ -80,7 +80,7 @@ describe("SafeExecTransactionWrapper", function () {
         collateralTokenAddress = cbETH_ADDRESS,
         supplyAmount = ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
     ) {
-        await sendCollateralToSafe(collateralTokenAddress, Protocols.FLUID);
+        await sendCollateralToSafe(collateralTokenAddress, DebtProtocols.FLUID);
         const collateralTokenContract = new ethers.Contract(collateralTokenAddress, ERC20_ABI, signer);
 
         const fluidVault = new ethers.Contract(vaultAddress, FluidVaultAbi, signer);

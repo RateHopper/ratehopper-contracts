@@ -2,7 +2,7 @@ import { loadFixture, time, setNextBlockBaseFeePerGas } from "@nomicfoundation/h
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { deploySafeContractFixture, deployHandlers } from "./deployUtils";
-import { Protocols } from "./constants";
+import { DebtProtocols } from "./constants";
 
 // Helper to get CRITICAL_ROLE bytes32
 const CRITICAL_ROLE = ethers.keccak256(ethers.toUtf8Bytes("CRITICAL_ROLE"));
@@ -26,7 +26,7 @@ describe("Set Protocol Handler", function () {
             const LeveragedPosition = await ethers.getContractFactory("LeveragedPosition");
             const leveragedPosition = await LeveragedPosition.deploy(
                 await protocolRegistry.getAddress(),
-                [Protocols.AAVE_V3, Protocols.COMPOUND, Protocols.MORPHO, Protocols.MOONWELL, Protocols.FLUID],
+                [DebtProtocols.AAVE_V3, DebtProtocols.COMPOUND, DebtProtocols.MORPHO, DebtProtocols.MOONWELL, DebtProtocols.FLUID],
                 [
                     await aaveV3Handler.getAddress(),
                     await compoundHandler.getAddress(),
@@ -48,14 +48,14 @@ describe("Set Protocol Handler", function () {
             const { leveragedPosition, timelock } = await loadFixture(deployLeveragedPositionWithRegistry);
 
             // Get current handler
-            const oldHandler = await leveragedPosition.protocolHandlers(Protocols.AAVE_V3);
+            const oldHandler = await leveragedPosition.protocolHandlers(DebtProtocols.AAVE_V3);
 
             // Create a new dummy handler address
             const newHandler = ethers.Wallet.createRandom().address;
 
             // Encode the setProtocolHandler call
             const callData = leveragedPosition.interface.encodeFunctionData("setProtocolHandler", [
-                Protocols.AAVE_V3,
+                DebtProtocols.AAVE_V3,
                 newHandler,
             ]);
 
@@ -74,10 +74,10 @@ describe("Set Protocol Handler", function () {
             // Execute the transaction
             await expect(timelock.execute(target, value, callData, predecessor, salt))
                 .to.emit(leveragedPosition, "ProtocolHandlerUpdated")
-                .withArgs(Protocols.AAVE_V3, oldHandler, newHandler);
+                .withArgs(DebtProtocols.AAVE_V3, oldHandler, newHandler);
 
             // Verify handler was updated
-            expect(await leveragedPosition.protocolHandlers(Protocols.AAVE_V3)).to.equal(newHandler);
+            expect(await leveragedPosition.protocolHandlers(DebtProtocols.AAVE_V3)).to.equal(newHandler);
         });
 
         it("should revert if caller does not have CRITICAL_ROLE", async function () {
@@ -88,7 +88,7 @@ describe("Set Protocol Handler", function () {
 
             // Try to update handler as non-owner without CRITICAL_ROLE
             await expect(
-                leveragedPosition.connect(nonOwner).setProtocolHandler(Protocols.AAVE_V3, newHandler),
+                leveragedPosition.connect(nonOwner).setProtocolHandler(DebtProtocols.AAVE_V3, newHandler),
             ).to.be.revertedWith("Caller does not have CRITICAL_ROLE");
         });
 
@@ -97,7 +97,7 @@ describe("Set Protocol Handler", function () {
 
             // Encode the setProtocolHandler call with zero address
             const callData = leveragedPosition.interface.encodeFunctionData("setProtocolHandler", [
-                Protocols.AAVE_V3,
+                DebtProtocols.AAVE_V3,
                 ethers.ZeroAddress,
             ]);
 
@@ -121,14 +121,14 @@ describe("Set Protocol Handler", function () {
             const { leveragedPosition, timelock } = await loadFixture(deployLeveragedPositionWithRegistry);
 
             // Get current handler for AAVE_V3
-            const oldHandler = await leveragedPosition.protocolHandlers(Protocols.AAVE_V3);
+            const oldHandler = await leveragedPosition.protocolHandlers(DebtProtocols.AAVE_V3);
             expect(oldHandler).to.not.equal(ethers.ZeroAddress);
 
             const newHandler = ethers.Wallet.createRandom().address;
 
             // Encode the setProtocolHandler call
             const callData = leveragedPosition.interface.encodeFunctionData("setProtocolHandler", [
-                Protocols.AAVE_V3,
+                DebtProtocols.AAVE_V3,
                 newHandler,
             ]);
 
@@ -147,9 +147,9 @@ describe("Set Protocol Handler", function () {
             // Execute the transaction
             await expect(timelock.execute(target, value, callData, predecessor, salt))
                 .to.emit(leveragedPosition, "ProtocolHandlerUpdated")
-                .withArgs(Protocols.AAVE_V3, oldHandler, newHandler);
+                .withArgs(DebtProtocols.AAVE_V3, oldHandler, newHandler);
 
-            expect(await leveragedPosition.protocolHandlers(Protocols.AAVE_V3)).to.equal(newHandler);
+            expect(await leveragedPosition.protocolHandlers(DebtProtocols.AAVE_V3)).to.equal(newHandler);
         });
 
         it("should allow admin to revoke CRITICAL_ROLE via registry", async function () {
@@ -161,7 +161,7 @@ describe("Set Protocol Handler", function () {
 
             // Verify newAdmin can update handler
             const handler1 = ethers.Wallet.createRandom().address;
-            await leveragedPosition.connect(newAdmin).setProtocolHandler(Protocols.AAVE_V3, handler1);
+            await leveragedPosition.connect(newAdmin).setProtocolHandler(DebtProtocols.AAVE_V3, handler1);
 
             // Revoke CRITICAL_ROLE from newAdmin via registry
             await protocolRegistry.revokeRole(CRITICAL_ROLE, newAdmin.address);
@@ -169,7 +169,7 @@ describe("Set Protocol Handler", function () {
             // newAdmin should no longer be able to update handler
             const newHandler = ethers.Wallet.createRandom().address;
             await expect(
-                leveragedPosition.connect(newAdmin).setProtocolHandler(Protocols.AAVE_V3, newHandler),
+                leveragedPosition.connect(newAdmin).setProtocolHandler(DebtProtocols.AAVE_V3, newHandler),
             ).to.be.revertedWith("Caller does not have CRITICAL_ROLE");
         });
 
@@ -180,7 +180,7 @@ describe("Set Protocol Handler", function () {
 
             // Encode the setProtocolHandler call
             const callData = leveragedPosition.interface.encodeFunctionData("setProtocolHandler", [
-                Protocols.AAVE_V3,
+                DebtProtocols.AAVE_V3,
                 newHandler,
             ]);
 
@@ -208,14 +208,14 @@ describe("Set Protocol Handler", function () {
             const timelock = await ethers.getContractAt("TimelockController", timelockAddress);
 
             // Get current handler
-            const oldHandler = await safeModule.protocolHandlers(Protocols.AAVE_V3);
+            const oldHandler = await safeModule.protocolHandlers(DebtProtocols.AAVE_V3);
 
             // Create a new dummy handler address
             const newHandler = ethers.Wallet.createRandom().address;
 
             // Encode the setProtocolHandler call
             const callData = safeModule.interface.encodeFunctionData("setProtocolHandler", [
-                Protocols.AAVE_V3,
+                DebtProtocols.AAVE_V3,
                 newHandler,
             ]);
 
@@ -234,10 +234,10 @@ describe("Set Protocol Handler", function () {
             // Execute the transaction
             await expect(timelock.execute(target, value, callData, predecessor, salt))
                 .to.emit(safeModule, "ProtocolHandlerUpdated")
-                .withArgs(Protocols.AAVE_V3, oldHandler, newHandler);
+                .withArgs(DebtProtocols.AAVE_V3, oldHandler, newHandler);
 
             // Verify handler was updated
-            expect(await safeModule.protocolHandlers(Protocols.AAVE_V3)).to.equal(newHandler);
+            expect(await safeModule.protocolHandlers(DebtProtocols.AAVE_V3)).to.equal(newHandler);
         });
 
         it("should revert if caller does not have CRITICAL_ROLE", async function () {
@@ -248,7 +248,7 @@ describe("Set Protocol Handler", function () {
 
             // Try to update handler as non-owner without CRITICAL_ROLE
             await expect(
-                safeModule.connect(nonOwner).setProtocolHandler(Protocols.AAVE_V3, newHandler),
+                safeModule.connect(nonOwner).setProtocolHandler(DebtProtocols.AAVE_V3, newHandler),
             ).to.be.revertedWith("Caller does not have CRITICAL_ROLE");
         });
 
@@ -261,7 +261,7 @@ describe("Set Protocol Handler", function () {
 
             // Encode the setProtocolHandler call with zero address
             const callData = safeModule.interface.encodeFunctionData("setProtocolHandler", [
-                Protocols.AAVE_V3,
+                DebtProtocols.AAVE_V3,
                 ethers.ZeroAddress,
             ]);
 
@@ -289,14 +289,14 @@ describe("Set Protocol Handler", function () {
             const timelock = await ethers.getContractAt("TimelockController", timelockAddress);
 
             // Get current handler for AAVE_V3
-            const oldHandler = await safeModule.protocolHandlers(Protocols.AAVE_V3);
+            const oldHandler = await safeModule.protocolHandlers(DebtProtocols.AAVE_V3);
             expect(oldHandler).to.not.equal(ethers.ZeroAddress);
 
             const newHandler = ethers.Wallet.createRandom().address;
 
             // Encode the setProtocolHandler call
             const callData = safeModule.interface.encodeFunctionData("setProtocolHandler", [
-                Protocols.AAVE_V3,
+                DebtProtocols.AAVE_V3,
                 newHandler,
             ]);
 
@@ -315,9 +315,9 @@ describe("Set Protocol Handler", function () {
             // Execute the transaction
             await expect(timelock.execute(target, value, callData, predecessor, salt))
                 .to.emit(safeModule, "ProtocolHandlerUpdated")
-                .withArgs(Protocols.AAVE_V3, oldHandler, newHandler);
+                .withArgs(DebtProtocols.AAVE_V3, oldHandler, newHandler);
 
-            expect(await safeModule.protocolHandlers(Protocols.AAVE_V3)).to.equal(newHandler);
+            expect(await safeModule.protocolHandlers(DebtProtocols.AAVE_V3)).to.equal(newHandler);
         });
 
         it("should allow admin to revoke CRITICAL_ROLE via registry", async function () {
@@ -329,7 +329,7 @@ describe("Set Protocol Handler", function () {
 
             // Verify newAdmin can update handler
             const handler1 = ethers.Wallet.createRandom().address;
-            await safeModule.connect(newAdmin).setProtocolHandler(Protocols.AAVE_V3, handler1);
+            await safeModule.connect(newAdmin).setProtocolHandler(DebtProtocols.AAVE_V3, handler1);
 
             // Revoke CRITICAL_ROLE from newAdmin via registry
             await protocolRegistry.revokeRole(CRITICAL_ROLE, newAdmin.address);
@@ -337,7 +337,7 @@ describe("Set Protocol Handler", function () {
             // newAdmin should no longer be able to update handler
             const newHandler = ethers.Wallet.createRandom().address;
             await expect(
-                safeModule.connect(newAdmin).setProtocolHandler(Protocols.AAVE_V3, newHandler),
+                safeModule.connect(newAdmin).setProtocolHandler(DebtProtocols.AAVE_V3, newHandler),
             ).to.be.revertedWith("Caller does not have CRITICAL_ROLE");
         });
 
@@ -352,7 +352,7 @@ describe("Set Protocol Handler", function () {
 
             // Encode the setProtocolHandler call
             const callData = safeModule.interface.encodeFunctionData("setProtocolHandler", [
-                Protocols.AAVE_V3,
+                DebtProtocols.AAVE_V3,
                 newHandler,
             ]);
 

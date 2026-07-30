@@ -9,7 +9,7 @@ import {PoolAddress} from "./dependencies/uniswapV3/PoolAddress.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "./Types.sol";
 import "./interfaces/safe/ISafe.sol";
-import {IProtocolHandler} from "./interfaces/IProtocolHandler.sol";
+import {IDebtHandler} from "./interfaces/IDebtHandler.sol";
 import "./ProtocolRegistry.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -26,16 +26,16 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     address public feeBeneficiary;
     address public pauser;
     ProtocolRegistry public immutable registry;
-    mapping(Protocol => address) public protocolHandlers;
-    mapping(Protocol => bool) public protocolEnabledForSwitchFrom;
-    mapping(Protocol => bool) public protocolEnabledForSwitchTo;
+    mapping(DebtProtocol => address) public protocolHandlers;
+    mapping(DebtProtocol => bool) public protocolEnabledForSwitchFrom;
+    mapping(DebtProtocol => bool) public protocolEnabledForSwitchTo;
 
     error InsufficientTokenBalanceAfterSwap(uint256 expected, uint256 actual);
     error OnlyTimelock();
 
     struct FlashCallbackData {
-        Protocol fromProtocol;
-        Protocol toProtocol;
+        DebtProtocol fromProtocol;
+        DebtProtocol toProtocol;
         address fromAsset;
         address toAsset;
         uint256 amount;
@@ -48,8 +48,8 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
     event DebtSwapped(
         address indexed onBehalfOf,
-        Protocol fromProtocol,
-        Protocol toProtocol,
+        DebtProtocol fromProtocol,
+        DebtProtocol toProtocol,
         address fromAsset,
         address toAsset,
         uint256 amount,
@@ -58,7 +58,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
     event DebtPositionExited(
         address indexed onBehalfOf,
-        Protocol protocol,
+        DebtProtocol protocol,
         address debtAsset,
         uint256 debtAmount,
         CollateralAsset[] collateralAssets
@@ -68,13 +68,13 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
     event ProtocolFeeSet(uint8 oldFee, uint8 newFee);
 
-    event ProtocolStatusChanged(Protocol indexed protocol, string operationType, bool enabled);
+    event ProtocolStatusChanged(DebtProtocol indexed protocol, string operationType, bool enabled);
 
     event EmergencyWithdrawn(address indexed token, uint256 amount, address indexed to);
 
     event EmergencyETHWithdrawn(uint256 amount, address indexed to);
 
-    event ProtocolHandlerUpdated(Protocol indexed protocol, address indexed oldHandler, address indexed newHandler);
+    event ProtocolHandlerUpdated(DebtProtocol indexed protocol, address indexed oldHandler, address indexed newHandler);
 
     modifier onlyOwnerOrOperator(address onBehalfOf) {
         require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
@@ -102,7 +102,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
     constructor(
         address _registry,
-        Protocol[] memory protocols,
+        DebtProtocol[] memory protocols,
         address[] memory handlers,
         address _pauser
     ) Ownable(msg.sender) {
@@ -144,7 +144,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     /// @param _protocol The protocol to enable/disable
     /// @param _enabled True to enable, false to disable
     /// @dev Only callable by the pauser. Used for emergency protocol disabling.
-    function setProtocolEnabledForSwitchFrom(Protocol _protocol, bool _enabled) external onlyPauser {
+    function setProtocolEnabledForSwitchFrom(DebtProtocol _protocol, bool _enabled) external onlyPauser {
         require(protocolHandlers[_protocol] != address(0), "Protocol handler not set");
         protocolEnabledForSwitchFrom[_protocol] = _enabled;
         emit ProtocolStatusChanged(_protocol, "switchFrom", _enabled);
@@ -154,7 +154,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     /// @param _protocol The protocol to enable/disable
     /// @param _enabled True to enable, false to disable
     /// @dev Only callable by the pauser. Used for emergency protocol disabling.
-    function setProtocolEnabledForSwitchTo(Protocol _protocol, bool _enabled) external onlyPauser {
+    function setProtocolEnabledForSwitchTo(DebtProtocol _protocol, bool _enabled) external onlyPauser {
         require(protocolHandlers[_protocol] != address(0), "Protocol handler not set");
         protocolEnabledForSwitchTo[_protocol] = _enabled;
         emit ProtocolStatusChanged(_protocol, "switchTo", _enabled);
@@ -165,7 +165,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     /// @param _handler The new handler address
     /// @dev Only callable via the registry's immutable timelock and must also hold CRITICAL_ROLE.
     /// @dev Allows updating handlers if a bug is found or handler needs upgrade.
-    function setProtocolHandler(Protocol _protocol, address _handler) external onlyTimelockCriticalRole {
+    function setProtocolHandler(DebtProtocol _protocol, address _handler) external onlyTimelockCriticalRole {
         require(_handler != address(0), "Invalid handler address");
         address oldHandler = protocolHandlers[_protocol];
         protocolHandlers[_protocol] = _handler;
@@ -186,8 +186,8 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
     /// @dev Uses Uniswap V3 flash loan to atomically repay source debt and borrow on destination
     function executeDebtSwap(
         address _flashloanPool,
-        Protocol _fromProtocol,
-        Protocol _toProtocol,
+        DebtProtocol _fromProtocol,
+        DebtProtocol _toProtocol,
         address _fromDebtAsset,
         address _toDebtAsset,
         uint256 _amount,
@@ -222,7 +222,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         }
 
         if (_amount == type(uint256).max) {
-            debtAmount = IProtocolHandler(fromHandler).getDebtAmount(_fromDebtAsset, _onBehalfOf, _extraData[0]);
+            debtAmount = IDebtHandler(fromHandler).getDebtAmount(_fromDebtAsset, _onBehalfOf, _extraData[0]);
             require(debtAmount >= 10000, "Debt amount below minimum threshold");
         }
 
@@ -305,7 +305,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         if (decoded.fromProtocol == decoded.toProtocol) {
             (bool success, ) = fromHandler.delegatecall(
                 abi.encodeCall(
-                    IProtocolHandler.switchIn,
+                    IDebtHandler.switchIn,
                     (
                         decoded.fromAsset,
                         decoded.toAsset,
@@ -322,7 +322,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         } else {
             (bool successFrom, ) = fromHandler.delegatecall(
                 abi.encodeCall(
-                    IProtocolHandler.switchFrom,
+                    IDebtHandler.switchFrom,
                     (decoded.fromAsset, decoded.amount, safe, decoded.collateralAssets, decoded.fromExtraData)
                 )
             );
@@ -330,7 +330,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
             (bool successTo, ) = toHandler.delegatecall(
                 abi.encodeCall(
-                    IProtocolHandler.switchTo,
+                    IDebtHandler.switchTo,
                     (decoded.toAsset, amountTotal, safe, decoded.collateralAssets, decoded.toExtraData)
                 )
             );
@@ -364,7 +364,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
         if (remainingBalance > 0) {
             (bool success, ) = toHandler.delegatecall(
-                abi.encodeCall(IProtocolHandler.repay, (decoded.toAsset, remainingBalance, safe, decoded.toExtraData))
+                abi.encodeCall(IDebtHandler.repay, (decoded.toAsset, remainingBalance, safe, decoded.toExtraData))
             );
 
             require(success, "Repay remainingBalance failed");
@@ -421,7 +421,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
      * @param _withdrawCollateral Whether to withdraw collateral assets after repaying debt
      */
     function exit(
-        Protocol _protocol,
+        DebtProtocol _protocol,
         address _debtAsset,
         uint256 _debtAmount,
         CollateralAsset[] calldata _collateralAssets,
@@ -447,7 +447,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
             // Determine repay amount - if max, get actual debt from handler
             uint256 repayAmount = _debtAmount;
             if (_debtAmount == type(uint256).max) {
-                uint256 debtAmount = IProtocolHandler(handler).getDebtAmount(_debtAsset, _onBehalfOf, _extraData);
+                uint256 debtAmount = IDebtHandler(handler).getDebtAmount(_debtAsset, _onBehalfOf, _extraData);
                 uint256 safeBalance = IERC20(_debtAsset).balanceOf(_onBehalfOf);
                 require(safeBalance >= debtAmount, "Insufficient balance");
                 repayAmount = debtAmount;
@@ -462,7 +462,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
             require(transferSuccess, "Transfer debt tokens to contract failed");
 
             (bool repaySuccess, ) = handler.delegatecall(
-                abi.encodeCall(IProtocolHandler.repay, (_debtAsset, repayAmount, _onBehalfOf, _extraData))
+                abi.encodeCall(IDebtHandler.repay, (_debtAsset, repayAmount, _onBehalfOf, _extraData))
             );
             require(repaySuccess, "Repay failed");
 
@@ -480,7 +480,7 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
 
                 (bool withdrawSuccess, ) = handler.delegatecall(
                     abi.encodeCall(
-                        IProtocolHandler.withdraw,
+                        IDebtHandler.withdraw,
                         (_collateralAssets[i].asset, _collateralAssets[i].amount, _onBehalfOf, _extraData)
                     )
                 );

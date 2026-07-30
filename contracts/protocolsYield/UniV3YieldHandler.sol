@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {INonfungiblePositionManager} from "../interfaces/uniswapV3/INonfungiblePositionManager.sol";
 import {IUniswapV3Factory} from "../interfaces/uniswapV3/IUniswapV3Factory.sol";
 import {IUniswapV3Pool} from "../interfaces/uniswapV3/IUniswapV3Pool.sol";
+import {IV3SwapRouter} from "../interfaces/uniswapV3/IV3SwapRouter.sol";
 import {BaseYieldHandler} from "./BaseYieldHandler.sol";
 import "../Types.sol";
 
@@ -14,21 +15,6 @@ import "../Types.sol";
 ///         delegatecall from the manager.
 contract UniV3YieldHandler is BaseYieldHandler {
     IUniswapV3Factory public immutable UNISWAP_V3_FACTORY;
-
-    /// @dev Mirror of SwapRouter02's `ExactInputSingleParams` so swap
-    ///      calldata is built on-chain (no deadline field on SwapRouter02).
-    struct ExactInputSingleParams {
-        address tokenIn;
-        address tokenOut;
-        uint24 fee;
-        address recipient;
-        uint256 amountIn;
-        uint256 amountOutMinimum;
-        uint160 sqrtPriceLimitX96;
-    }
-
-    // SwapRouter02 exactInputSingle((address,address,uint24,address,uint256,uint256,uint160)) = 0x04e45aaf
-    bytes4 private constant EXACT_INPUT_SINGLE_SELECTOR = 0x04e45aaf;
 
     constructor(
         address _positionManager,
@@ -61,17 +47,19 @@ contract UniV3YieldHandler is BaseYieldHandler {
     ) internal pure override returns (bytes memory) {
         uint24 feeTier = abi.decode(poolParam, (uint24));
         return
-            abi.encodeWithSelector(
-                EXACT_INPUT_SINGLE_SELECTOR,
-                ExactInputSingleParams({
-                    tokenIn: tokenIn,
-                    tokenOut: tokenOut,
-                    fee: feeTier,
-                    recipient: recipient,
-                    amountIn: amountIn,
-                    amountOutMinimum: amountOutMin,
-                    sqrtPriceLimitX96: 0
-                })
+            abi.encodeCall(
+                IV3SwapRouter.exactInputSingle,
+                (
+                    IV3SwapRouter.ExactInputSingleParams({
+                        tokenIn: tokenIn,
+                        tokenOut: tokenOut,
+                        fee: feeTier,
+                        recipient: recipient,
+                        amountIn: amountIn,
+                        amountOutMinimum: amountOutMin,
+                        sqrtPriceLimitX96: 0
+                    })
+                )
             );
     }
 

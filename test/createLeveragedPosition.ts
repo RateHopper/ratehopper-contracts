@@ -15,7 +15,7 @@ import {
     cbETH_ADDRESS,
     TEST_ADDRESS,
     TEST_FEE_BENEFICIARY_ADDRESS,
-    Protocols,
+    DebtProtocols,
     WETH_ADDRESS,
     DEFAULT_SUPPLY_AMOUNT,
     cbETH_ETH_POOL,
@@ -24,8 +24,8 @@ import {
     ETH_USDC_POOL,
 } from "./constants";
 
-import { AaveV3Helper } from "./protocols/aaveV3";
-import { cometAddressMap, CompoundHelper } from "./protocols/compound";
+import { AaveV3Helper } from "./protocolsDebt/aaveV3";
+import { cometAddressMap, CompoundHelper } from "./protocolsDebt/compound";
 import {
     MORPHO_ADDRESS,
     MorphoHelper,
@@ -34,7 +34,7 @@ import {
     morphoMarket5Id,
     morphoMarket6Id,
     morphoMarket7Id,
-} from "./protocols/morpho";
+} from "./protocolsDebt/morpho";
 import { deployLeveragedPositionContractFixture } from "./deployUtils";
 
 describe("Create leveraged position", function () {
@@ -67,7 +67,7 @@ describe("Create leveraged position", function () {
 
     async function createLeveragedPosition(
         flashloanPool: string,
-        protocol: Protocols,
+        protocol: DebtProtocols,
         collateralAddress = cbETH_ADDRESS,
         debtTokenAddress = USDC_ADDRESS,
         principleAmount = Number(DEFAULT_SUPPLY_AMOUNT),
@@ -93,13 +93,13 @@ describe("Create leveraged position", function () {
         );
 
         switch (protocol) {
-            case Protocols.AAVE_V3:
+            case DebtProtocols.AAVE_V3:
                 await aaveV3Helper.approveDelegation(debtAsset, deployedContractAddress);
                 break;
-            case Protocols.COMPOUND:
+            case DebtProtocols.COMPOUND:
                 await compoundHelper.allow(debtAsset, deployedContractAddress);
                 break;
-            case Protocols.MORPHO:
+            case DebtProtocols.MORPHO:
                 const morphoContract = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, impersonatedSigner);
                 await morphoContract.setAuthorization(deployedContractAddress, true);
                 break;
@@ -108,10 +108,10 @@ describe("Create leveraged position", function () {
         let extraData = "0x";
 
         switch (protocol) {
-            case Protocols.COMPOUND:
+            case DebtProtocols.COMPOUND:
                 extraData = compoundHelper.encodeExtraData(cometAddressMap.get(debtAsset)!);
                 break;
-            case Protocols.MORPHO:
+            case DebtProtocols.MORPHO:
                 extraData = morphoHelper.encodeExtraData(morphoMarketId!, BigInt(0));
                 break;
         }
@@ -134,22 +134,22 @@ describe("Create leveraged position", function () {
             paraswapData,
         );
 
-        const debtAmountParameter = protocol === Protocols.MORPHO ? morphoMarketId! : debtAsset;
+        const debtAmountParameter = protocol === DebtProtocols.MORPHO ? morphoMarketId! : debtAsset;
         const debtAmount = await protocolHelper.getDebtAmount(debtAmountParameter);
         console.log("debtAmount: ", ethers.formatUnits(debtAmount, debtDecimals));
 
         let collateralAmount: bigint;
         switch (protocol) {
-            case Protocols.AAVE_V3:
+            case DebtProtocols.AAVE_V3:
                 collateralAmount = await aaveV3Helper.getCollateralAmount(collateralAddress);
                 break;
-            case Protocols.COMPOUND:
+            case DebtProtocols.COMPOUND:
                 collateralAmount = await compoundHelper.getCollateralAmount(
                     cometAddressMap.get(debtAsset)!,
                     collateralAddress,
                 );
                 break;
-            case Protocols.MORPHO:
+            case DebtProtocols.MORPHO:
                 collateralAmount = await morphoHelper.getCollateralAmount(morphoMarketId!);
                 break;
             default:
@@ -173,7 +173,7 @@ describe("Create leveraged position", function () {
 
     async function deleveragePosition(
         flashloanPool: string,
-        protocol: Protocols,
+        protocol: DebtProtocols,
         collateralAddress = cbETH_ADDRESS,
         debtTokenAddress = USDC_ADDRESS,
         morphoMarketId?: string,
@@ -188,27 +188,27 @@ describe("Create leveraged position", function () {
         const debtDecimals = await getDecimals(debtAsset);
 
         // Get current debt amount before closing
-        const debtAmountParameter = protocol === Protocols.MORPHO ? morphoMarketId! : debtAsset;
+        const debtAmountParameter = protocol === DebtProtocols.MORPHO ? morphoMarketId! : debtAsset;
         const debtAmountFull = await protocolHelper.getDebtAmount(debtAmountParameter);
         console.log("Debt amount before closing: ", ethers.formatUnits(debtAmountFull, debtDecimals));
 
         // Get current collateral amount before closing
         let collateralAmountFull: bigint;
         switch (protocol) {
-            case Protocols.AAVE_V3:
+            case DebtProtocols.AAVE_V3:
                 collateralAmountFull = await aaveV3Helper.getCollateralAmount(collateralAddress);
 
                 // Approve aToken to the contract for withdrawal
                 const aTokenAddress = await aaveV3Helper.getATokenAddress(collateralAddress);
                 await approve(aTokenAddress, deployedContractAddress, impersonatedSigner);
                 break;
-            case Protocols.COMPOUND:
+            case DebtProtocols.COMPOUND:
                 collateralAmountFull = await compoundHelper.getCollateralAmount(
                     cometAddressMap.get(debtAsset)!,
                     collateralAddress,
                 );
                 break;
-            case Protocols.MORPHO:
+            case DebtProtocols.MORPHO:
                 collateralAmountFull = await morphoHelper.getCollateralAmount(morphoMarketId!);
                 break;
             default:
@@ -228,10 +228,10 @@ describe("Create leveraged position", function () {
 
         let extraData = "0x";
         switch (protocol) {
-            case Protocols.COMPOUND:
+            case DebtProtocols.COMPOUND:
                 extraData = compoundHelper.encodeExtraData(cometAddressMap.get(debtAsset)!);
                 break;
-            case Protocols.MORPHO:
+            case DebtProtocols.MORPHO:
                 // Fetch borrowShares for full repayment
                 const borrowShares = await morphoHelper.getBorrowShares(morphoMarketId!);
                 console.log("Morpho borrowShares for repayment:", borrowShares.toString());
@@ -289,16 +289,16 @@ describe("Create leveraged position", function () {
 
         let collateralAmountAfter: bigint;
         switch (protocol) {
-            case Protocols.AAVE_V3:
+            case DebtProtocols.AAVE_V3:
                 collateralAmountAfter = await aaveV3Helper.getCollateralAmount(collateralAddress);
                 break;
-            case Protocols.COMPOUND:
+            case DebtProtocols.COMPOUND:
                 collateralAmountAfter = await compoundHelper.getCollateralAmount(
                     cometAddressMap.get(debtAsset)!,
                     collateralAddress,
                 );
                 break;
-            case Protocols.MORPHO:
+            case DebtProtocols.MORPHO:
                 collateralAmountAfter = await morphoHelper.getCollateralAmount(morphoMarketId!);
                 break;
             default:
@@ -351,11 +351,11 @@ describe("Create leveraged position", function () {
 
     describe("on Aave", function () {
         it("create and close position with cbETH collateral", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
+            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.AAVE_V3);
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.AAVE_V3);
         });
 
         it("create position with cbETH collateral and protocol fee", async function () {
@@ -375,7 +375,7 @@ describe("Create leveraged position", function () {
             // Record fee beneficiary's USDC balance before
             const beneficiaryUsdcBalanceBefore = await usdcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
 
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
+            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.AAVE_V3);
 
             // Check fee beneficiary's USDC balance after
             const beneficiaryUsdcBalanceAfter = await usdcContract.balanceOf(TEST_FEE_BENEFICIARY_ADDRESS);
@@ -389,24 +389,24 @@ describe("Create leveraged position", function () {
         });
 
         it("create and close position with WETH collateral", async function () {
-            await createLeveragedPosition(ETH_USDC_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
+            await createLeveragedPosition(ETH_USDC_POOL, DebtProtocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.AAVE_V3, WETH_ADDRESS, USDC_ADDRESS);
         });
 
         it("partial close position with cbETH collateral", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3);
+            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.AAVE_V3);
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
             // Partially close 50% of the position
-            await deleveragePosition(ETH_USDC_POOL, Protocols.AAVE_V3, cbETH_ADDRESS, USDC_ADDRESS, undefined, 50);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.AAVE_V3, cbETH_ADDRESS, USDC_ADDRESS, undefined, 50);
         });
 
         it("with cbETH collateral and EURC debt", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.AAVE_V3, cbETH_ADDRESS, EURC_ADDRESS);
+            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.AAVE_V3, cbETH_ADDRESS, EURC_ADDRESS);
         });
 
         it("with cbBTC collateral", async function () {
@@ -414,7 +414,7 @@ describe("Create leveraged position", function () {
 
             await createLeveragedPosition(
                 cbBTC_USDC_POOL,
-                Protocols.AAVE_V3,
+                DebtProtocols.AAVE_V3,
                 cbBTC_ADDRESS,
                 USDC_ADDRESS,
                 cbBTCPrincipleAmount,
@@ -427,7 +427,7 @@ describe("Create leveraged position", function () {
 
             await createLeveragedPosition(
                 cbBTC_USDC_POOL,
-                Protocols.AAVE_V3,
+                DebtProtocols.AAVE_V3,
                 cbBTC_ADDRESS,
                 USDC_ADDRESS,
                 cbBTCPrincipleAmount,
@@ -438,23 +438,23 @@ describe("Create leveraged position", function () {
 
     describe("on Compoud", function () {
         it("create and close position with cbETH collateral", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.COMPOUND);
+            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.COMPOUND);
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await deleveragePosition(ETH_USDC_POOL, Protocols.COMPOUND);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.COMPOUND);
         });
 
         // USDbC is no longer available in Compound
         it.skip("with cbETH collateral and EURC debt", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, Protocols.COMPOUND, cbETH_ADDRESS, EURC_ADDRESS);
+            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.COMPOUND, cbETH_ADDRESS, EURC_ADDRESS);
         });
 
         it("with cbBTC collateral", async function () {
             const targetAmount = cbBTCPrincipleAmount * 2;
             await createLeveragedPosition(
                 cbBTC_USDC_POOL,
-                Protocols.COMPOUND,
+                DebtProtocols.COMPOUND,
                 cbBTC_ADDRESS,
                 USDC_ADDRESS,
                 cbBTCPrincipleAmount,
@@ -463,11 +463,11 @@ describe("Create leveraged position", function () {
         });
 
         it("close position with WETH collateral", async function () {
-            await createLeveragedPosition(ETH_USDC_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
+            await createLeveragedPosition(ETH_USDC_POOL, DebtProtocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await deleveragePosition(ETH_USDC_POOL, Protocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.COMPOUND, WETH_ADDRESS, USDC_ADDRESS);
         });
     });
 
@@ -475,7 +475,7 @@ describe("Create leveraged position", function () {
         it("create and close position with cbETH collateral", async function () {
             await createLeveragedPosition(
                 cbETH_ETH_POOL,
-                Protocols.MORPHO,
+                DebtProtocols.MORPHO,
                 undefined,
                 undefined,
                 undefined,
@@ -485,7 +485,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await deleveragePosition(ETH_USDC_POOL, Protocols.MORPHO, cbETH_ADDRESS, USDC_ADDRESS, morphoMarket1Id);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.MORPHO, cbETH_ADDRESS, USDC_ADDRESS, morphoMarket1Id);
         });
 
         it("with cbETH collateral and protocol fee", async function () {
@@ -507,7 +507,7 @@ describe("Create leveraged position", function () {
 
             await createLeveragedPosition(
                 cbETH_ETH_POOL,
-                Protocols.MORPHO,
+                DebtProtocols.MORPHO,
                 undefined,
                 undefined,
                 undefined,
@@ -530,7 +530,7 @@ describe("Create leveraged position", function () {
             const targetAmount = cbBTCPrincipleAmount * 2;
             await createLeveragedPosition(
                 cbBTC_USDC_POOL,
-                Protocols.MORPHO,
+                DebtProtocols.MORPHO,
                 cbBTC_ADDRESS,
                 USDC_ADDRESS,
                 cbBTCPrincipleAmount,
@@ -542,7 +542,7 @@ describe("Create leveraged position", function () {
         it("with USDC collateral and WETH debt", async function () {
             await createLeveragedPosition(
                 ETH_USDC_POOL,
-                Protocols.MORPHO,
+                DebtProtocols.MORPHO,
                 USDC_ADDRESS,
                 WETH_ADDRESS,
                 10, // Increased from 1 to 10 USDC to avoid Paraswap edge case with small amounts
@@ -571,7 +571,7 @@ describe("Create leveraged position", function () {
             // Create leveraged position with USDC collateral (6 decimals) and WETH debt (18 decimals)
             await createLeveragedPosition(
                 ETH_USDC_POOL,
-                Protocols.MORPHO,
+                DebtProtocols.MORPHO,
                 USDC_ADDRESS,
                 WETH_ADDRESS,
                 10,
@@ -595,7 +595,7 @@ describe("Create leveraged position", function () {
         it("close position with WETH collateral", async function () {
             await createLeveragedPosition(
                 ETH_USDC_POOL,
-                Protocols.MORPHO,
+                DebtProtocols.MORPHO,
                 WETH_ADDRESS,
                 USDC_ADDRESS,
                 undefined,
@@ -605,7 +605,7 @@ describe("Create leveraged position", function () {
 
             await time.increaseTo((await time.latest()) + 3600); // 1 hour
 
-            await deleveragePosition(ETH_USDC_POOL, Protocols.MORPHO, WETH_ADDRESS, USDC_ADDRESS, morphoMarket7Id);
+            await deleveragePosition(ETH_USDC_POOL, DebtProtocols.MORPHO, WETH_ADDRESS, USDC_ADDRESS, morphoMarket7Id);
         });
     });
 
@@ -719,7 +719,7 @@ describe("Create leveraged position", function () {
 
     it("revert if flashloan pool is not uniswap v3 pool", async function () {
         await expect(
-            createLeveragedPosition(USDC_ADDRESS, Protocols.MORPHO, USDC_ADDRESS, WETH_ADDRESS, 1, 2, morphoMarket6Id),
+            createLeveragedPosition(USDC_ADDRESS, DebtProtocols.MORPHO, USDC_ADDRESS, WETH_ADDRESS, 1, 2, morphoMarket6Id),
         ).to.be.revertedWith("Invalid flashloan pool address");
     });
 });

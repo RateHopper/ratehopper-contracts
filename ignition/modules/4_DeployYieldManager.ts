@@ -11,24 +11,16 @@ import {
     UNISWAP_V3_SWAP_ROUTER_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
+    YieldProtocol,
 } from "../../contractAddresses";
+import { makeRequireAddress } from "./deployHelpers";
 
-const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
-
-function requireAddress(label: string, value: string): void {
-    if (!ADDRESS_RE.test(value)) {
-        throw new Error(
-            `DeployYieldManager: ${label} must be a valid address but got "${value}". ` +
-                "Set the corresponding env var in your .env before deploying.",
-        );
-    }
-}
+const requireAddress = makeRequireAddress("DeployYieldManager");
 
 const abi = AbiCoder.defaultAbiCoder();
 
-// YieldProtocol enum values (contracts/Types.sol).
-const UNISWAP_V3 = 0;
-const AERODROME = 1;
+const UNISWAP_V3 = YieldProtocol.UNISWAP_V3;
+const AERODROME = YieldProtocol.AERODROME;
 
 // Default pool-param allow-lists, matching the standalone helpers' deploy
 // defaults: Uniswap V3 fee tiers {100, 500, 3000} (10000 deliberately

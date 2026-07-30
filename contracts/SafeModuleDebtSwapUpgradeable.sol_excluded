@@ -8,7 +8,7 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 
 import "./Types.sol";
 import "./interfaces/safe/ISafe.sol";
-import {IProtocolHandler} from "./interfaces/IProtocolHandler.sol";
+import {IDebtHandler} from "./interfaces/IDebtHandler.sol";
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -20,11 +20,11 @@ contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUP
     uint8 public protocolFee;
     address public feeBeneficiary;
     address public operator;
-    mapping(Protocol => address) public protocolHandlers;
+    mapping(DebtProtocol => address) public protocolHandlers;
 
     struct FlashCallbackData {
-        Protocol fromProtocol;
-        Protocol toProtocol;
+        DebtProtocol fromProtocol;
+        DebtProtocol toProtocol;
         address fromAsset;
         address toAsset;
         uint256 amount;
@@ -38,8 +38,8 @@ contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUP
 
     event DebtSwapped(
         address indexed onBehalfOf,
-        Protocol fromProtocol,
-        Protocol toProtocol,
+        DebtProtocol fromProtocol,
+        DebtProtocol toProtocol,
         address fromAsset,
         address toAsset,
         uint256 amount
@@ -66,7 +66,7 @@ contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUP
      * @param protocols Array of protocols to register
      * @param handlers Array of handler addresses corresponding to protocols
      */
-    function initialize(Protocol[] memory protocols, address[] memory handlers) public initializer {
+    function initialize(DebtProtocol[] memory protocols, address[] memory handlers) public initializer {
         require(protocols.length == handlers.length, "Protocols and handlers length mismatch");
 
         __Ownable_init(msg.sender);
@@ -100,8 +100,8 @@ contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUP
 
     function executeDebtSwap(
         address _flashloanPool,
-        Protocol _fromProtocol,
-        Protocol _toProtocol,
+        DebtProtocol _fromProtocol,
+        DebtProtocol _toProtocol,
         address _fromDebtAsset,
         address _toDebtAsset,
         uint256 _amount,
@@ -121,7 +121,7 @@ contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUP
         if (_amount == type(uint256).max) {
             address handler = protocolHandlers[_fromProtocol];
 
-            debtAmount = IProtocolHandler(handler).getDebtAmount(_fromDebtAsset, _onBehalfOf, _extraData[0]);
+            debtAmount = IDebtHandler(handler).getDebtAmount(_fromDebtAsset, _onBehalfOf, _extraData[0]);
         }
 
         address token0;
@@ -178,7 +178,7 @@ contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUP
 
             (bool success, ) = handler.delegatecall(
                 abi.encodeCall(
-                    IProtocolHandler.switchIn,
+                    IDebtHandler.switchIn,
                     (
                         decoded.fromAsset,
                         decoded.toAsset,
@@ -196,7 +196,7 @@ contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUP
             address fromHandler = protocolHandlers[decoded.fromProtocol];
             (bool successFrom, ) = fromHandler.delegatecall(
                 abi.encodeCall(
-                    IProtocolHandler.switchFrom,
+                    IDebtHandler.switchFrom,
                     (decoded.fromAsset, decoded.amount, safe, decoded.collateralAssets, decoded.fromExtraData)
                 )
             );
@@ -205,7 +205,7 @@ contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUP
             address toHandler = protocolHandlers[decoded.toProtocol];
             (bool successTo, ) = toHandler.delegatecall(
                 abi.encodeCall(
-                    IProtocolHandler.switchTo,
+                    IDebtHandler.switchTo,
                     (decoded.toAsset, amountTotal, safe, decoded.collateralAssets, decoded.toExtraData)
                 )
             );
@@ -237,7 +237,7 @@ contract SafeModuleDebtSwapUpgradeable is Initializable, OwnableUpgradeable, UUP
             address handler = protocolHandlers[decoded.toProtocol];
 
             (bool success, ) = handler.delegatecall(
-                abi.encodeCall(IProtocolHandler.repay, (decoded.toAsset, remainingBalance, safe, decoded.toExtraData))
+                abi.encodeCall(IDebtHandler.repay, (decoded.toAsset, remainingBalance, safe, decoded.toExtraData))
             );
 
             require(success, "Repay remainingBalance failed");

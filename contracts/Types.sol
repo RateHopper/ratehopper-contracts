@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 // Role required for critical operations like updating protocol handlers
 bytes32 constant CRITICAL_ROLE = keccak256("CRITICAL_ROLE");
 
-enum Protocol {
+enum DebtProtocol {
     AAVE_V3,
     COMPOUND,
     MORPHO,
