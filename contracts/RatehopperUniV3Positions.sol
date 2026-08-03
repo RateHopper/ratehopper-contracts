@@ -8,6 +8,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {INonfungiblePositionManager} from "./interfaces/uniswapV3/INonfungiblePositionManager.sol";
 import {IUniswapV3Factory} from "./interfaces/uniswapV3/IUniswapV3Factory.sol";
 import {IUniswapV3Pool} from "./interfaces/uniswapV3/IUniswapV3Pool.sol";
@@ -620,13 +621,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
                 // still be able to exit their positions. Emit on failure for
                 // off-chain monitoring; zero out feeUsd6 so the event reflects
                 // what actually moved.
-                (bool ok, ) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(
-                    address(USDC),
-                    0,
-                    abi.encodeCall(IERC20.transfer, (treasury, uint256(feeUsd6))),
-                    ISafe.Operation.Call
-                );
-                if (!ok) {
+                if (!_trySafeTransfer(_onBehalfOf, address(USDC), treasury, feeUsd6)) {
                     emit FeeTransferFailed(_onBehalfOf, tokenId, feeUsd6);
                     feeUsd6 = 0;
                 }
@@ -924,6 +919,30 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
     //  Internal helpers
     // ─────────────────────────────────────────────────────────────────────
 
+    /// @dev Accept empty ERC20 return data or the canonical true word only.
+    ///      Malformed/false returndata must waive the fee without blocking an exit.
+    function _trySafeTransfer(
+        address _onBehalfOf,
+        address token,
+        address recipient,
+        uint256 amount
+    ) internal returns (bool) {
+        (bool ok, bytes memory ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(
+            token,
+            0,
+            abi.encodeCall(IERC20.transfer, (recipient, amount)),
+            ISafe.Operation.Call
+        );
+        if (!ok) return false;
+        if (ret.length == 0) return true;
+        if (ret.length < 32) return false;
+        uint256 word;
+        assembly ("memory-safe") {
+            word := mload(add(ret, 0x20))
+        }
+        return word == 1;
+    }
+
     /// @dev Assert that `tokenId` is a WETH/USDC LP position currently owned
     ///      by `_onBehalfOf`. Called at the top of `closeLp` and `collectLp`
     ///      to fail fast before any module-mediated NonfungiblePositionManager call. Without this,
@@ -1021,18 +1040,14 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
             ISafe.Operation.Call
         );
         if (!ok) {
-            if (ret.length > 0) {
-                assembly ("memory-safe") {
-                    revert(add(ret, 0x20), mload(ret))
-                }
-            }
+            if (ret.length > 0) Address.verifyCallResult(ok, ret);
             revert ModuleCallFailed(step);
         }
     }
 
     /// @notice Generic module-mediated `target.call(value, data)` from the Safe.
     /// @dev    Uses `execTransactionFromModuleReturnData` and bubbles
-    ///         the inner revert via assembly when present, so production
+    ///         the inner revert via OpenZeppelin Address when present, so production
     ///         debug surfaces the NonfungiblePositionManager/SwapRouter reason instead of an opaque
     ///         `ModuleCallFailed(step)`. Falls back to the typed step error
     ///         if the inner call returned no revert data.
@@ -1044,11 +1059,7 @@ contract RatehopperUniV3Positions is AccessControl, ReentrancyGuard {
             ISafe.Operation.Call
         );
         if (!ok) {
-            if (ret.length > 0) {
-                assembly ("memory-safe") {
-                    revert(add(ret, 0x20), mload(ret))
-                }
-            }
+            if (ret.length > 0) Address.verifyCallResult(ok, ret);
             revert ModuleCallFailed(step);
         }
     }

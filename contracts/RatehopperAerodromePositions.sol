@@ -8,6 +8,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISlipstreamNonfungiblePositionManager} from "./interfaces/aerodrome/ISlipstreamNonfungiblePositionManager.sol";
 import {ICLFactory} from "./interfaces/aerodrome/ICLFactory.sol";
 import {ICLPool} from "./interfaces/aerodrome/ICLPool.sol";
@@ -426,13 +427,7 @@ contract RatehopperAerodromePositions is AccessControl, ReentrancyGuard {
             feeUsd6 = ((profit * performanceFeeBps) / 10_000).toUint128();
             if (feeUsd6 > 0) {
                 // Fee failure must not block exits.
-                (bool ok, ) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(
-                    address(USDC),
-                    0,
-                    abi.encodeCall(IERC20.transfer, (treasury, uint256(feeUsd6))),
-                    ISafe.Operation.Call
-                );
-                if (!ok) {
+                if (!_trySafeTransfer(_onBehalfOf, address(USDC), treasury, feeUsd6)) {
                     emit FeeTransferFailed(_onBehalfOf, tokenId, feeUsd6);
                     feeUsd6 = 0;
                 }
@@ -664,6 +659,30 @@ contract RatehopperAerodromePositions is AccessControl, ReentrancyGuard {
     //  Internal helpers
     // ─────────────────────────────────────────────────────────────────────
 
+    /// @dev Accept empty ERC20 return data or the canonical true word only.
+    ///      Malformed/false returndata must waive the fee without blocking an exit.
+    function _trySafeTransfer(
+        address _onBehalfOf,
+        address token,
+        address recipient,
+        uint256 amount
+    ) internal returns (bool) {
+        (bool ok, bytes memory ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(
+            token,
+            0,
+            abi.encodeCall(IERC20.transfer, (recipient, amount)),
+            ISafe.Operation.Call
+        );
+        if (!ok) return false;
+        if (ret.length == 0) return true;
+        if (ret.length < 32) return false;
+        uint256 word;
+        assembly ("memory-safe") {
+            word := mload(add(ret, 0x20))
+        }
+        return word == 1;
+    }
+
     /// @dev Require a Safe-owned WETH/USDC LP NFT.
     function _requireWethUsdcPositionOwnedBy(address _onBehalfOf, uint256 tokenId) internal view {
         (, , address token0, address token1, , , , , , , , ) = POSITION_MANAGER.positions(tokenId);
@@ -725,11 +744,7 @@ contract RatehopperAerodromePositions is AccessControl, ReentrancyGuard {
             ISafe.Operation.Call
         );
         if (!ok) {
-            if (ret.length > 0) {
-                assembly ("memory-safe") {
-                    revert(add(ret, 0x20), mload(ret))
-                }
-            }
+            if (ret.length > 0) Address.verifyCallResult(ok, ret);
             revert ModuleCallFailed(step);
         }
     }
@@ -743,11 +758,7 @@ contract RatehopperAerodromePositions is AccessControl, ReentrancyGuard {
             ISafe.Operation.Call
         );
         if (!ok) {
-            if (ret.length > 0) {
-                assembly ("memory-safe") {
-                    revert(add(ret, 0x20), mload(ret))
-                }
-            }
+            if (ret.length > 0) Address.verifyCallResult(ok, ret);
             revert ModuleCallFailed(step);
         }
     }

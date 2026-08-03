@@ -717,6 +717,19 @@ describe("RatehopperAerodromePositions - mock harness (no fork)", function () {
         expect((await ctx.usdc.balanceOf(ctx.treasury.address)) - tUsdc0).to.equal(0n);
     });
 
+    it("closeLp waives the performance fee when the treasury transfer returns false", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
+        await (await ctx.router.setOutput(1_000_000n)).wait();
+        await (await ctx.usdc.setFalseTransferTo(ctx.treasury.address)).wait();
+
+        await expect(closeLpCall(ctx, tokenId)).to.emit(ctx.rha, "FeeTransferFailed");
+        const ev = (await ctx.rha.queryFilter(ctx.rha.filters.PositionClosed(ctx.safeAddr, tokenId), -5)).slice(-1)[0]
+            .args;
+        expect(ev.feeUsd6).to.equal(0n);
+        expect(await ctx.usdc.balanceOf(ctx.treasury.address)).to.equal(0n);
+    });
+
     it("collectLp surfaces CollectFeeTransferFailed (catch branch) when the fee transfer reverts", async function () {
         const ctx = await loadFixture(deployMockHarness);
         const tokenId = await openLp(ctx);

@@ -1,0 +1,10 @@
+{
+    "chainId": 8453,
+    "network": "base",
+    "contracts": {
+        "DeployAerodromeHelper#RatehopperAerodromePositions": "0x75624fbe39C6b823Dbc0C743FD727AF7A7819Cd3",
+        "DeployYieldManager#AerodromeYieldHandler": "0xA455B9b41088bcD48F783aa6a82aa3187062733c",
+        "DeployYieldManager#UniV3YieldHandler": "0x3E442d3a3ceA750EF88c31E909b2F9cA7ba7c543",
+        "DeployYieldManager#SafeYieldManager": "0xD313AC20E5Fe4bF30DfFE0B5E20Bc47Df19d2FF6"
+    }
+}

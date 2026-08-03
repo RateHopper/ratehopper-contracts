@@ -22,7 +22,7 @@ contract AerodromeYieldHandler is BaseYieldHandler {
         IERC20 _weth,
         address _swapRouter,
         ICLFactory _clFactory
-    ) BaseYieldHandler(YieldProtocol.AERODROME, _positionManager, _usdc, _weth, _swapRouter) {
+    ) BaseYieldHandler(YIELD_PROTOCOL_AERODROME, _positionManager, _usdc, _weth, _swapRouter) {
         if (address(_clFactory) == address(0)) revert ZeroAddress();
         CL_FACTORY = _clFactory;
     }

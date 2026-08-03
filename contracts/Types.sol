@@ -12,13 +12,15 @@ enum DebtProtocol {
     MOONWELL
 }
 
-// Yield (LP) protocols managed by SafeYieldManager. Append-only: new
-// protocols (e.g. UNISWAP_V4) must be added at the end so existing
-// handler registrations and stored basis keys keep their meaning.
-enum YieldProtocol {
-    UNISWAP_V3,
-    AERODROME
-}
+// Canonical yield (LP) protocol ids. SafeYieldManager and the yield
+// handlers key everything by plain uint8 so NEW protocols can be
+// registered on the deployed manager via `setYieldHandler` without a
+// redeploy. Append-only: new ids (e.g. UNISWAP_V4 = 2) must never reuse
+// an existing value, so handler registrations and stored basis keys
+// keep their meaning. Mirrored by the YieldProtocol enum in
+// contractAddresses.ts for off-chain consumers.
+uint8 constant YIELD_PROTOCOL_UNISWAP_V3 = 0;
+uint8 constant YIELD_PROTOCOL_AERODROME = 1;
 
 struct CollateralAsset {
     address asset;

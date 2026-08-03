@@ -175,16 +175,28 @@ function collectLpCall(
 }
 
 describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
-
     it("openLp reverts on reentrancy", async function () {
         const ctx = await loadFixture(deployMockHarness);
         const rhpAddr = await ctx.rhp.getAddress();
         const callData = ctx.rhp.interface.encodeFunctionData("openLp", [
-            ctx.safeAddr, USDC_AMOUNT, 0, 0, 500, 0n, 0n, 500, 1n, 1n, SLIP, DEADLINE
+            ctx.safeAddr,
+            USDC_AMOUNT,
+            0,
+            0,
+            500,
+            0n,
+            0n,
+            500,
+            1n,
+            1n,
+            SLIP,
+            DEADLINE,
         ]);
         await (await ctx.router.setCallback(rhpAddr, callData)).wait();
         await expect(
-            ctx.rhp.connect(ctx.operatorEOA).openLp(ctx.safeAddr, USDC_AMOUNT, 0, 0, 500, 0n, 0n, 500, 1n, 1n, SLIP, DEADLINE)
+            ctx.rhp
+                .connect(ctx.operatorEOA)
+                .openLp(ctx.safeAddr, USDC_AMOUNT, 0, 0, 500, 0n, 0n, 500, 1n, 1n, SLIP, DEADLINE),
         ).to.be.revertedWithCustomError(ctx.rhp, "ReentrancyGuardReentrantCall");
     });
 
@@ -193,11 +205,23 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         const tokenId = await openLp(ctx);
         const rhpAddr = await ctx.rhp.getAddress();
         const callData = ctx.rhp.interface.encodeFunctionData("closeLp", [
-            ctx.safeAddr, tokenId, 500, 1n, 1n, SLIP, 10_000, 0, 0, DEADLINE, 0
+            ctx.safeAddr,
+            tokenId,
+            500,
+            1n,
+            1n,
+            SLIP,
+            10_000,
+            0,
+            0,
+            DEADLINE,
+            0,
         ]);
         await (await ctx.router.setCallback(rhpAddr, callData)).wait();
         await expect(
-            ctx.rhp.connect(ctx.operatorEOA).closeLp(ctx.safeAddr, tokenId, 500, 1n, 1n, SLIP, 10_000, 0, 0, DEADLINE, 0)
+            ctx.rhp
+                .connect(ctx.operatorEOA)
+                .closeLp(ctx.safeAddr, tokenId, 500, 1n, 1n, SLIP, 10_000, 0, 0, DEADLINE, 0),
         ).to.be.revertedWithCustomError(ctx.rhp, "ReentrancyGuardReentrantCall");
     });
 
@@ -207,11 +231,18 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         await (await ctx.npm.setOwed(tokenId, 100n, 100n)).wait();
         const rhpAddr = await ctx.rhp.getAddress();
         const callData = ctx.rhp.interface.encodeFunctionData("collectLp", [
-            ctx.safeAddr, tokenId, true, 500, 1n, 1n, SLIP, DEADLINE
+            ctx.safeAddr,
+            tokenId,
+            true,
+            500,
+            1n,
+            1n,
+            SLIP,
+            DEADLINE,
         ]);
         await (await ctx.router.setCallback(rhpAddr, callData)).wait();
         await expect(
-            ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, true, 500, 1n, 1n, SLIP, DEADLINE)
+            ctx.rhp.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, true, 500, 1n, 1n, SLIP, DEADLINE),
         ).to.be.revertedWithCustomError(ctx.rhp, "ReentrancyGuardReentrantCall");
     });
 
@@ -472,13 +503,12 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
 
     // ── Access-control modifier branches ────────────────────────────────
 
-
     it("onlyOperatorOrSafe allows the Safe itself to call the functions directly", async function () {
         const ctx = await loadFixture(deployMockHarness);
-        
+
         const safeSigner = await ethers.getImpersonatedSigner(ctx.safeAddr);
         await ctx.deployer.sendTransaction({ to: ctx.safeAddr, value: ethers.parseEther("1") });
-        
+
         // openLp
         await (await ctx.router.setOutput(WETH_OUT)).wait();
         await (
@@ -492,9 +522,7 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         // collectLp
         await (await ctx.npm.setOwed(tokenId, 100n, 100n)).wait();
         await (
-            await ctx.rhp
-                .connect(safeSigner)
-                .collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE)
+            await ctx.rhp.connect(safeSigner).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE)
         ).wait();
 
         // closeLp
@@ -737,6 +765,19 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         expect((await ctx.usdc.balanceOf(ctx.treasury.address)) - tUsdc0).to.equal(0n);
     });
 
+    it("closeLp waives the performance fee when the treasury transfer returns false", async function () {
+        const ctx = await loadFixture(deployMockHarness);
+        const tokenId = await openLp(ctx);
+        await (await ctx.router.setOutput(1_000_000n)).wait();
+        await (await ctx.usdc.setFalseTransferTo(ctx.treasury.address)).wait();
+
+        await expect(closeLpCall(ctx, tokenId)).to.emit(ctx.rhp, "FeeTransferFailed");
+        const ev = (await ctx.rhp.queryFilter(ctx.rhp.filters.PositionClosed(ctx.safeAddr, tokenId), -5)).slice(-1)[0]
+            .args;
+        expect(ev.feeUsd6).to.equal(0n);
+        expect(await ctx.usdc.balanceOf(ctx.treasury.address)).to.equal(0n);
+    });
+
     it("collectLp surfaces CollectFeeTransferFailed (catch branch) when the fee transfer reverts", async function () {
         const ctx = await loadFixture(deployMockHarness);
         const tokenId = await openLp(ctx);
@@ -817,10 +858,9 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         expect(await ctx.npm.ownerOf(tokenId)).to.equal(ctx.safeAddr);
     });
 
-
     it("_chargeCollectFee with feeCollectBps = 10000 takes 100% of fees and forwards 0 to Safe", async function () {
         const ctx = await loadFixture(deployMockHarness);
-        
+
         // Deploy a new RHP with MAX_FEE_BPS = 10000
         const RHP = await ethers.getContractFactory("RatehopperUniV3Positions");
         const rhp100 = await RHP.deploy(
@@ -837,7 +877,7 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
             ctx.deployer.address,
             ctx.deployer.address,
             0,
-            0
+            0,
         );
         await rhp100.waitForDeployment();
         await (await ctx.reg.connect(ctx.deployer).setOperator(ctx.operatorEOA.address)).wait();
@@ -864,7 +904,9 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         const sWeth0 = await ctx.weth.balanceOf(ctx.safeAddr);
         const sUsdc0 = await ctx.usdc.balanceOf(ctx.safeAddr);
 
-        await (await rhp100.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE)).wait();
+        await (
+            await rhp100.connect(ctx.operatorEOA).collectLp(ctx.safeAddr, tokenId, false, 500, 1n, 1n, SLIP, DEADLINE)
+        ).wait();
 
         expect((await ctx.weth.balanceOf(ctx.treasury.address)) - tWeth0).to.equal(owed0);
         expect((await ctx.weth.balanceOf(ctx.safeAddr)) - sWeth0).to.equal(0n);

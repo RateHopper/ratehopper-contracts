@@ -19,7 +19,7 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 - **SafeYieldManager.sol**: Single Safe-module entry point for yield (LP) protocols; delegatecalls stateless yield handlers, shared state in ERC-7201 namespace (`YieldStorage`)
 - **LeveragedPosition.sol**: Creates leveraged positions across protocols
 - **ProtocolRegistry.sol**: Central registry for token mappings, operator, and protocol configs
-- **Types.sol**: Shared type definitions (`DebtProtocol`, `YieldProtocol` enums)
+- **Types.sol**: Shared type definitions (`DebtProtocol` enum, `YIELD_PROTOCOL_*` uint8 id constants)
 - **RatehopperUniV3Positions.sol** / **RatehopperAerodromePositions.sol**: Legacy standalone yield modules, deployed and serving existing positions; superseded by SafeYieldManager for new positions (coexistence — do not modify)
 
 ### Protocol Handlers (`contracts/protocolsDebt/`, `contracts/protocolsSafeDebt/`)

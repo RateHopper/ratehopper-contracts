@@ -9,6 +9,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "./interfaces/safe/ISafe.sol";
 import {IProtocolRegistry} from "./interfaces/IProtocolRegistry.sol";
 import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams} from "./interfaces/IYieldHandler.sol";
@@ -46,19 +47,19 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     uint16 public constant MAX_SETTABLE_SLIPPAGE_BPS = 1000;
 
     address public pauser;
-    mapping(YieldProtocol => address) public yieldHandlers;
-    mapping(YieldProtocol => bool) public protocolEnabledForOpen;
-    mapping(YieldProtocol => bool) public protocolEnabledForClose;
+    mapping(uint8 => address) public yieldHandlers;
+    mapping(uint8 => bool) public protocolEnabledForOpen;
+    mapping(uint8 => bool) public protocolEnabledForClose;
 
-    event YieldHandlerUpdated(YieldProtocol indexed protocol, address indexed oldHandler, address indexed newHandler);
-    event ProtocolStatusChanged(YieldProtocol indexed protocol, string operationType, bool enabled);
+    event YieldHandlerUpdated(uint8 indexed protocol, address indexed oldHandler, address indexed newHandler);
+    event ProtocolStatusChanged(uint8 indexed protocol, string operationType, bool enabled);
     event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
     event PerformanceFeeBpsUpdated(uint16 previousPerformanceFeeBps, uint16 newPerformanceFeeBps);
     event FeeCollectBpsUpdated(uint16 previousFeeCollectBps, uint16 newFeeCollectBps);
     event MaxSlippageBpsUpdated(uint16 previousMaxSlippageBps, uint16 newMaxSlippageBps);
-    event PoolParamAllowedUpdated(YieldProtocol indexed protocol, bytes poolParam, bool previousAllowed, bool newAllowed);
-    event MinPoolLiquidityUpdated(YieldProtocol indexed protocol, uint128 previousValue, uint128 newValue);
-    event MinPositionLiquidityUpdated(YieldProtocol indexed protocol, uint128 previousValue, uint128 newValue);
+    event PoolParamAllowedUpdated(uint8 indexed protocol, bytes poolParam, bool previousAllowed, bool newAllowed);
+    event MinPoolLiquidityUpdated(uint8 indexed protocol, uint128 previousValue, uint128 newValue);
+    event MinPositionLiquidityUpdated(uint8 indexed protocol, uint128 previousValue, uint128 newValue);
     event TokenRescued(address indexed token, address indexed recipient, uint256 amount);
     event NftRescued(address indexed token, address indexed recipient, uint256 indexed tokenId);
     event PauserUpdated(address indexed previousPauser, address indexed newPauser);
@@ -68,6 +69,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     error LengthMismatch();
     error HandlerCallFailed();
     error InvalidHandler();
+    error HandlerProtocolMismatch(uint8 expected, uint8 actual);
 
     /// @notice Allows only the registry operator or the Safe itself.
     modifier onlyOperatorOrSafe(address _onBehalfOf) {
@@ -90,7 +92,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     constructor(
         IProtocolRegistry _registry,
         IERC20 _usdc,
-        YieldProtocol[] memory _protocols,
+        uint8[] memory _protocols,
         address[] memory _handlers,
         bytes[][] memory _allowedPoolParams,
         uint128[] memory _minPoolLiquidity,
@@ -132,7 +134,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         $.maxSlippageBps = 300;
 
         for (uint256 i = 0; i < _protocols.length; i++) {
-            if (_handlers[i] == address(0)) revert InvalidHandler();
+            _validateHandler(_protocols[i], _handlers[i]);
             yieldHandlers[_protocols[i]] = _handlers[i];
             protocolEnabledForOpen[_protocols[i]] = true;
             protocolEnabledForClose[_protocols[i]] = true;
@@ -172,7 +174,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     /// @dev    The only lifecycle entry gated by `whenNotPaused`: pausing the
     ///         contract yields an exit-only mode, never trapping positions.
     function openLp(
-        YieldProtocol protocol,
+        uint8 protocol,
         OpenLpParams calldata params
     ) external nonReentrant whenNotPaused onlyOperatorOrSafe(params.onBehalfOf) returns (uint256 tokenId) {
         if (block.timestamp > params.deadline) revert DeadlineExpired();
@@ -186,7 +188,6 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         uint128 usedWeth;
         uint128 usedUsdc;
         (tokenId, basisUsd6, usedWeth, usedUsdc) = abi.decode(ret, (uint256, uint128, uint128, uint128));
-
 
         // Persist the open-time basis so closes always price against an
         // on-chain value neither the Safe nor the operator can attest, and
@@ -208,7 +209,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         `protocolEnabledForClose` switch can stop them (e.g. a
     ///         compromised handler).
     function closeLp(
-        YieldProtocol protocol,
+        uint8 protocol,
         CloseLpParams calldata params
     ) external nonReentrant onlyOperatorOrSafe(params.onBehalfOf) {
         if (block.timestamp > params.deadline) revert DeadlineExpired();
@@ -286,7 +287,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         pinned handler, unaffected by pause, stoppable only via
     ///         `protocolEnabledForClose`.
     function collectLp(
-        YieldProtocol protocol,
+        uint8 protocol,
         CollectLpParams calldata params
     ) external nonReentrant onlyOperatorOrSafe(params.onBehalfOf) {
         if (!protocolEnabledForClose[protocol]) revert ProtocolDisabled();
@@ -301,15 +302,15 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     //  Views
     // ─────────────────────────────────────────────────────────────────────
 
-    function residualBasisUsd6Of(YieldProtocol protocol, uint256 tokenId) external view returns (uint128) {
+    function residualBasisUsd6Of(uint8 protocol, uint256 tokenId) external view returns (uint128) {
         return _yieldStorage().residualBasisUsd6Of[protocol][tokenId];
     }
 
-    function positionHandlerOf(YieldProtocol protocol, uint256 tokenId) external view returns (address) {
+    function positionHandlerOf(uint8 protocol, uint256 tokenId) external view returns (address) {
         return _yieldStorage().positionHandlerOf[protocol][tokenId];
     }
 
-    function isPoolParamAllowed(YieldProtocol protocol, bytes calldata poolParam) external view returns (bool) {
+    function isPoolParamAllowed(uint8 protocol, bytes calldata poolParam) external view returns (bool) {
         return _yieldStorage().allowedPoolKey[protocol][keccak256(poolParam)];
     }
 
@@ -329,11 +330,11 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         return _yieldStorage().maxSlippageBps;
     }
 
-    function minPoolLiquidity(YieldProtocol protocol) external view returns (uint128) {
+    function minPoolLiquidity(uint8 protocol) external view returns (uint128) {
         return _yieldStorage().minPoolLiquidity[protocol];
     }
 
-    function minPositionLiquidity(YieldProtocol protocol) external view returns (uint128) {
+    function minPositionLiquidity(uint8 protocol) external view returns (uint128) {
         return _yieldStorage().minPositionLiquidity[protocol];
     }
 
@@ -369,11 +370,20 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         the handler pinned per position at open time, so replacing a
     ///         handler (or a bad registration) can never strand existing
     ///         positions on an incompatible implementation.
-    function setYieldHandler(YieldProtocol protocol, address handler) external onlyTimelockCriticalRole {
-        if (handler == address(0)) revert InvalidHandler();
+    function setYieldHandler(uint8 protocol, address handler) external onlyTimelockCriticalRole {
+        _validateHandler(protocol, handler);
         address oldHandler = yieldHandlers[protocol];
         yieldHandlers[protocol] = handler;
         emit YieldHandlerUpdated(protocol, oldHandler, handler);
+    }
+
+    function _validateHandler(uint8 protocol, address handler) internal view {
+        if (handler.code.length == 0) revert InvalidHandler();
+        try IYieldHandler(handler).PROTOCOL() returns (uint8 handlerProtocol) {
+            if (handlerProtocol != protocol) revert HandlerProtocolMismatch(protocol, handlerProtocol);
+        } catch {
+            revert InvalidHandler();
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -390,7 +400,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     /// @notice Allow or disallow a protocol-specific pool param (ABI-encoded
     ///         feeTier / tickSpacing / future pool key).
     function setPoolParamAllowed(
-        YieldProtocol protocol,
+        uint8 protocol,
         bytes calldata poolParam,
         bool allowed
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -400,13 +410,13 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         $.allowedPoolKey[protocol][key] = allowed;
     }
 
-    function setMinPoolLiquidity(YieldProtocol protocol, uint128 newValue) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setMinPoolLiquidity(uint8 protocol, uint128 newValue) external onlyRole(DEFAULT_ADMIN_ROLE) {
         YieldLayout storage $ = _yieldStorage();
         emit MinPoolLiquidityUpdated(protocol, $.minPoolLiquidity[protocol], newValue);
         $.minPoolLiquidity[protocol] = newValue;
     }
 
-    function setMinPositionLiquidity(YieldProtocol protocol, uint128 newValue) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setMinPositionLiquidity(uint8 protocol, uint128 newValue) external onlyRole(DEFAULT_ADMIN_ROLE) {
         YieldLayout storage $ = _yieldStorage();
         emit MinPositionLiquidityUpdated(protocol, $.minPositionLiquidity[protocol], newValue);
         $.minPositionLiquidity[protocol] = newValue;
@@ -441,7 +451,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     /// @notice Emergency per-protocol disable of NEW position opens (mirrors
     ///         SafeDebtManager's switchFrom/switchTo split). Never affects
     ///         exits.
-    function setProtocolEnabledForOpen(YieldProtocol protocol, bool enabled) external onlyPauser {
+    function setProtocolEnabledForOpen(uint8 protocol, bool enabled) external onlyPauser {
         if (yieldHandlers[protocol] == address(0)) revert HandlerNotSet();
         protocolEnabledForOpen[protocol] = enabled;
         emit ProtocolStatusChanged(protocol, "open", enabled);
@@ -450,7 +460,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     /// @notice Emergency per-protocol disable of close/collect — the ONLY
     ///         switch that can stop exits, reserved for a compromised or
     ///         malfunctioning handler. Keep opens disabled too when using it.
-    function setProtocolEnabledForClose(YieldProtocol protocol, bool enabled) external onlyPauser {
+    function setProtocolEnabledForClose(uint8 protocol, bool enabled) external onlyPauser {
         if (yieldHandlers[protocol] == address(0)) revert HandlerNotSet();
         protocolEnabledForClose[protocol] = enabled;
         emit ProtocolStatusChanged(protocol, "close", enabled);
@@ -476,7 +486,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///      check is a defensive invariant.
     function _pinnedPosition(
         YieldLayout storage $,
-        YieldProtocol protocol,
+        uint8 protocol,
         uint256 tokenId
     ) internal view returns (uint128 residualBasis, address handler) {
         residualBasis = $.residualBasisUsd6Of[protocol][tokenId];
@@ -489,11 +499,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     function _delegateToHandler(address handler, bytes memory data) internal returns (bytes memory) {
         (bool ok, bytes memory ret) = handler.delegatecall(data);
         if (!ok) {
-            if (ret.length > 0) {
-                assembly ("memory-safe") {
-                    revert(add(ret, 0x20), mload(ret))
-                }
-            }
+            if (ret.length > 0) Address.verifyCallResult(ok, ret);
             revert HandlerCallFailed();
         }
         return ret;

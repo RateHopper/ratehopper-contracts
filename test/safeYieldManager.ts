@@ -53,7 +53,12 @@ function openParams(safeAddr: string, poolParam: string, overrides: Record<strin
     };
 }
 
-function closeParams(safeAddr: string, tokenId: bigint | number, poolParam: string, overrides: Record<string, any> = {}) {
+function closeParams(
+    safeAddr: string,
+    tokenId: bigint | number,
+    poolParam: string,
+    overrides: Record<string, any> = {},
+) {
     return {
         onBehalfOf: safeAddr,
         tokenId,
@@ -70,7 +75,12 @@ function closeParams(safeAddr: string, tokenId: bigint | number, poolParam: stri
     };
 }
 
-function collectParams(safeAddr: string, tokenId: bigint | number, poolParam: string, overrides: Record<string, any> = {}) {
+function collectParams(
+    safeAddr: string,
+    tokenId: bigint | number,
+    poolParam: string,
+    overrides: Record<string, any> = {},
+) {
     return {
         onBehalfOf: safeAddr,
         tokenId,
@@ -255,6 +265,35 @@ describe("SafeYieldManager", function () {
                 ),
             ).to.be.revertedWithCustomError(manager, "LengthMismatch");
         });
+
+        it("rejects mismatched and non-contract handlers in the constructor", async function () {
+            const { manager, reg, usdcAddr, uniHandler, treasury, deployer, pauser, stranger } =
+                await loadFixture(deployYieldManagerHarness);
+            const Manager = await ethers.getContractFactory("SafeYieldManager");
+            const registryAddress = await reg.getAddress();
+            const deployWithHandler = (handler: string) =>
+                Manager.deploy(
+                    registryAddress,
+                    usdcAddr,
+                    [AERODROME],
+                    [handler],
+                    [[TICK_SPACING]],
+                    [0],
+                    [0],
+                    treasury.address,
+                    Number(PERF_FEE_BPS),
+                    Number(COLLECT_FEE_BPS),
+                    MAX_FEE_BPS,
+                    deployer.address,
+                    deployer.address,
+                    pauser.address,
+                );
+
+            await expect(deployWithHandler(await uniHandler.getAddress()))
+                .to.be.revertedWithCustomError(manager, "HandlerProtocolMismatch")
+                .withArgs(AERODROME, UNISWAP_V3);
+            await expect(deployWithHandler(stranger.address)).to.be.revertedWithCustomError(manager, "InvalidHandler");
+        });
     });
 
     describe("openLp", function () {
@@ -266,9 +305,7 @@ describe("SafeYieldManager", function () {
                 .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, WETH_OUT, HALF, USDC_AMOUNT);
 
             expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(USDC_AMOUNT);
-            expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.equal(
-                await manager.yieldHandlers(UNISWAP_V3),
-            );
+            expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.equal(await manager.yieldHandlers(UNISWAP_V3));
             expect(await uniNpm.ownerOf(1)).to.equal(safeAddr);
         });
 
@@ -353,9 +390,7 @@ describe("SafeYieldManager", function () {
                     .openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER, { swapAmountOutMin: 0 })),
             ).to.be.revertedWithCustomError(manager, "InvalidSwapAmountOutMin");
             await expect(
-                manager
-                    .connect(operatorEOA)
-                    .openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER, { expectedSwapOut: 0 })),
+                manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER, { expectedSwapOut: 0 })),
             ).to.be.revertedWithCustomError(manager, "InvalidExpectedSwapOut");
         });
 
@@ -418,9 +453,10 @@ describe("SafeYieldManager", function () {
 
             expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.equal(pinnedHandler);
             await (await uniRouter.setOutput(600_000n)).wait();
-            await expect(
-                manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER)),
-            ).to.emit(manager, "PositionClosed");
+            await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER))).to.emit(
+                manager,
+                "PositionClosed",
+            );
             expect(await uniNpm.ownerOf(1)).to.equal(ZERO);
         });
 
@@ -604,9 +640,10 @@ describe("SafeYieldManager", function () {
                 manager.connect(operatorEOA).collectLp(UNISWAP_V3, collectParams(safeAddr, 1, FEE_TIER)),
             ).to.emit(manager, "FeesCollected");
             await (await uniRouter.setOutput(600_000n)).wait();
-            await expect(
-                manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER)),
-            ).to.emit(manager, "PositionClosed");
+            await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER))).to.emit(
+                manager,
+                "PositionClosed",
+            );
 
             await (await manager.connect(pauser).unpause()).wait();
             await expect(manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).to.emit(
@@ -631,9 +668,10 @@ describe("SafeYieldManager", function () {
                 "PositionOpened",
             );
             await (await uniRouter.setOutput(600_000n)).wait();
-            await expect(
-                manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER)),
-            ).to.emit(manager, "PositionClosed");
+            await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER))).to.emit(
+                manager,
+                "PositionClosed",
+            );
         });
 
         it("pauser can disable exits for a single protocol", async function () {
@@ -706,8 +744,11 @@ describe("SafeYieldManager", function () {
                 "InvalidHandler",
             );
             await expect(manager.connect(deployer).setYieldHandler(AERODROME, await uniHandler.getAddress()))
-                .to.emit(manager, "YieldHandlerUpdated")
-                .withArgs(AERODROME, anyValue, await uniHandler.getAddress());
+                .to.be.revertedWithCustomError(manager, "HandlerProtocolMismatch")
+                .withArgs(AERODROME, UNISWAP_V3);
+            await expect(
+                manager.connect(deployer).setYieldHandler(UNISWAP_V3, stranger.address),
+            ).to.be.revertedWithCustomError(manager, "InvalidHandler");
         });
 
         it("admin setters enforce role and bounds", async function () {
@@ -746,6 +787,84 @@ describe("SafeYieldManager", function () {
         });
     });
 
+    describe("protocol extensibility (uint8 ids)", function () {
+        const NEXT_PROTOCOL = 2;
+
+        it("registers and runs a handler for an id beyond the canonical ids without redeploy", async function () {
+            const {
+                manager,
+                deployer,
+                pauser,
+                operatorEOA,
+                safeAddr,
+                usdcAddr,
+                wethAddr,
+                uniFactory,
+                uniNpm,
+                uniRouter,
+            } = await loadFixture(deployYieldManagerHarness);
+
+            const NextHandler = await ethers.getContractFactory("MockNextYieldHandler");
+            const nextHandler = await NextHandler.deploy(
+                NEXT_PROTOCOL,
+                await uniNpm.getAddress(),
+                usdcAddr,
+                wethAddr,
+                await uniRouter.getAddress(),
+                await uniFactory.getAddress(),
+            );
+            await nextHandler.waitForDeployment();
+            const nextHandlerAddr = await nextHandler.getAddress();
+
+            await expect(manager.connect(deployer).setYieldHandler(NEXT_PROTOCOL, nextHandlerAddr))
+                .to.emit(manager, "YieldHandlerUpdated")
+                .withArgs(NEXT_PROTOCOL, ZERO, nextHandlerAddr);
+            expect(await manager.yieldHandlers(NEXT_PROTOCOL)).to.equal(nextHandlerAddr);
+
+            await expect(
+                manager.connect(operatorEOA).openLp(NEXT_PROTOCOL, openParams(safeAddr, FEE_TIER)),
+            ).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
+
+            await (await manager.connect(pauser).setProtocolEnabledForOpen(NEXT_PROTOCOL, true)).wait();
+            await (await manager.connect(pauser).setProtocolEnabledForClose(NEXT_PROTOCOL, true)).wait();
+            await (await manager.connect(deployer).setPoolParamAllowed(NEXT_PROTOCOL, FEE_TIER, true)).wait();
+
+            await expect(manager.connect(operatorEOA).openLp(NEXT_PROTOCOL, openParams(safeAddr, FEE_TIER)))
+                .to.emit(manager, "PositionOpened")
+                .withArgs(safeAddr, NEXT_PROTOCOL, 1n, USDC_AMOUNT, WETH_OUT, HALF, USDC_AMOUNT);
+            expect(await manager.residualBasisUsd6Of(NEXT_PROTOCOL, 1)).to.equal(USDC_AMOUNT);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(0);
+            expect(await uniNpm.ownerOf(1)).to.equal(safeAddr);
+
+            await (await uniRouter.setOutput(600_000n)).wait();
+            await expect(manager.connect(operatorEOA).closeLp(NEXT_PROTOCOL, closeParams(safeAddr, 1, FEE_TIER)))
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, NEXT_PROTOCOL, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
+            expect(await manager.residualBasisUsd6Of(NEXT_PROTOCOL, 1)).to.equal(0);
+            expect(await manager.positionHandlerOf(NEXT_PROTOCOL, 1)).to.equal(ZERO);
+        });
+
+        it("keeps unregistered ids inert instead of reverting on decode", async function () {
+            const { manager, operatorEOA, pauser, safeAddr } = await loadFixture(deployYieldManagerHarness);
+            await expect(
+                manager.connect(operatorEOA).openLp(200, openParams(safeAddr, FEE_TIER)),
+            ).to.be.revertedWithCustomError(manager, "HandlerNotSet");
+            await expect(manager.connect(pauser).setProtocolEnabledForOpen(200, true)).to.be.revertedWithCustomError(
+                manager,
+                "HandlerNotSet",
+            );
+            expect(await manager.yieldHandlers(200)).to.equal(ZERO);
+            expect(await manager.isPoolParamAllowed(200, FEE_TIER)).to.equal(false);
+        });
+
+        it("rejects registering a handler whose PROTOCOL id mismatches the target id", async function () {
+            const { manager, deployer, uniHandler } = await loadFixture(deployYieldManagerHarness);
+            await expect(manager.connect(deployer).setYieldHandler(NEXT_PROTOCOL, await uniHandler.getAddress()))
+                .to.be.revertedWithCustomError(manager, "HandlerProtocolMismatch")
+                .withArgs(NEXT_PROTOCOL, UNISWAP_V3);
+        });
+    });
+
     describe("handlers", function () {
         it("rejects direct (non-delegatecall) invocation", async function () {
             const { uniHandler, aeroHandler, safeAddr } = await loadFixture(deployYieldManagerHarness);
@@ -753,9 +872,10 @@ describe("SafeYieldManager", function () {
                 uniHandler,
                 "OnlyDelegatecall",
             );
-            await expect(
-                aeroHandler.collectLp(collectParams(safeAddr, 1, TICK_SPACING)),
-            ).to.be.revertedWithCustomError(aeroHandler, "OnlyDelegatecall");
+            await expect(aeroHandler.collectLp(collectParams(safeAddr, 1, TICK_SPACING))).to.be.revertedWithCustomError(
+                aeroHandler,
+                "OnlyDelegatecall",
+            );
         });
     });
 });

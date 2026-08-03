@@ -6,6 +6,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../interfaces/safe/ISafe.sol";
 import {INonfungiblePositionManager} from "../interfaces/uniswapV3/INonfungiblePositionManager.sol";
 import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams} from "../interfaces/IYieldHandler.sol";
@@ -44,7 +45,9 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
 
-    YieldProtocol public immutable PROTOCOL;
+    /// @notice Protocol id (canonical ids are the YIELD_PROTOCOL_* constants
+    ///         in Types.sol; plain uint8 so the manager stays extensible).
+    uint8 public immutable PROTOCOL;
     address public immutable POSITION_MANAGER;
     IERC20 public immutable USDC;
     IERC20 public immutable WETH;
@@ -62,7 +65,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         _;
     }
 
-    constructor(YieldProtocol _protocol, address _positionManager, IERC20 _usdc, IERC20 _weth, address _swapRouter) {
+    constructor(uint8 _protocol, address _positionManager, IERC20 _usdc, IERC20 _weth, address _swapRouter) {
         if (_positionManager == address(0)) revert ZeroAddress();
         if (address(_usdc) == address(0)) revert ZeroAddress();
         if (address(_weth) == address(0)) revert ZeroAddress();
@@ -135,7 +138,18 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         // Only consume WETH produced by this call, never pre-existing WETH.
         uint256 wethBefore = WETH.balanceOf(p.onBehalfOf);
 
-        _swapViaSafe(p.onBehalfOf, address(USDC), address(WETH), p.swapPoolParam, halfUsdc, p.swapAmountOutMin, p.deadline, 20, 3, 21);
+        _swapViaSafe(
+            p.onBehalfOf,
+            address(USDC),
+            address(WETH),
+            p.swapPoolParam,
+            halfUsdc,
+            p.swapAmountOutMin,
+            p.deadline,
+            20,
+            3,
+            21
+        );
 
         uint128 wethReceived = (WETH.balanceOf(p.onBehalfOf) - wethBefore).toUint128();
         // Avoid accidental one-sided mints after a zero-output swap.
@@ -212,7 +226,13 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
         // Burn only on a full close.
         if (p.exitBps == 10_000) {
-            _safeExec(p.onBehalfOf, POSITION_MANAGER, 0, abi.encodeCall(INonfungiblePositionManager.burn, (p.tokenId)), 9);
+            _safeExec(
+                p.onBehalfOf,
+                POSITION_MANAGER,
+                0,
+                abi.encodeCall(INonfungiblePositionManager.burn, (p.tokenId)),
+                9
+            );
         }
 
         // Swap the WETH this close produced back to USDC.
@@ -352,7 +372,15 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         uint8 execStep,
         uint8 resetStep
     ) internal {
-        bytes memory swapData = _buildSwapCalldata(tokenIn, tokenOut, poolParam, _onBehalfOf, amountIn, amountOutMin, deadline);
+        bytes memory swapData = _buildSwapCalldata(
+            tokenIn,
+            tokenOut,
+            poolParam,
+            _onBehalfOf,
+            amountIn,
+            amountOutMin,
+            deadline
+        );
         _safeApprove(_onBehalfOf, tokenIn, SWAP_ROUTER, amountIn, approveStep);
         _safeExec(_onBehalfOf, SWAP_ROUTER, 0, swapData, execStep);
         _safeApprove(_onBehalfOf, tokenIn, SWAP_ROUTER, 0, resetStep);
@@ -368,7 +396,18 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     ) internal {
         uint256 wethDelta = WETH.balanceOf(_onBehalfOf) - wethBefore;
         if (wethDelta > 0) {
-            _swapViaSafe(_onBehalfOf, address(WETH), address(USDC), swapPoolParam, wethDelta, swapAmountOutMin, deadline, 26, 10, 27);
+            _swapViaSafe(
+                _onBehalfOf,
+                address(WETH),
+                address(USDC),
+                swapPoolParam,
+                wethDelta,
+                swapAmountOutMin,
+                deadline,
+                26,
+                10,
+                27
+            );
         }
     }
 
@@ -432,11 +471,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         bool ok;
         (ok, ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(target, value, data, ISafe.Operation.Call);
         if (!ok) {
-            if (ret.length > 0) {
-                assembly ("memory-safe") {
-                    revert(add(ret, 0x20), mload(ret))
-                }
-            }
+            if (ret.length > 0) Address.verifyCallResult(ok, ret);
             revert ModuleCallFailed(step);
         }
     }

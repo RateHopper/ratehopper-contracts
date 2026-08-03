@@ -6,30 +6,30 @@ import {INonfungiblePositionManager} from "../interfaces/uniswapV3/INonfungibleP
 import {IUniswapV3Factory} from "../interfaces/uniswapV3/IUniswapV3Factory.sol";
 import {IUniswapV3Pool} from "../interfaces/uniswapV3/IUniswapV3Pool.sol";
 import {IV3SwapRouter} from "../interfaces/uniswapV3/IV3SwapRouter.sol";
-import {BaseYieldHandler} from "./BaseYieldHandler.sol";
-import "../Types.sol";
+import {BaseYieldHandler} from "../protocolsYield/BaseYieldHandler.sol";
 
-/// @title UniV3YieldHandler
-/// @notice Uniswap V3 adapter for SafeYieldManager. Pool params are
-///         `abi.encode(uint24 feeTier)`. Stateless — executed via
-///         delegatecall from the manager.
-contract UniV3YieldHandler is BaseYieldHandler {
-    IUniswapV3Factory public immutable UNISWAP_V3_FACTORY;
+/// @dev Test-only "future protocol" handler: V3-shaped mechanics with the
+///      protocol id supplied at construction, proving SafeYieldManager
+///      accepts ids beyond the canonical YIELD_PROTOCOL_* constants without
+///      a redeploy.
+contract MockNextYieldHandler is BaseYieldHandler {
+    IUniswapV3Factory public immutable FACTORY;
 
     constructor(
+        uint8 _protocolId,
         address _positionManager,
         IERC20 _usdc,
         IERC20 _weth,
         address _swapRouter,
-        IUniswapV3Factory _uniswapV3Factory
-    ) BaseYieldHandler(YIELD_PROTOCOL_UNISWAP_V3, _positionManager, _usdc, _weth, _swapRouter) {
-        if (address(_uniswapV3Factory) == address(0)) revert ZeroAddress();
-        UNISWAP_V3_FACTORY = _uniswapV3Factory;
+        IUniswapV3Factory _factory
+    ) BaseYieldHandler(_protocolId, _positionManager, _usdc, _weth, _swapRouter) {
+        if (address(_factory) == address(0)) revert ZeroAddress();
+        FACTORY = _factory;
     }
 
     function _getPool(bytes memory poolParam) internal view override returns (address) {
         uint24 feeTier = abi.decode(poolParam, (uint24));
-        return UNISWAP_V3_FACTORY.getPool(address(WETH), address(USDC), feeTier);
+        return FACTORY.getPool(address(WETH), address(USDC), feeTier);
     }
 
     function _poolSqrtPriceX96(address pool) internal view override returns (uint160 sqrtPriceX96) {
@@ -43,7 +43,7 @@ contract UniV3YieldHandler is BaseYieldHandler {
         address recipient,
         uint256 amountIn,
         uint256 amountOutMin,
-        uint256 /* deadline — SwapRouter02 has no deadline field */
+        uint256 /* deadline */
     ) internal pure override returns (bytes memory) {
         uint24 feeTier = abi.decode(poolParam, (uint24));
         return

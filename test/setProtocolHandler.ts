@@ -26,7 +26,13 @@ describe("Set Protocol Handler", function () {
             const LeveragedPosition = await ethers.getContractFactory("LeveragedPosition");
             const leveragedPosition = await LeveragedPosition.deploy(
                 await protocolRegistry.getAddress(),
-                [DebtProtocols.AAVE_V3, DebtProtocols.COMPOUND, DebtProtocols.MORPHO, DebtProtocols.MOONWELL, DebtProtocols.FLUID],
+                [
+                    DebtProtocols.AAVE_V3,
+                    DebtProtocols.COMPOUND,
+                    DebtProtocols.MORPHO,
+                    DebtProtocols.MOONWELL,
+                    DebtProtocols.FLUID,
+                ],
                 [
                     await aaveV3Handler.getAddress(),
                     await compoundHandler.getAddress(),
@@ -80,16 +86,15 @@ describe("Set Protocol Handler", function () {
             expect(await leveragedPosition.protocolHandlers(DebtProtocols.AAVE_V3)).to.equal(newHandler);
         });
 
-        it("should revert if caller does not have CRITICAL_ROLE", async function () {
+        it("should reject a caller that is not the immutable timelock", async function () {
             const { leveragedPosition } = await loadFixture(deployLeveragedPositionWithRegistry);
             const [, nonOwner] = await ethers.getSigners();
 
             const newHandler = ethers.Wallet.createRandom().address;
 
-            // Try to update handler as non-owner without CRITICAL_ROLE
             await expect(
                 leveragedPosition.connect(nonOwner).setProtocolHandler(DebtProtocols.AAVE_V3, newHandler),
-            ).to.be.revertedWith("Caller does not have CRITICAL_ROLE");
+            ).to.be.revertedWithCustomError(leveragedPosition, "OnlyTimelock");
         });
 
         it("should revert if new handler is zero address", async function () {
@@ -152,25 +157,17 @@ describe("Set Protocol Handler", function () {
             expect(await leveragedPosition.protocolHandlers(DebtProtocols.AAVE_V3)).to.equal(newHandler);
         });
 
-        it("should allow admin to revoke CRITICAL_ROLE via registry", async function () {
+        it("should not let a CRITICAL_ROLE grantee bypass the immutable timelock", async function () {
             const { leveragedPosition, protocolRegistry } = await loadFixture(deployLeveragedPositionWithRegistry);
             const [, newAdmin] = await ethers.getSigners();
 
             // Grant CRITICAL_ROLE to newAdmin via registry
             await protocolRegistry.grantRole(CRITICAL_ROLE, newAdmin.address);
 
-            // Verify newAdmin can update handler
             const handler1 = ethers.Wallet.createRandom().address;
-            await leveragedPosition.connect(newAdmin).setProtocolHandler(DebtProtocols.AAVE_V3, handler1);
-
-            // Revoke CRITICAL_ROLE from newAdmin via registry
-            await protocolRegistry.revokeRole(CRITICAL_ROLE, newAdmin.address);
-
-            // newAdmin should no longer be able to update handler
-            const newHandler = ethers.Wallet.createRandom().address;
             await expect(
-                leveragedPosition.connect(newAdmin).setProtocolHandler(DebtProtocols.AAVE_V3, newHandler),
-            ).to.be.revertedWith("Caller does not have CRITICAL_ROLE");
+                leveragedPosition.connect(newAdmin).setProtocolHandler(DebtProtocols.AAVE_V3, handler1),
+            ).to.be.revertedWithCustomError(leveragedPosition, "OnlyTimelock");
         });
 
         it("should revert execution if timelock delay has not passed", async function () {
@@ -196,7 +193,6 @@ describe("Set Protocol Handler", function () {
             // Try to execute immediately without waiting - should revert
             await expect(timelock.execute(target, value, callData, predecessor, salt)).to.be.reverted;
         });
-
     });
 
     describe("SafeDebtManager", function () {
@@ -240,16 +236,15 @@ describe("Set Protocol Handler", function () {
             expect(await safeModule.protocolHandlers(DebtProtocols.AAVE_V3)).to.equal(newHandler);
         });
 
-        it("should revert if caller does not have CRITICAL_ROLE", async function () {
+        it("should reject a caller that is not the immutable timelock", async function () {
             const { safeModule } = await loadFixture(deploySafeContractFixture);
             const [, nonOwner] = await ethers.getSigners();
 
             const newHandler = ethers.Wallet.createRandom().address;
 
-            // Try to update handler as non-owner without CRITICAL_ROLE
             await expect(
                 safeModule.connect(nonOwner).setProtocolHandler(DebtProtocols.AAVE_V3, newHandler),
-            ).to.be.revertedWith("Caller does not have CRITICAL_ROLE");
+            ).to.be.revertedWithCustomError(safeModule, "OnlyTimelock");
         });
 
         it("should revert if new handler is zero address", async function () {
@@ -320,25 +315,17 @@ describe("Set Protocol Handler", function () {
             expect(await safeModule.protocolHandlers(DebtProtocols.AAVE_V3)).to.equal(newHandler);
         });
 
-        it("should allow admin to revoke CRITICAL_ROLE via registry", async function () {
+        it("should not let a CRITICAL_ROLE grantee bypass the immutable timelock", async function () {
             const { safeModule, protocolRegistry } = await loadFixture(deploySafeContractFixture);
             const [, newAdmin] = await ethers.getSigners();
 
             // Grant CRITICAL_ROLE to newAdmin via registry
             await protocolRegistry.grantRole(CRITICAL_ROLE, newAdmin.address);
 
-            // Verify newAdmin can update handler
             const handler1 = ethers.Wallet.createRandom().address;
-            await safeModule.connect(newAdmin).setProtocolHandler(DebtProtocols.AAVE_V3, handler1);
-
-            // Revoke CRITICAL_ROLE from newAdmin via registry
-            await protocolRegistry.revokeRole(CRITICAL_ROLE, newAdmin.address);
-
-            // newAdmin should no longer be able to update handler
-            const newHandler = ethers.Wallet.createRandom().address;
             await expect(
-                safeModule.connect(newAdmin).setProtocolHandler(DebtProtocols.AAVE_V3, newHandler),
-            ).to.be.revertedWith("Caller does not have CRITICAL_ROLE");
+                safeModule.connect(newAdmin).setProtocolHandler(DebtProtocols.AAVE_V3, handler1),
+            ).to.be.revertedWithCustomError(safeModule, "OnlyTimelock");
         });
 
         it("should revert execution if timelock delay has not passed", async function () {
@@ -368,6 +355,5 @@ describe("Set Protocol Handler", function () {
             // Try to execute immediately without waiting - should revert
             await expect(timelock.execute(target, value, callData, predecessor, salt)).to.be.reverted;
         });
-
     });
 });

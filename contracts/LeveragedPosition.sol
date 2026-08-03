@@ -334,10 +334,7 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         require(successSupply, "Supply failed");
 
         (bool successBorrow, ) = handler.delegatecall(
-            abi.encodeCall(
-                IDebtHandler.borrow,
-                (decoded.debtAsset, amountInMax, decoded.onBehalfOf, decoded.extraData)
-            )
+            abi.encodeCall(IDebtHandler.borrow, (decoded.debtAsset, amountInMax, decoded.onBehalfOf, decoded.extraData))
         );
         require(successBorrow, "Borrow failed");
 

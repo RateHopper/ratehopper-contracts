@@ -58,6 +58,12 @@ struct CollectLpParams {
 ///         Position basis bookkeeping and the performance fee stay in the
 ///         manager, so handlers only report values back.
 interface IYieldHandler {
+    /// @notice Protocol id implemented by this handler (canonical ids are
+    ///         the YIELD_PROTOCOL_* constants in Types.sol).
+    ///         SafeYieldManager checks this metadata before accepting a
+    ///         handler registration.
+    function PROTOCOL() external view returns (uint8);
+
     /// @return tokenId   Newly minted LP NFT id (owned by the Safe).
     /// @return basisUsd6 USDC-equivalent value of the freshly minted LP.
     /// @return usedWeth  WETH consumed by the mint.

@@ -38,6 +38,7 @@ const SLIPPAGE_BPS = 100; // 1% — per-call slippage tolerance for openLp/close
 // `SLIPPAGE_BPS > 0`. Production callers must supply a real quoter-derived
 // value here.
 const EXPECTED_SWAP_OUT = 1n;
+const BASE_FORK_BLOCK = Number(process.env.BASE_FORK_BLOCK_NUMBER ?? 49_470_000);
 
 // Deadline passed to openLp / closeLp in tests. Uses MaxUint256 so the
 // staleness check never fires unintentionally.
@@ -114,7 +115,10 @@ async function deployFixture() {
     await (await protocolRegistry.setFluidVaultResolver(FLUID_VAULT_RESOLVER)).wait();
 
     const FluidSafeDebtHandler = await ethers.getContractFactory("FluidSafeDebtHandler");
-    const fluidHandler = await FluidSafeDebtHandler.deploy(UNISWAP_V3_FACTORY_ADDRESS, await protocolRegistry.getAddress());
+    const fluidHandler = await FluidSafeDebtHandler.deploy(
+        UNISWAP_V3_FACTORY_ADDRESS,
+        await protocolRegistry.getAddress(),
+    );
     await fluidHandler.waitForDeployment();
 
     const SafeDebtManager = await ethers.getContractFactory("SafeDebtManager");
@@ -860,7 +864,14 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         // (e.g. an unrepaid Fluid debt) leaks into the next.
         await network.provider.request({
             method: "hardhat_reset",
-            params: [{ forking: { jsonRpcUrl: process.env.BASE_RPC_URL || "https://mainnet.base.org" } }],
+            params: [
+                {
+                    forking: {
+                        jsonRpcUrl: process.env.BASE_RPC_URL || "https://mainnet.base.org",
+                        blockNumber: BASE_FORK_BLOCK,
+                    },
+                },
+            ],
         });
 
         signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);

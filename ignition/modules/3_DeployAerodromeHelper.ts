@@ -8,7 +8,7 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
 } from "../../contractAddresses";
-import { makeRequireAddress } from "./deployHelpers";
+import { envBigInt, envNumber, envString, makeRequireAddress } from "./deployHelpers";
 
 const requireAddress = makeRequireAddress("DeployAerodromeHelper");
 
@@ -23,29 +23,33 @@ const requireAddress = makeRequireAddress("DeployAerodromeHelper");
  * timelock, set `RHP_TIMELOCK` — when present, this module skips the sub-module
  * path and uses the literal address directly.
  *
- * Environment variables (same surface as the UniV3 helper):
- *  - RHA_REGISTRY:              ProtocolRegistry address. Falls back to
+ * Environment variables — resolution order is RHA_* module override, then
+ * the unprefixed name shared by all yield deploy modules, then a legacy
+ * RHP_* fallback (addresses only), then the default. Empty values (X=)
+ * count as unset:
+ *  - RHA_REGISTRY / REGISTRY:   ProtocolRegistry address. Falls back to
  *                               `PROTOCOL_REGISTRY_ADDRESS`.
- *  - RHA_TREASURY:              Treasury address that collects fees. Required.
- *  - RHA_INITIAL_ADMIN:         DEFAULT_ADMIN_ROLE holder. Falls back to
- *                               ADMIN_ADDRESS. Required.
- *  - RHP_TIMELOCK:              Pre-deployed TimelockController to reuse (shared
- *                               with the UniV3 helper). When set, SKIPS the
- *                               shared sub-module entirely.
+ *  - RHA_TREASURY / TREASURY:   Treasury address that collects fees. Required.
+ *  - RHA_INITIAL_ADMIN / INITIAL_ADMIN: DEFAULT_ADMIN_ROLE holder. Falls back
+ *                               to ADMIN_ADDRESS. Required.
+ *  - RHA_TIMELOCK / RHP_TIMELOCK: Pre-deployed TimelockController to reuse
+ *                               (shared with the UniV3 helper). When set,
+ *                               SKIPS the shared sub-module entirely.
  *  - TIMELOCK_ADMIN / TIMELOCK_DELAY: consumed by TimelockControllerModule.
- *  - RHA_PERFORMANCE_FEE_BPS:   Performance fee on net profit at closeLp in
- *                               bps. Defaults to 1000 (10%).
- *  - RHA_FEE_COLLECT_BPS:       Fee on harvested LP fees in bps. Defaults to
- *                               250 (2.5%).
- *  - RHA_MAX_FEE_BPS:           Hard upper bound on BOTH fees. Defaults to
- *                               2000 (20%).
- *  - RHA_MIN_POSITION_LIQUIDITY: Floor on NPM `mint` liquidity. Defaults to
- *                               10000. Set 0 to disable.
- *  - RHA_MIN_POOL_LIQUIDITY:    Floor on `pool.liquidity()` for any pool a spot
- *                               price is read from. Defaults to 0 (disabled);
- *                               measure the target CL WETH/USDC pool's in-range
- *                               `liquidity()` and set a conservative fraction
- *                               here or via post-deploy `setMinPoolLiquidity`.
+ *  - RHA_PERFORMANCE_FEE_BPS / PERFORMANCE_FEE_BPS: Performance fee on net
+ *                               profit at closeLp in bps. Defaults to 1000 (10%).
+ *  - RHA_FEE_COLLECT_BPS / FEE_COLLECT_BPS: Fee on harvested LP fees in bps.
+ *                               Defaults to 250 (2.5%).
+ *  - RHA_MAX_FEE_BPS / MAX_FEE_BPS: Hard upper bound on BOTH fees. Defaults
+ *                               to 2000 (20%).
+ *  - RHA_MIN_POSITION_LIQUIDITY / MIN_POSITION_LIQUIDITY: Floor on NPM `mint`
+ *                               liquidity. Defaults to 10000. Set 0 to disable.
+ *  - RHA_MIN_POOL_LIQUIDITY / MIN_POOL_LIQUIDITY: Floor on `pool.liquidity()`
+ *                               for any pool a spot price is read from.
+ *                               Defaults to 0 (disabled); measure the target
+ *                               CL WETH/USDC pool's in-range `liquidity()` and
+ *                               set a conservative fraction here or via
+ *                               post-deploy `setMinPoolLiquidity`.
  *  - DEPLOYER_PRIVATE_KEY:      Deployer key (set in hardhat.config.ts).
  *
  * Usage:
@@ -58,20 +62,22 @@ export default buildModule("DeployAerodromeHelper", (m) => {
     // address. Ignition keys futures by `<moduleName>#<contractName>`, so the
     // sub-module's `TimelockControllerModule#TimelockController` is the same
     // future the other deploy modules reference and is deduplicated across runs.
-    const reuseTimelockAddr = process.env.RHP_TIMELOCK ?? "";
+    const reuseTimelockAddr = envString("RHA_TIMELOCK", "RHP_TIMELOCK");
 
     const timelock = reuseTimelockAddr ? undefined : m.useModule(TimelockControllerModule).timelock;
 
     const timelockArg: any = timelock ?? reuseTimelockAddr;
 
     // ── RHA ────────────────────────────────────────────────────────────────
-    const registryAddr = process.env.RHA_REGISTRY ?? PROTOCOL_REGISTRY_ADDRESS;
-    const treasuryAddr = process.env.RHA_TREASURY ?? process.env.RHP_TREASURY ?? "";
-    const initialAdminAddr = process.env.RHA_INITIAL_ADMIN ?? process.env.ADMIN_ADDRESS ?? "";
+    // Module-specific RHA_* overrides win; unprefixed names are shared with
+    // the other yield deploy modules (RHP_* kept as a legacy fallback).
+    const registryAddr = envString("RHA_REGISTRY", "REGISTRY", "RHP_REGISTRY") || PROTOCOL_REGISTRY_ADDRESS;
+    const treasuryAddr = envString("RHA_TREASURY", "TREASURY", "RHP_TREASURY");
+    const initialAdminAddr = envString("RHA_INITIAL_ADMIN", "INITIAL_ADMIN", "ADMIN_ADDRESS");
 
-    requireAddress("registry (RHA_REGISTRY / PROTOCOL_REGISTRY_ADDRESS)", registryAddr);
-    requireAddress("treasury (RHA_TREASURY)", treasuryAddr);
-    requireAddress("initialAdmin (RHA_INITIAL_ADMIN / ADMIN_ADDRESS)", initialAdminAddr);
+    requireAddress("registry (RHA_REGISTRY / REGISTRY / PROTOCOL_REGISTRY_ADDRESS)", registryAddr);
+    requireAddress("treasury (RHA_TREASURY / TREASURY)", treasuryAddr);
+    requireAddress("initialAdmin (RHA_INITIAL_ADMIN / INITIAL_ADMIN / ADMIN_ADDRESS)", initialAdminAddr);
     requireAddress("slipstream NPM (AERODROME_SLIPSTREAM_NPM_ADDRESS)", AERODROME_SLIPSTREAM_NPM_ADDRESS);
     requireAddress(
         "slipstream swap router (AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS)",
@@ -85,17 +91,20 @@ export default buildModule("DeployAerodromeHelper", (m) => {
     const initialAdmin = m.getParameter<string>("initialAdmin", initialAdminAddr);
     const performanceFeeBps = m.getParameter<number>(
         "performanceFeeBps",
-        Number(process.env.RHA_PERFORMANCE_FEE_BPS ?? 1000),
+        envNumber(1000, "RHA_PERFORMANCE_FEE_BPS", "PERFORMANCE_FEE_BPS"),
     );
-    const feeCollectBps = m.getParameter<number>("feeCollectBps", Number(process.env.RHA_FEE_COLLECT_BPS ?? 250));
-    const maxFeeBps = m.getParameter<number>("maxFeeBps", Number(process.env.RHA_MAX_FEE_BPS ?? 2000));
+    const feeCollectBps = m.getParameter<number>(
+        "feeCollectBps",
+        envNumber(250, "RHA_FEE_COLLECT_BPS", "FEE_COLLECT_BPS"),
+    );
+    const maxFeeBps = m.getParameter<number>("maxFeeBps", envNumber(2000, "RHA_MAX_FEE_BPS", "MAX_FEE_BPS"));
     const minPositionLiquidity = m.getParameter<bigint>(
         "minPositionLiquidity",
-        BigInt(process.env.RHA_MIN_POSITION_LIQUIDITY ?? 10_000),
+        envBigInt(10_000n, "RHA_MIN_POSITION_LIQUIDITY", "MIN_POSITION_LIQUIDITY"),
     );
     const minPoolLiquidity = m.getParameter<bigint>(
         "minPoolLiquidity",
-        BigInt(process.env.RHA_MIN_POOL_LIQUIDITY ?? 0),
+        envBigInt(0n, "RHA_MIN_POOL_LIQUIDITY", "MIN_POOL_LIQUIDITY"),
     );
 
     const ratehopperAerodromePositions = m.contract(

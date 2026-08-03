@@ -8,7 +8,7 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
 } from "../../contractAddresses";
-import { makeRequireAddress } from "./deployHelpers";
+import { envBigInt, envNumber, envString, makeRequireAddress } from "./deployHelpers";
 
 const requireAddress = makeRequireAddress("DeployUniV3Helper");
 
@@ -84,7 +84,7 @@ export default buildModule("DeployUniV3Helper", (m) => {
     //      that exact address.
     //   3. First-ever run → sub-module deploys it; params (TIMELOCK_ADMIN,
     //      TIMELOCK_DELAY) come from env vars inside TimelockControllerModule.
-    const reuseTimelockAddr = process.env.RHP_TIMELOCK ?? "";
+    const reuseTimelockAddr = envString("RHP_TIMELOCK");
 
     const timelock = reuseTimelockAddr ? undefined : m.useModule(TimelockControllerModule).timelock;
 
@@ -94,13 +94,15 @@ export default buildModule("DeployUniV3Helper", (m) => {
     const timelockArg: any = timelock ?? reuseTimelockAddr;
 
     // ── RHP ────────────────────────────────────────────────────────────────
-    const registryAddr = process.env.RHP_REGISTRY ?? PROTOCOL_REGISTRY_ADDRESS;
-    const treasuryAddr = process.env.RHP_TREASURY ?? "";
-    const initialAdminAddr = process.env.RHP_INITIAL_ADMIN ?? process.env.ADMIN_ADDRESS ?? "";
+    // Module-specific RHP_* overrides win; unprefixed names are shared with
+    // the other yield deploy modules (3_aerodrome_helper, 4_yield_manager).
+    const registryAddr = envString("RHP_REGISTRY", "REGISTRY") || PROTOCOL_REGISTRY_ADDRESS;
+    const treasuryAddr = envString("RHP_TREASURY", "TREASURY");
+    const initialAdminAddr = envString("RHP_INITIAL_ADMIN", "INITIAL_ADMIN", "ADMIN_ADDRESS");
 
-    requireAddress("registry (RHP_REGISTRY / PROTOCOL_REGISTRY_ADDRESS)", registryAddr);
-    requireAddress("treasury (RHP_TREASURY)", treasuryAddr);
-    requireAddress("initialAdmin (RHP_INITIAL_ADMIN / ADMIN_ADDRESS)", initialAdminAddr);
+    requireAddress("registry (RHP_REGISTRY / REGISTRY / PROTOCOL_REGISTRY_ADDRESS)", registryAddr);
+    requireAddress("treasury (RHP_TREASURY / TREASURY)", treasuryAddr);
+    requireAddress("initialAdmin (RHP_INITIAL_ADMIN / INITIAL_ADMIN / ADMIN_ADDRESS)", initialAdminAddr);
     if (reuseTimelockAddr) requireAddress("timelock (RHP_TIMELOCK)", reuseTimelockAddr);
 
     const registry = m.getParameter<string>("registry", registryAddr);
@@ -108,17 +110,20 @@ export default buildModule("DeployUniV3Helper", (m) => {
     const initialAdmin = m.getParameter<string>("initialAdmin", initialAdminAddr);
     const performanceFeeBps = m.getParameter<number>(
         "performanceFeeBps",
-        Number(process.env.RHP_PERFORMANCE_FEE_BPS ?? 1000),
+        envNumber(1000, "RHP_PERFORMANCE_FEE_BPS", "PERFORMANCE_FEE_BPS"),
     );
-    const feeCollectBps = m.getParameter<number>("feeCollectBps", Number(process.env.RHP_FEE_COLLECT_BPS ?? 250));
-    const maxFeeBps = m.getParameter<number>("maxFeeBps", Number(process.env.RHP_MAX_FEE_BPS ?? 2000));
+    const feeCollectBps = m.getParameter<number>(
+        "feeCollectBps",
+        envNumber(250, "RHP_FEE_COLLECT_BPS", "FEE_COLLECT_BPS"),
+    );
+    const maxFeeBps = m.getParameter<number>("maxFeeBps", envNumber(2000, "RHP_MAX_FEE_BPS", "MAX_FEE_BPS"));
     const minPositionLiquidity = m.getParameter<bigint>(
         "minPositionLiquidity",
-        BigInt(process.env.RHP_MIN_POSITION_LIQUIDITY ?? 10_000),
+        envBigInt(10_000n, "RHP_MIN_POSITION_LIQUIDITY", "MIN_POSITION_LIQUIDITY"),
     );
     const minPoolLiquidity = m.getParameter<bigint>(
         "minPoolLiquidity",
-        BigInt(process.env.RHP_MIN_POOL_LIQUIDITY ?? 0),
+        envBigInt(0n, "RHP_MIN_POOL_LIQUIDITY", "MIN_POOL_LIQUIDITY"),
     );
 
     const ratehopperUniV3Positions = m.contract(
