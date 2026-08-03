@@ -1,9 +1,9 @@
 import { ethers } from "hardhat";
 import { expect } from "chai";
-import { deploySafeContractFixture } from "./deployUtils";
+import { deploySafeContractFixture } from "../helpers/deployUtils";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { DebtProtocols, USDC_ADDRESS, DAI_ADDRESS, ETH_USDC_POOL } from "./constants";
-import { SafeDebtManager } from "../typechain-types";
+import { DebtProtocols, USDC_ADDRESS, DAI_ADDRESS, ETH_USDC_POOL } from "../helpers/constants";
+import { SafeDebtManager } from "../../typechain-types";
 
 describe("SafeDebtManager Pausable", function () {
     let safeModuleContract: any;

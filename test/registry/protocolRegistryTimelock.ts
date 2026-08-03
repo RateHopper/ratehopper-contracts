@@ -1,11 +1,11 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { ProtocolRegistry } from "../typechain-types";
-import { TimelockController } from "../typechain-types/@openzeppelin/contracts/governance/TimelockController";
+import { ProtocolRegistry } from "../../typechain-types";
+import { TimelockController } from "../../typechain-types/@openzeppelin/contracts/governance/TimelockController";
 import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
-import { WETH_ADDRESS } from "./constants";
-import { UNISWAP_V3_FACTORY_ADDRESS } from "../contractAddresses";
+import { WETH_ADDRESS } from "../helpers/constants";
+import { UNISWAP_V3_FACTORY_ADDRESS } from "../../contractAddresses";
 
 describe("ProtocolRegistry - Timelock Integration Tests", function () {
     const TWO_DAYS = 2 * 24 * 60 * 60; // 2 days in seconds

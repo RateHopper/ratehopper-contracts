@@ -2,7 +2,7 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
-import { YieldProtocol } from "../contractAddresses";
+import { YieldProtocol } from "../../contractAddresses";
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Mock-driven suite for SafeYieldManager + UniV3YieldHandler /

@@ -1,8 +1,8 @@
 import { loadFixture, time, setNextBlockBaseFeePerGas } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { deploySafeContractFixture, deployHandlers } from "./deployUtils";
-import { DebtProtocols } from "./constants";
+import { deploySafeContractFixture, deployHandlers } from "../helpers/deployUtils";
+import { DebtProtocols } from "../helpers/constants";
 
 // Helper to get CRITICAL_ROLE bytes32
 const CRITICAL_ROLE = ethers.keccak256(ethers.toUtf8Bytes("CRITICAL_ROLE"));

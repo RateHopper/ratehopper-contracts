@@ -9,17 +9,17 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
     cbETH_ETH_POOL,
-} from "./constants";
+} from "../helpers/constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { eip1193Provider, fundETH, fundSignerWithETH, getDecimals, getParaswapData } from "./utils";
-import { FLUID_cbETH_USDC_VAULT, FluidHelper, fluidVaultMap } from "./protocolsDebt/fluid";
-import FluidVaultAbi from "../externalAbi/fluid/fluidVaultT1.json";
+import { eip1193Provider, fundETH, fundSignerWithETH, getDecimals, getParaswapData } from "../helpers/utils";
+import { FLUID_cbETH_USDC_VAULT, FluidHelper, fluidVaultMap } from "../helpers/protocolsDebt/fluid";
+import FluidVaultAbi from "../../externalAbi/fluid/fluidVaultT1.json";
 import { expect } from "chai";
-import { getGasOptions, deployLeveragedPositionContractFixture } from "./deployUtils";
+import { getGasOptions, deployLeveragedPositionContractFixture } from "../helpers/deployUtils";
 import { MaxUint256 } from "ethers";
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { safeAddress } from "./safeTestContext";
+import { safeAddress } from "../helpers/safeTestContext";
 
 describe("SafeExecTransactionWrapper", function () {
     // Increase timeout for memory-intensive operations

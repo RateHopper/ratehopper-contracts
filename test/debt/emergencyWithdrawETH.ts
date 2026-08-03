@@ -1,7 +1,7 @@
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { deployLeveragedPositionContractFixture, deploySafeContractFixture } from "./deployUtils";
+import { deployLeveragedPositionContractFixture, deploySafeContractFixture } from "../helpers/deployUtils";
 
 describe("Emergency Withdraw ETH", function () {
     describe("LeveragedPosition", function () {

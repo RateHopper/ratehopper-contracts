@@ -3,9 +3,9 @@ const { expect } = require("chai");
 import { ethers } from "hardhat";
 import "dotenv/config";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { LeveragedPosition } from "../typechain-types";
+import { LeveragedPosition } from "../../typechain-types";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { eip1193Provider, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
+import { eip1193Provider, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "../helpers/utils";
 import Safe from "@safe-global/protocol-kit";
 import {
     USDC_ADDRESS,
@@ -19,13 +19,13 @@ import {
     cbBTC_USDC_POOL,
     ETH_USDC_POOL,
     ETH_USDbC_POOL,
-} from "./constants";
+} from "../helpers/constants";
 import { MaxUint256 } from "ethers";
-import { deployLeveragedPositionContractFixture } from "./deployUtils";
-import { mContractAddressMap, MoonwellHelper, COMPTROLLER_ADDRESS } from "./protocolsDebt/moonwell";
-import { safeAddress } from "./safeTestContext";
+import { deployLeveragedPositionContractFixture } from "../helpers/deployUtils";
+import { mContractAddressMap, MoonwellHelper, COMPTROLLER_ADDRESS } from "../helpers/protocolsDebt/moonwell";
+import { safeAddress } from "../helpers/safeTestContext";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { fluidVaultMap, FluidHelper } from "./protocolsDebt/fluid";
+import { fluidVaultMap, FluidHelper } from "../helpers/protocolsDebt/fluid";
 
 describe("Create leveraged position by Safe", function () {
     this.timeout(3000000); // 50 minutes
@@ -541,8 +541,8 @@ describe("Create leveraged position by Safe", function () {
             const mCollateralAddress = mContractAddressMap.get(collateralAddress)!;
             const mDebtAddress = mContractAddressMap.get(debtAddress)!;
 
-            const MErc20DelegatorAbi = require("../externalAbi/moonwell/MErc20Delegator.json");
-            const ComptrollerAbi = require("../externalAbi/moonwell/comptroller.json");
+            const MErc20DelegatorAbi = require("../../externalAbi/moonwell/MErc20Delegator.json");
+            const ComptrollerAbi = require("../../externalAbi/moonwell/comptroller.json");
 
             const mCollateralContract = new ethers.Contract(mCollateralAddress, MErc20DelegatorAbi, impersonatedSigner);
             const mDebtContract = new ethers.Contract(mDebtAddress, MErc20DelegatorAbi, impersonatedSigner);

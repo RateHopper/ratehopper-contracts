@@ -12,10 +12,10 @@ import {
     UNISWAP_V3_SWAP_ROUTER_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
-} from "./constants";
-import { FLUID_VAULT_RESOLVER, FLUID_WETH_USDC_VAULT, FluidHelper } from "./protocolsDebt/fluid";
-import { eip1193Provider, fundSignerWithETH } from "./utils";
-import FluidVaultAbi from "../externalAbi/fluid/fluidVaultT1.json";
+} from "../helpers/constants";
+import { FLUID_VAULT_RESOLVER, FLUID_WETH_USDC_VAULT, FluidHelper } from "../helpers/protocolsDebt/fluid";
+import { eip1193Provider, fundSignerWithETH } from "../helpers/utils";
+import FluidVaultAbi from "../../externalAbi/fluid/fluidVaultT1.json";
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Real Base mainnet contract addresses

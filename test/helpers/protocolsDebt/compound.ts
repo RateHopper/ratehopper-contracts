@@ -1,7 +1,7 @@
 import { ethers } from "hardhat";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { Contract, MaxUint256 } from "ethers";
-import cometAbi from "../../externalAbi/compound/comet.json";
+import cometAbi from "../../../externalAbi/compound/comet.json";
 import { approve, defaultProvider, formatAmount } from "../utils";
 import {
     AERO_ADDRESS,

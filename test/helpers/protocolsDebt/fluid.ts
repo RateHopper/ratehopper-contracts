@@ -1,8 +1,8 @@
 import { ethers } from "hardhat";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { Contract, MaxUint256 } from "ethers";
-import fluidAbi from "../../externalAbi/fluid/fluidVaultT1.json";
-import fluidVaultResolverAbi from "../../externalAbi/fluid/fluidVaultResolver.json";
+import fluidAbi from "../../../externalAbi/fluid/fluidVaultT1.json";
+import fluidVaultResolverAbi from "../../../externalAbi/fluid/fluidVaultResolver.json";
 import { formatAmount } from "../utils";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import {

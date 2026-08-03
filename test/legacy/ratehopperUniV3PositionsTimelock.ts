@@ -7,7 +7,7 @@ import {
     UNISWAP_V3_SWAP_ROUTER_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
-} from "./constants";
+} from "../helpers/constants";
 
 const UNISWAP_V3_NPM_ADDRESS = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
 const MAX_FEE_BPS = 2000;

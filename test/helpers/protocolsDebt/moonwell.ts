@@ -4,11 +4,11 @@ import { DEFAULT_SUPPLY_AMOUNT, TEST_ADDRESS, WETH_ADDRESS } from "../constants"
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { approve, defaultProvider, formatAmount, getDecimals } from "../utils";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { mContractAddressMap, mcbETH, mUSDC, mDAI } from "../../contractAddresses";
+import { mContractAddressMap, mcbETH, mUSDC, mDAI } from "../../../contractAddresses";
 
-const MErc20DelegatorAbi = require("../../externalAbi/moonwell/MErc20Delegator.json");
-const ComptrollerAbi = require("../../externalAbi/moonwell/comptroller.json");
-const ViewAbi = require("../../externalAbi/moonwell/moonwellViewsV3.json");
+const MErc20DelegatorAbi = require("../../../externalAbi/moonwell/MErc20Delegator.json");
+const ComptrollerAbi = require("../../../externalAbi/moonwell/comptroller.json");
+const ViewAbi = require("../../../externalAbi/moonwell/moonwellViewsV3.json");
 export const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
 const view_address = "0x821ff3a967b39bcbe8a018a9b1563eaf878bad39";
 

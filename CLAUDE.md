@@ -52,12 +52,12 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 
 - Handlers: `<Protocol>DebtHandler.sol` (debt) / `<Protocol>YieldHandler.sol` (yield)
 - Interfaces: `I<ContractName>.sol`
-- Tests: `test/<feature>.ts`
+- Tests: `test/<area>/<feature>.ts` — areas: `debt/`, `registry/`, `yield/`, `legacy/` (deployed standalone modules), `helpers/` (fixtures/utils, no tests)
 
 ## Key Files
 
 - `contractAddresses.ts`: Token and protocol addresses
-- `test/constants.ts`, `test/utils.ts`, `test/deployUtils.ts`: Test helpers
+- `test/helpers/constants.ts`, `test/helpers/utils.ts`, `test/helpers/deployUtils.ts`: Test helpers
 
 ## Security Requirements
 

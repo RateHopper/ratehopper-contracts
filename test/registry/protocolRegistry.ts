@@ -1,10 +1,10 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { ProtocolRegistry } from "../typechain-types";
+import { ProtocolRegistry } from "../../typechain-types";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { USDC_ADDRESS, cbETH_ADDRESS, WETH_ADDRESS, DAI_ADDRESS } from "./constants";
-import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS } from "../contractAddresses";
+import { USDC_ADDRESS, cbETH_ADDRESS, WETH_ADDRESS, DAI_ADDRESS } from "../helpers/constants";
+import { PARASWAP_V6_CONTRACT_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS } from "../../contractAddresses";
 
 describe("ProtocolRegistry - setTokenMContract and setTokenCContract Tests", function () {
     let protocolRegistry: ProtocolRegistry;

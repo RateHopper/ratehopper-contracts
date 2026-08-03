@@ -3,11 +3,11 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { Contract, MaxUint256 } from "ethers";
 import { AAVE_V3_POOL_ADDRESS, cbETH_ADDRESS, DEFAULT_SUPPLY_AMOUNT, TEST_ADDRESS } from "../constants";
 const aaveV3ProtocolDataProvider = "0xd82a47fdebB5bf5329b09441C3DaB4b5df2153Ad";
-const aaveProtocolDataProviderAbi = require("../../externalAbi/aaveV3/aaveProtocolDataProvider.json");
+const aaveProtocolDataProviderAbi = require("../../../externalAbi/aaveV3/aaveProtocolDataProvider.json");
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { approve, defaultProvider, formatAmount } from "../utils";
-import aaveDebtTokenJson from "../../externalAbi/aaveV3/aaveDebtToken.json";
-import aaveV3PoolJson from "../../externalAbi/aaveV3/aaveV3Pool.json";
+import aaveDebtTokenJson from "../../../externalAbi/aaveV3/aaveDebtToken.json";
+import aaveV3PoolJson from "../../../externalAbi/aaveV3/aaveV3Pool.json";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import { safeAddress } from "../safeTestContext";
 

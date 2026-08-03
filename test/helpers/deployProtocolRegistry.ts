@@ -15,7 +15,7 @@ import {
     UNISWAP_V3_FACTORY_ADDRESS,
 } from "./constants";
 import { USDC_COMET_ADDRESS, WETH_COMET_ADDRESS } from "./protocolsDebt/compound";
-import { mAERO, mcbBTC, mEURC, mWeETH, mWETH, mwstETH, USDS_COMET_ADDRESS } from "../contractAddresses";
+import { mAERO, mcbBTC, mEURC, mWeETH, mWETH, mwstETH, USDS_COMET_ADDRESS } from "../../contractAddresses";
 import { getGasOptions } from "./deployUtils";
 import { FLUID_VAULT_RESOLVER } from "./protocolsDebt/fluid";
 

@@ -21,10 +21,10 @@ import {
     ETH_USDC_POOL,
     WETH_ADDRESS,
     wstETH_ADDRESS,
-} from "./constants";
+} from "../helpers/constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import cometAbi from "../externalAbi/compound/comet.json";
-import morphoAbi from "../externalAbi/morpho/morpho.json";
+import cometAbi from "../../externalAbi/compound/comet.json";
+import morphoAbi from "../../externalAbi/morpho/morpho.json";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import { MaxUint256 } from "ethers";
 import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
@@ -36,7 +36,7 @@ import {
     getDecimals,
     getParaswapData,
     protocolHelperMap,
-} from "./utils";
+} from "../helpers/utils";
 import {
     FLUID_cbETH_EURC_VAULT,
     FLUID_cbETH_USDC_VAULT,
@@ -44,19 +44,19 @@ import {
     FLUID_wstETH_sUSDS_VAULT,
     FLUID_wstETH_USDC_VAULT,
     FluidHelper,
-} from "./protocolsDebt/fluid";
-import { cometAddressMap, CompoundHelper, USDC_COMET_ADDRESS } from "./protocolsDebt/compound";
-import { MORPHO_ADDRESS, morphoMarket1Id, morphoMarket2Id, morphoMarket7Id, MorphoHelper } from "./protocolsDebt/morpho";
-import { AaveV3Helper } from "./protocolsDebt/aaveV3";
-import FluidVaultAbi from "../externalAbi/fluid/fluidVaultT1.json";
-import aaveDebtTokenJson from "../externalAbi/aaveV3/aaveDebtToken.json";
-import aaveV3PoolJson from "../externalAbi/aaveV3/aaveV3Pool.json";
+} from "../helpers/protocolsDebt/fluid";
+import { cometAddressMap, CompoundHelper, USDC_COMET_ADDRESS } from "../helpers/protocolsDebt/compound";
+import { MORPHO_ADDRESS, morphoMarket1Id, morphoMarket2Id, morphoMarket7Id, MorphoHelper } from "../helpers/protocolsDebt/morpho";
+import { AaveV3Helper } from "../helpers/protocolsDebt/aaveV3";
+import FluidVaultAbi from "../../externalAbi/fluid/fluidVaultT1.json";
+import aaveDebtTokenJson from "../../externalAbi/aaveV3/aaveDebtToken.json";
+import aaveV3PoolJson from "../../externalAbi/aaveV3/aaveV3Pool.json";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect } from "chai";
-import { deploySafeContractFixture } from "./deployUtils";
+import { deploySafeContractFixture } from "../helpers/deployUtils";
 import { zeroAddress } from "viem";
 
-import { safeAddress } from "./safeTestContext";
+import { safeAddress } from "../helpers/safeTestContext";
 
 // Export helper functions for reuse in other test files
 export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWallet: any; safeModuleAddress: string }) {

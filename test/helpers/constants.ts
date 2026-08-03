@@ -28,7 +28,7 @@ export {
     MAI_ADDRESS,
     sUSDS_ADDRESS,
     UNISWAP_V3_SWAP_ROUTER_ADDRESS,
-} from "../contractAddresses";
+} from "../../contractAddresses";
 
 export const TEST_ADDRESS = "0x50fe1109188A0B666c4d78908E3E539D73F97E33";
 export const TEST_FEE_BENEFICIARY_ADDRESS = "0xF7A9C820e0dcE141AC2F56324697A9E8AA82F7Fa";

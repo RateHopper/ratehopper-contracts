@@ -4,10 +4,10 @@ import { ethers } from "hardhat";
 
 import "dotenv/config";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { LeveragedPosition } from "../typechain-types";
-import morphoAbi from "../externalAbi/morpho/morpho.json";
+import { LeveragedPosition } from "../../typechain-types";
+import morphoAbi from "../../externalAbi/morpho/morpho.json";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { approve, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "./utils";
+import { approve, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "../helpers/utils";
 
 import {
     USDC_ADDRESS,
@@ -22,10 +22,10 @@ import {
     cbBTC_ADDRESS,
     cbBTC_USDC_POOL,
     ETH_USDC_POOL,
-} from "./constants";
+} from "../helpers/constants";
 
-import { AaveV3Helper } from "./protocolsDebt/aaveV3";
-import { cometAddressMap, CompoundHelper } from "./protocolsDebt/compound";
+import { AaveV3Helper } from "../helpers/protocolsDebt/aaveV3";
+import { cometAddressMap, CompoundHelper } from "../helpers/protocolsDebt/compound";
 import {
     MORPHO_ADDRESS,
     MorphoHelper,
@@ -34,8 +34,8 @@ import {
     morphoMarket5Id,
     morphoMarket6Id,
     morphoMarket7Id,
-} from "./protocolsDebt/morpho";
-import { deployLeveragedPositionContractFixture } from "./deployUtils";
+} from "../helpers/protocolsDebt/morpho";
+import { deployLeveragedPositionContractFixture } from "../helpers/deployUtils";
 
 describe("Create leveraged position", function () {
     let myContract: LeveragedPosition;

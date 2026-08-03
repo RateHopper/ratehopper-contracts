@@ -1,31 +1,33 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import {
-    AERODROME_CL_FACTORY_ADDRESS,
-    AERODROME_SLIPSTREAM_NPM_ADDRESS,
-    AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
+    UNISWAP_V3_FACTORY_ADDRESS,
+    UNISWAP_V3_NPM_ADDRESS,
+    UNISWAP_V3_SWAP_ROUTER_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
-} from "../contractAddresses";
+} from "../../contractAddresses";
 
-const AERODROME = 1;
-const TICK_SPACING = 100;
+const UNISWAP_V3 = 0;
+const FEE_TIER = 500;
+// Uniswap V3 tick spacing for the 0.05% fee tier.
+const TICK_SPACING = 10;
 const FORK_BLOCK = Number(process.env.BASE_FORK_BLOCK_NUMBER ?? 49_470_000);
-const POOL_PARAM = ethers.AbiCoder.defaultAbiCoder().encode(["int24"], [TICK_SPACING]);
+const POOL_PARAM = ethers.AbiCoder.defaultAbiCoder().encode(["uint24"], [FEE_TIER]);
 
 const ERC20_ABI = [
     "function balanceOf(address) view returns (uint256)",
     "function transfer(address,uint256) returns (bool)",
 ];
-const FACTORY_ABI = ["function getPool(address,address,int24) view returns (address)"];
+const FACTORY_ABI = ["function getPool(address,address,uint24) view returns (address)"];
 const POOL_ABI = [
     "function token0() view returns (address)",
     "function token1() view returns (address)",
-    "function slot0() view returns (uint160,int24,uint16,uint16,uint16,bool)",
+    "function slot0() view returns (uint160,int24,uint16,uint16,uint16,uint8,bool)",
 ];
 const NPM_ABI = ["function ownerOf(uint256) view returns (address)"];
 
-describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
+describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () {
     this.timeout(300_000);
 
     beforeEach(async function () {
@@ -42,7 +44,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         });
     });
 
-    it("opens, collects, partially closes, and fully closes a real Slipstream position", async function () {
+    it("opens, collects, partially closes, and fully closes a real Uniswap V3 position", async function () {
         const [admin, operator, treasury, pauser] = await ethers.getSigners();
 
         const Registry = await ethers.getContractFactory("MockRegistry");
@@ -55,13 +57,13 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         await safe.waitForDeployment();
         const safeAddress = await safe.getAddress();
 
-        const Handler = await ethers.getContractFactory("AerodromeYieldHandler");
+        const Handler = await ethers.getContractFactory("UniV3YieldHandler");
         const handler = await Handler.deploy(
-            AERODROME_SLIPSTREAM_NPM_ADDRESS,
+            UNISWAP_V3_NPM_ADDRESS,
             USDC_ADDRESS,
             WETH_ADDRESS,
-            AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
-            AERODROME_CL_FACTORY_ADDRESS,
+            UNISWAP_V3_SWAP_ROUTER_ADDRESS,
+            UNISWAP_V3_FACTORY_ADDRESS,
         );
         await handler.waitForDeployment();
 
@@ -69,7 +71,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const manager = await Manager.deploy(
             await registry.getAddress(),
             USDC_ADDRESS,
-            [AERODROME],
+            [UNISWAP_V3],
             [await handler.getAddress()],
             [[POOL_PARAM]],
             [0],
@@ -84,8 +86,8 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         );
         await manager.waitForDeployment();
 
-        const factory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, FACTORY_ABI, ethers.provider);
-        const poolAddress: string = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, TICK_SPACING);
+        const factory = new ethers.Contract(UNISWAP_V3_FACTORY_ADDRESS, FACTORY_ABI, ethers.provider);
+        const poolAddress: string = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, FEE_TIER);
         expect(poolAddress).to.not.equal(ethers.ZeroAddress);
 
         const pool = new ethers.Contract(poolAddress, POOL_ABI, ethers.provider);
@@ -120,17 +122,17 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             swapPoolParam: POOL_PARAM,
         };
 
-        await expect(manager.connect(operator).openLp(AERODROME, openParams)).to.emit(manager, "PositionOpened");
+        await expect(manager.connect(operator).openLp(UNISWAP_V3, openParams)).to.emit(manager, "PositionOpened");
         const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
         const opened = openedEvents[openedEvents.length - 1];
         const tokenId = opened.args.tokenId;
-        const npm = new ethers.Contract(AERODROME_SLIPSTREAM_NPM_ADDRESS, NPM_ABI, ethers.provider);
+        const npm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, ethers.provider);
         expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
-        const initialBasis = await manager.residualBasisUsd6Of(AERODROME, tokenId);
+        const initialBasis = await manager.residualBasisUsd6Of(UNISWAP_V3, tokenId);
         expect(initialBasis).to.be.greaterThan(0);
 
         await expect(
-            manager.connect(operator).collectLp(AERODROME, {
+            manager.connect(operator).collectLp(UNISWAP_V3, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 swapWethToUsdc: false,
@@ -156,18 +158,18 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             swapPoolParam: POOL_PARAM,
         });
 
-        await expect(manager.connect(operator).closeLp(AERODROME, closeParams(5_000))).to.emit(
+        await expect(manager.connect(operator).closeLp(UNISWAP_V3, closeParams(5_000))).to.emit(
             manager,
             "PositionClosed",
         );
         expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
-        expect(await manager.residualBasisUsd6Of(AERODROME, tokenId)).to.be.lessThan(initialBasis);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, tokenId)).to.be.lessThan(initialBasis);
 
-        await expect(manager.connect(operator).closeLp(AERODROME, closeParams(10_000))).to.emit(
+        await expect(manager.connect(operator).closeLp(UNISWAP_V3, closeParams(10_000))).to.emit(
             manager,
             "PositionClosed",
         );
-        expect(await manager.residualBasisUsd6Of(AERODROME, tokenId)).to.equal(0);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, tokenId)).to.equal(0);
         await expect(npm.ownerOf(tokenId)).to.be.reverted;
         expect(await usdc.balanceOf(safeAddress)).to.be.greaterThan(0);
     });

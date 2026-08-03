@@ -1,8 +1,8 @@
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 const { expect } = require("chai");
 import { ethers } from "hardhat";
-import { TEST_ADDRESS, USDC_ADDRESS, DAI_ADDRESS, MAI_ADDRESS } from "./constants";
-import { deployHandlers, deployMaliciousUniswapV3Pool } from "./deployUtils";
+import { TEST_ADDRESS, USDC_ADDRESS, DAI_ADDRESS, MAI_ADDRESS } from "../helpers/constants";
+import { deployHandlers, deployMaliciousUniswapV3Pool } from "../helpers/deployUtils";
 
 describe("Handler contracts should", function () {
     let aaveV3Handler;

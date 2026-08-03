@@ -14,8 +14,8 @@ import {
 
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { approve, defaultProvider, formatAmount } from "../utils";
-import chainAgnosticBundlerV2Abi from "../../externalAbi/morpho/chainAgnosticBundlerV2.json";
-import morphoAbi from "../../externalAbi/morpho/morpho.json";
+import chainAgnosticBundlerV2Abi from "../../../externalAbi/morpho/chainAgnosticBundlerV2.json";
+import morphoAbi from "../../../externalAbi/morpho/morpho.json";
 import { BundlerAction } from "@morpho-org/bundler-sdk-ethers";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import { safeAddress } from "../safeTestContext";
