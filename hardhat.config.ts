@@ -8,7 +8,9 @@ require("hardhat-tracer");
 require("@openzeppelin/hardhat-upgrades");
 
 const baseUrl = process.env.BASE_RPC_URL || "https://mainnet.base.org";
-const baseForkBlockNumber = Number(process.env.BASE_FORK_BLOCK_NUMBER ?? 49_470_000);
+const baseForkBlockNumber = process.env.BASE_FORK_BLOCK_NUMBER
+    ? Number(process.env.BASE_FORK_BLOCK_NUMBER)
+    : undefined;
 
 // Only configure signing accounts when a deployer key is present. Hardhat rejects
 // `[undefined]`, which breaks `compile`/`coverage` in CI where no key is set.
@@ -82,7 +84,7 @@ const config: HardhatUserConfig = {
             },
             forking: {
                 url: baseUrl,
-                blockNumber: baseForkBlockNumber,
+                ...(baseForkBlockNumber !== undefined ? { blockNumber: baseForkBlockNumber } : {}),
             },
         },
     },

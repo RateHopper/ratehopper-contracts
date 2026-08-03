@@ -3,14 +3,14 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 /**
  * Shared TimelockController deployment.
  *
- * Both `DeployCore` and `DeployUniV3Helper` import this via
- * `m.useModule(TimelockControllerModule)`. Because Ignition derives futures'
- * IDs from `<moduleName>#<contractName>`, the timelock here always has the
- * stable ID `TimelockControllerModule#TimelockController` — regardless of
- * which top-level module called it. The journal at
+ * `DeployRegistryOnly`, `DeployCore`, and `DeployYieldManager` import this
+ * via `m.useModule(TimelockControllerModule)`. Because Ignition derives
+ * futures' IDs from `<moduleName>#<contractName>`, the timelock here always
+ * has the stable ID `TimelockControllerModule#TimelockController` —
+ * regardless of which top-level module called it. The journal at
  * `ignition/deployments/chain-<chainId>/` deduplicates by ID across deploy
- * runs, so calling `yarn deploy:1_core` first and `yarn deploy:2_univ3_helper` later reuses
- * the same timelock address.
+ * runs, so calling `yarn deploy:1_core` first and `yarn deploy:2_yield_manager`
+ * later reuses the same timelock address.
  *
  * IMPORTANT: parameters are baked in by the FIRST deploy run that executes
  * the sub-module. Subsequent runs reuse the existing address regardless of

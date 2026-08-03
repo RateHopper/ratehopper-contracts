@@ -173,17 +173,17 @@ Create a `.env` file with the following required variables (use `.env.sample` as
 
 ```env
 # Core deploy
-ADMIN_ADDRESS=0x...           # Initial admin and timelock proposer/executor (used by 1_DeployCore AND 2_DeployUniV3Helper)
+ADMIN_ADDRESS=0x...           # Initial admin and timelock proposer/executor (used by all deploy modules)
 SAFE_OPERATOR_ADDRESS=0x...   # Operator address for Safe interactions
 PAUSER_ADDRESS=0x...          # Address that can pause contracts
 DEPLOYER_PRIVATE_KEY=...      # Private key for deployment
 EXPLORER_KEY=...              # Block explorer API key for verification
 BASE_FORK_BLOCK_NUMBER=49470000 # Optional deterministic fork block for CI
 
-# Shared yield deploy config (deploy:2_univ3_helper / 4_yield_manager)
-# Resolution order: module override (RHP_* / SYM_*) → shared unprefixed
-# name → legacy RHP_* fallback (addresses only) → default. Empty values (X=)
-# count as unset and fall through.
+# Yield deploy config (deploy:2_yield_manager)
+# Resolution order: SYM_* module override → shared unprefixed name → legacy
+# RHP_* fallback (addresses only) → default. Empty values (X=) count as
+# unset and fall through.
 TREASURY=0x...                # Fee treasury for all yield modules. REQUIRED.
 REGISTRY=0x...                # Optional. Falls back to PROTOCOL_REGISTRY_ADDRESS in contractAddresses.ts
 INITIAL_ADMIN=0x...           # Optional. DEFAULT_ADMIN_ROLE holder. Falls back to ADMIN_ADDRESS
@@ -315,32 +315,15 @@ This deploys all contracts sequentially in a single transaction chain:
 4. **LeveragedPosition** → `transferOwnership` to `ADMIN_ADDRESS`
 5. **SafeExecTransactionWrapper**
 
-### Deploy RatehopperUniV3Positions (Standalone)
-
-`RatehopperUniV3Positions` is deployed separately because it sits on top of an existing `ProtocolRegistry` and needs its own TimelockController for fund-impacting setters.
-
-```bash
-yarn deploy:2_univ3_helper
-```
-
-This deploys `ignition/modules/2_DeployUniV3Helper.ts` to Base with verification enabled and refreshes the ABI files in `abis/`.
-
-This module by default deploys:
-
-1. **TimelockController** (proposer + executor = `TIMELOCK_ADMIN` ?? `ADMIN_ADDRESS`; delay = `TIMELOCK_DELAY` ?? 8 hours)
-2. **RatehopperUniV3Positions** (wired to the registry from `RHP_REGISTRY` ?? `PROTOCOL_REGISTRY_ADDRESS`; CRITICAL_ROLE granted to the timelock from step 1)
-
-To reuse an existing TimelockController instead of deploying a new one, set `RHP_TIMELOCK=0x...` — the module skips step 1 and points RHP at the supplied address. See `## Environment Variables` for the full list of optional knobs.
-
 ### Deploy SafeYieldManager (Unified Yield Stack)
 
 Deploys the adapter-pattern yield stack: `UniV3YieldHandler` + `AerodromeYieldHandler` + `SafeYieldManager`.
 
 ```bash
-yarn deploy:4_yield_manager
+yarn deploy:2_yield_manager
 ```
 
-This deploys `ignition/modules/4_DeployYieldManager.ts` to Base with verification enabled and refreshes the ABI files in `abis/`.
+This deploys `ignition/modules/2_DeployYieldManager.ts` to Base with verification enabled and refreshes the ABI files in `abis/`.
 
 The module by default deploys:
 
@@ -390,9 +373,9 @@ Shortcut scripts are available for common futures:
 
 ```bash
 yarn wipe:leveraged-position
-yarn wipe:univ3-positions
 yarn wipe:safe-debt-manager
 yarn wipe:safe-wrapper
+yarn wipe:yield-manager
 ```
 
 In short: use `wipe:all` for a clean redeploy of the whole Base deployment, and use `wipe` or a `wipe:*` shortcut only when you intentionally want to rerun one named future.

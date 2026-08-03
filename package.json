@@ -26,12 +26,10 @@
         "deployments:sync": "node scripts/syncDeploymentAddresses.js",
         "deploy:0_registry": "npx hardhat ignition deploy ignition/modules/0_DeployRegistryOnly.ts --network base --verify && node scripts/syncRegistryAddress.js && node scripts/exportAbis.js && node scripts/syncDeploymentAddresses.js",
         "deploy:1_core": "npx hardhat ignition deploy ignition/modules/1_DeployCore.ts --network base --verify && node scripts/syncRegistryAddress.js && node scripts/exportAbis.js && node scripts/syncDeploymentAddresses.js",
-        "deploy:2_univ3_helper": "npx hardhat ignition deploy ignition/modules/2_DeployUniV3Helper.ts --network base --verify && node scripts/exportAbis.js && node scripts/syncDeploymentAddresses.js",
-        "deploy:4_yield_manager": "npx hardhat ignition deploy ignition/modules/4_DeployYieldManager.ts --network base --verify && node scripts/exportAbis.js && node scripts/syncDeploymentAddresses.js",
+        "deploy:2_yield_manager": "npx hardhat ignition deploy ignition/modules/2_DeployYieldManager.ts --network base --verify && node scripts/exportAbis.js && node scripts/syncDeploymentAddresses.js",
         "verify": "npx hardhat run scripts/verifyAll.ts --network base",
         "wipe:all": "rm -rf ignition/deployments/chain-8453",
         "wipe:leveraged-position": "npx hardhat ignition wipe chain-8453 DeployCore#LeveragedPosition",
-        "wipe:univ3-positions": "npx hardhat ignition wipe chain-8453 DeployUniV3Helper#RatehopperUniV3Positions",
         "wipe:safe-debt-manager": "npx hardhat ignition wipe chain-8453 DeployCore#SafeDebtManager",
         "wipe:safe-wrapper": "npx hardhat ignition wipe chain-8453 DeployCore#SafeExecTransactionWrapper",
         "wipe:yield-manager": "npx hardhat ignition wipe chain-8453 DeployYieldManager#SafeYieldManager"

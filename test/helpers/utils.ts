@@ -79,15 +79,25 @@ export async function getParaswapData(
     };
 
     let lastError: unknown;
-    // ParaSwap occasionally returns a transient 5xx or cannot build a route
-    // with the preferred exclusions. Retry first, then allow Uniswap V2 while
-    // continuing to exclude Uniswap V3 (the flash-loan callback conflict).
-    const exclusions = [params.excludeDEXS, "UniswapV3,BalancerV3"];
-    for (const excludeDEXS of exclusions) {
-        for (let attempt = 1; attempt <= 3; attempt++) {
+    // ParaSwap can report "Unable to build transaction" when its best route
+    // uses excluded Uniswap V3 even though another supported DEX has a route.
+    // Try the broad safe set first, then force known callback-safe adapters.
+    const { excludeDEXS: defaultExclusions, ...baseParams } = params;
+    const routeOptions = [
+        { excludeDEXS: defaultExclusions },
+        { includeDEXS: "UniswapV4" },
+        { includeDEXS: "AerodromeSlipstream" },
+        { includeDEXS: "AerodromeSlipstreamNewFactory" },
+        { includeDEXS: "AerodromeSlipstreamFactory3" },
+        { includeDEXS: "MaverickV2" },
+        { includeDEXS: "SwapBasedV3" },
+        { includeDEXS: "Alien" },
+    ];
+    for (const routeOption of routeOptions) {
+        for (let attempt = 1; attempt <= 2; attempt++) {
             try {
                 const response = await axios.get(url, {
-                    params: { ...params, excludeDEXS },
+                    params: { ...baseParams, ...routeOption },
                     timeout: 30_000,
                 });
                 if (!response?.data?.txParams || !response?.data?.priceRoute) {
@@ -107,7 +117,7 @@ export async function getParaswapData(
                 };
             } catch (error) {
                 lastError = error;
-                if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+                if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1_000));
             }
         }
     }

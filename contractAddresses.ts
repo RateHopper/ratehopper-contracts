@@ -54,8 +54,8 @@ export const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
 export const ADMIN_ADDRESS = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
 
 // RateHopper canonical Base deployments — referenced by downstream deploys
-// (e.g. 2_DeployUniV3Helper reads PROTOCOL_REGISTRY_ADDRESS to wire RHP
-// to the existing registry).
+// (e.g. 2_DeployYieldManager reads PROTOCOL_REGISTRY_ADDRESS to wire
+// SafeYieldManager to the existing registry).
 //
 // AUTO-MANAGED: registry/core deploy scripts run scripts/syncRegistryAddress.js,
 // rewriting the address below to the configured

@@ -58,7 +58,7 @@ const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) => abi.encode(["int24
  *    MIN_POOL_LIQUIDITY:                     Pool-liquidity floors. Default 0 (disabled).
  *
  * Usage:
- *   npx hardhat ignition deploy ignition/modules/4_DeployYieldManager.ts \
+ *   npx hardhat ignition deploy ignition/modules/2_DeployYieldManager.ts \
  *     --network base --verify
  */
 export default buildModule("DeployYieldManager", (m) => {
