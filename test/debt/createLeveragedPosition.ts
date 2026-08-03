@@ -73,6 +73,7 @@ describe("Create leveraged position", function () {
         principleAmount = Number(DEFAULT_SUPPLY_AMOUNT),
         targetAmount = Number(defaultTargetSupplyAmount),
         morphoMarketId?: string,
+        preferredDEX?: string,
     ) {
         const Helper = protocolHelperMap.get(protocol)!;
         const protocolHelper = new Helper(impersonatedSigner);
@@ -120,7 +121,14 @@ describe("Create leveraged position", function () {
 
         const diffAmount = parsedTargetAmount - ethers.parseUnits(principleAmount.toString(), collateralDecimals);
 
-        const paraswapData = await getParaswapData(collateralAddress, debtAsset, deployedContractAddress, diffAmount);
+        const paraswapData = await getParaswapData(
+            collateralAddress,
+            debtAsset,
+            deployedContractAddress,
+            diffAmount,
+            1n,
+            preferredDEX,
+        );
 
         await myContract.createLeveragedPosition(
             flashloanPool,
@@ -406,7 +414,16 @@ describe("Create leveraged position", function () {
         });
 
         it("with cbETH collateral and EURC debt", async function () {
-            await createLeveragedPosition(cbETH_ETH_POOL, DebtProtocols.AAVE_V3, cbETH_ADDRESS, EURC_ADDRESS);
+            await createLeveragedPosition(
+                cbETH_ETH_POOL,
+                DebtProtocols.AAVE_V3,
+                cbETH_ADDRESS,
+                EURC_ADDRESS,
+                Number(DEFAULT_SUPPLY_AMOUNT),
+                Number(defaultTargetSupplyAmount),
+                undefined,
+                "UniswapV3",
+            );
         });
 
         it("with cbBTC collateral", async function () {

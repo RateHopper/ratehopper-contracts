@@ -187,7 +187,12 @@ describe("Create leveraged position by Safe", function () {
 
         const debtToken = new ethers.Contract(debtAddress, ERC20_ABI, impersonatedSigner);
         const debtRemainingBalance = await debtToken.balanceOf(deployedContractAddress);
-        expect(Number(debtRemainingBalance)).to.be.equal(0);
+        if (protocol === DebtProtocols.FLUID) {
+            // Fluid rejects repayments below 10,000 units, so the handler intentionally leaves that dust unspent.
+            expect(debtRemainingBalance).to.be.lt(10_000n);
+        } else {
+            expect(debtRemainingBalance).to.equal(0n);
+        }
     }
 
     async function deleveragePosition(

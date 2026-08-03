@@ -362,12 +362,6 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
                 )
             );
             require(successRepay, "Repay remaining amount failed");
-
-            // Some protocols cannot repay amounts below their minimum, so return any unspent dust.
-            remainingBalance = IERC20(decoded.debtAsset).balanceOf(address(this));
-            if (remainingBalance > 0) {
-                IERC20(decoded.debtAsset).safeTransfer(decoded.onBehalfOf, remainingBalance);
-            }
         }
 
         emit LeveragedPositionCreated(

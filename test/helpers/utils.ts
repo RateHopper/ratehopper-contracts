@@ -46,6 +46,7 @@ export async function getParaswapData(
     amount: bigint,
     // 0.01% fee by default
     flashloanFee = 1n,
+    preferredDEX?: string,
 ) {
     const url = "https://api.paraswap.io/swap";
 
@@ -83,16 +84,18 @@ export async function getParaswapData(
     // uses excluded Uniswap V3 even though another supported DEX has a route.
     // Try the broad safe set first, then force known callback-safe adapters.
     const { excludeDEXS: defaultExclusions, ...baseParams } = params;
-    const routeOptions = [
-        { excludeDEXS: defaultExclusions },
-        { includeDEXS: "UniswapV4" },
-        { includeDEXS: "AerodromeSlipstream" },
-        { includeDEXS: "AerodromeSlipstreamNewFactory" },
-        { includeDEXS: "AerodromeSlipstreamFactory3" },
-        { includeDEXS: "MaverickV2" },
-        { includeDEXS: "SwapBasedV3" },
-        { includeDEXS: "Alien" },
-    ];
+    const routeOptions = preferredDEX
+        ? [{ includeDEXS: preferredDEX }]
+        : [
+              { excludeDEXS: defaultExclusions },
+              { includeDEXS: "UniswapV4" },
+              { includeDEXS: "AerodromeSlipstream" },
+              { includeDEXS: "AerodromeSlipstreamNewFactory" },
+              { includeDEXS: "AerodromeSlipstreamFactory3" },
+              { includeDEXS: "MaverickV2" },
+              { includeDEXS: "SwapBasedV3" },
+              { includeDEXS: "Alien" },
+          ];
     for (const routeOption of routeOptions) {
         for (let attempt = 1; attempt <= 2; attempt++) {
             try {

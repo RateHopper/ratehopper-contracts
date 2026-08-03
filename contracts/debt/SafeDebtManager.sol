@@ -363,12 +363,6 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
             );
 
             require(success, "Repay remainingBalance failed");
-
-            // Some protocols cannot repay amounts below their minimum, so return any unspent dust.
-            remainingBalance = toToken.balanceOf(address(this));
-            if (remainingBalance > 0) {
-                toToken.safeTransfer(decoded.onBehalfOf, remainingBalance);
-            }
         }
 
         // send dust amount back to user if it exists
