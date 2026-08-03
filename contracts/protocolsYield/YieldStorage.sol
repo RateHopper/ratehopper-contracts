@@ -43,9 +43,6 @@ abstract contract YieldStorage {
         mapping(uint8 protocolId => mapping(uint256 tokenId => address)) positionHandlerOf;
     }
 
-    // ERC-7201 namespaced storage shared by SafeYieldManager and handlers
-    // executed via delegatecall. The fixed, isolated slot prevents collisions
-    // with inherited Manager storage while keeping all handlers on one layout.
     // keccak256(abi.encode(uint256(keccak256("ratehopper.storage.yield")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant YIELD_STORAGE_SLOT = 0x53ba738b9a2829dfda910cf4e864fcd3f84e03854b49244f3d159a473ee6a400;
 
@@ -87,8 +84,7 @@ abstract contract YieldStorage {
         uint256 fee0,
         address token1,
         uint256 collected1,
-        uint256 fee1,
-        uint128 currentValueUsd6
+        uint256 fee1
     );
     event FeeTransferFailed(address indexed onBehalfOf, uint256 indexed tokenId, uint128 feeUsd6);
     event CollectFeeTransferFailed(

@@ -141,7 +141,6 @@ contract MockSwapRouter {
     }
 
     uint256 public output;
-    bool public pullInput = true;
     address public callbackTarget;
     bytes public callbackData;
 
@@ -154,10 +153,6 @@ contract MockSwapRouter {
         callbackData = data;
     }
 
-    function setPullInput(bool enabled) external {
-        pullInput = enabled;
-    }
-
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
         if (callbackTarget != address(0)) {
             (bool success, bytes memory ret) = callbackTarget.call(callbackData);
@@ -167,7 +162,7 @@ contract MockSwapRouter {
                 }
             }
         }
-        if (pullInput && params.amountIn > 0) {
+        if (params.amountIn > 0) {
             IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
         }
         amountOut = output;
@@ -233,7 +228,6 @@ contract MockNonfungiblePositionManager {
     // Config applied to the next `mint`.
     uint128 public mintLiquidity = 1_000_000;
     address public mintOwnerOverride;
-    bool public pullOnMint = true;
 
     function setMintLiquidity(uint128 value) external {
         mintLiquidity = value;
@@ -241,10 +235,6 @@ contract MockNonfungiblePositionManager {
 
     function setMintOwnerOverride(address account) external {
         mintOwnerOverride = account;
-    }
-
-    function setPullOnMint(bool enabled) external {
-        pullOnMint = enabled;
     }
 
     /// @dev Seed a position directly (for collectLp/closeLp tests that bypass
@@ -282,10 +272,8 @@ contract MockNonfungiblePositionManager {
         tokenId = nextId++;
         amount0 = params.amount0Desired;
         amount1 = params.amount1Desired;
-        if (pullOnMint) {
-            if (amount0 > 0) IERC20(params.token0).transferFrom(msg.sender, address(this), amount0);
-            if (amount1 > 0) IERC20(params.token1).transferFrom(msg.sender, address(this), amount1);
-        }
+        if (amount0 > 0) IERC20(params.token0).transferFrom(msg.sender, address(this), amount0);
+        if (amount1 > 0) IERC20(params.token1).transferFrom(msg.sender, address(this), amount1);
         liquidity = mintLiquidity;
         address owner = mintOwnerOverride == address(0) ? params.recipient : mintOwnerOverride;
         positionsData[tokenId] = Position(

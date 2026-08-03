@@ -1,10 +1,8 @@
 import { ethers } from "hardhat";
 import { Eip1193Provider, RequestArguments } from "@safe-global/protocol-kit";
-import { DebtProtocols, WETH_ADDRESS } from "./constants";
+import { DebtProtocols } from "./constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MaxUint256 } from "ethers";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import WETH_ABI from "../externalAbi/weth.json";
 
 import { AaveV3Helper } from "./protocolsDebt/aaveV3";
 import { CompoundHelper } from "./protocolsDebt/compound";
@@ -37,25 +35,8 @@ export async function getDecimals(tokenAddress: string): Promise<number> {
     return await tokenContract.decimals();
 }
 
-export function getAmountInMax(amountOut: bigint): bigint {
-    // Suppose 1% slippage is allowed. must be fetched from quote to get actual slippage
-    const slippage = 1.01;
-    const scaleFactor = 100n;
-    const multiplier = BigInt(slippage * Number(scaleFactor));
-    return (amountOut * multiplier) / scaleFactor;
-}
-
 export function formatAmount(amount: bigint): string {
     return ethers.formatUnits(String(amount), 6);
-}
-
-export async function wrapETH(amountIn: string, signer: HardhatEthersSigner) {
-    const wethContract = new ethers.Contract(WETH_ADDRESS, WETH_ABI, signer);
-
-    const amount = ethers.parseEther(amountIn);
-    const tx = await wethContract.deposit({ value: amount });
-    await tx.wait();
-    console.log("Wrapped ETH to WETH:", amount);
 }
 
 export async function getParaswapData(

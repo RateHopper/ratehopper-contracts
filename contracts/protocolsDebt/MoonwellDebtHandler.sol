@@ -7,7 +7,6 @@ import {IComptroller, IMoonwellOracle} from "../interfaces/moonwell/Comptroller.
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../Types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ProtocolRegistry} from "../ProtocolRegistry.sol";
 import "../protocolsDebt/BaseDebtHandler.sol";
 import "../interfaces/IWETH9.sol";
 

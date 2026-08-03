@@ -441,12 +441,6 @@
                 "internalType": "uint256",
                 "name": "fee1",
                 "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "currentValueUsd6",
-                "type": "uint128"
             }
         ],
         "name": "FeesCollected",
@@ -736,10 +730,10 @@
                 "type": "uint8"
             },
             {
-                "indexed": false,
-                "internalType": "string",
-                "name": "operationType",
-                "type": "string"
+                "indexed": true,
+                "internalType": "bool",
+                "name": "forOpen",
+                "type": "bool"
             },
             {
                 "indexed": false,

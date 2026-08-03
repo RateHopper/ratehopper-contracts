@@ -14,12 +14,6 @@ pragma solidity >=0.5.0;
  *        https://github.com/aerodrome-finance/slipstream/blob/main/contracts/core/CLPool.sol
  */
 interface ICLPool {
-    /// @notice The contract address of token0.
-    function token0() external view returns (address);
-
-    /// @notice The contract address of token1.
-    function token1() external view returns (address);
-
     /// @notice The current price + tick of the pool, packed for gas efficiency.
     /// @dev Note the absence of Uniswap V3's `feeProtocol` field.
     /// @return sqrtPriceX96 The current price of the pool as a Q64.96 sqrt(token1/token0).
@@ -39,14 +33,4 @@ interface ICLPool {
             uint16 observationCardinalityNext,
             bool unlocked
         );
-
-    /// @notice The currently in-range liquidity available to the pool.
-    function liquidity() external view returns (uint128);
-
-    /// @notice The pool tick spacing (the pool's identity key in Slipstream).
-    function tickSpacing() external view returns (int24);
-
-    /// @notice The pool's CURRENT swap fee in pips (millionths). Dynamic and
-    ///         set per-pool by a fee module — never assume a fixed tier.
-    function fee() external view returns (uint24);
 }

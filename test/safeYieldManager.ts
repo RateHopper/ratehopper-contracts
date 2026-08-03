@@ -582,7 +582,6 @@ describe("SafeYieldManager", function () {
                     await usdc.getAddress(),
                     40_000n,
                     1_000n,
-                    140_000n,
                 );
 
             expect(await weth.balanceOf(treasury.address)).to.equal(2_500n);
@@ -658,7 +657,7 @@ describe("SafeYieldManager", function () {
 
             await expect(manager.connect(pauser).setProtocolEnabledForOpen(UNISWAP_V3, false))
                 .to.emit(manager, "ProtocolStatusChanged")
-                .withArgs(UNISWAP_V3, "open", false);
+                .withArgs(UNISWAP_V3, true, false);
 
             await expect(
                 manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER)),
@@ -680,7 +679,7 @@ describe("SafeYieldManager", function () {
 
             await expect(manager.connect(pauser).setProtocolEnabledForClose(UNISWAP_V3, false))
                 .to.emit(manager, "ProtocolStatusChanged")
-                .withArgs(UNISWAP_V3, "close", false);
+                .withArgs(UNISWAP_V3, false, false);
 
             await expect(
                 manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER)),

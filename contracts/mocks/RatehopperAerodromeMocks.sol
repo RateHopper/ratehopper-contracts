@@ -3,18 +3,18 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISlipstreamNonfungiblePositionManager} from "../interfaces/aerodrome/ISlipstreamNonfungiblePositionManager.sol";
+import {INonfungiblePositionManager} from "../interfaces/uniswapV3/INonfungiblePositionManager.sol";
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Slipstream (Aerodrome CL) mocks for the SafeYieldManager / AerodromeYieldHandler tests.
 //
 //  These mirror the Uniswap mocks in RatehopperMocks.sol but carry the three
-//  load-bearing Slipstream deltas so the helper's tickSpacing-keyed flow and
-//  recomputed swap selector exercise end-to-end on a plain Hardhat network:
+//  load-bearing Slipstream deltas so the handler's tickSpacing-keyed flow
+//  exercises end-to-end on a plain Hardhat network:
 //    1. pools/mint/positions are keyed by `int24 tickSpacing`, not `uint24 fee`;
 //    2. `slot0` has no `feeProtocol` field;
-//    3. the swap router's `exactInputSingle` carries `tickSpacing` + `deadline`
-//       — so its compiler-derived selector IS the recomputed `0xa026383e`, which
-//       means the helper's pinned selector must match for the mock to dispatch.
+//    3. the swap router's `exactInputSingle` params carry `tickSpacing` +
+//       `deadline`, matching `ISlipstreamSwapRouter.exactInputSingle`.
 //
 //  The shared MockERC20 / MockRegistry / MockSafeHarness / MockERC721 from
 //  RatehopperMocks.sol are reused as-is. TEST-ONLY; never deployed.
@@ -37,18 +37,13 @@ contract MockSlipstreamSwapRouter {
     }
 
     uint256 public output;
-    bool public pullInput = true;
 
     function setOutput(uint256 newOutput) external {
         output = newOutput;
     }
 
-    function setPullInput(bool enabled) external {
-        pullInput = enabled;
-    }
-
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
-        if (pullInput && params.amountIn > 0) {
+        if (params.amountIn > 0) {
             IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
         }
         amountOut = output;
@@ -65,16 +60,12 @@ contract MockCLPool {
     address public token1;
     uint160 public sqrtPriceX96;
     uint128 public liquidity;
-    int24 public tickSpacing;
-    uint24 public fee;
 
     constructor(address _token0, address _token1, uint160 _sqrtPriceX96, uint128 _liquidity) {
         token0 = _token0;
         token1 = _token1;
         sqrtPriceX96 = _sqrtPriceX96;
         liquidity = _liquidity;
-        tickSpacing = 100;
-        fee = 500;
     }
 
     function slot0() external view returns (uint160, int24, uint16, uint16, uint16, bool) {
@@ -120,7 +111,6 @@ contract MockCLNonfungiblePositionManager {
     // Config applied to the next `mint`.
     uint128 public mintLiquidity = 1_000_000;
     address public mintOwnerOverride;
-    bool public pullOnMint = true;
 
     function setMintLiquidity(uint128 value) external {
         mintLiquidity = value;
@@ -128,10 +118,6 @@ contract MockCLNonfungiblePositionManager {
 
     function setMintOwnerOverride(address account) external {
         mintOwnerOverride = account;
-    }
-
-    function setPullOnMint(bool enabled) external {
-        pullOnMint = enabled;
     }
 
     /// @dev Seed a position directly (for collectLp/closeLp tests that bypass
@@ -180,10 +166,8 @@ contract MockCLNonfungiblePositionManager {
         tokenId = nextId++;
         amount0 = params.amount0Desired;
         amount1 = params.amount1Desired;
-        if (pullOnMint) {
-            if (amount0 > 0) IERC20(params.token0).transferFrom(msg.sender, address(this), amount0);
-            if (amount1 > 0) IERC20(params.token1).transferFrom(msg.sender, address(this), amount1);
-        }
+        if (amount0 > 0) IERC20(params.token0).transferFrom(msg.sender, address(this), amount0);
+        if (amount1 > 0) IERC20(params.token1).transferFrom(msg.sender, address(this), amount1);
         liquidity = mintLiquidity;
         address owner = mintOwnerOverride == address(0) ? params.recipient : mintOwnerOverride;
         positionsData[tokenId] = Position(
@@ -229,7 +213,7 @@ contract MockCLNonfungiblePositionManager {
     }
 
     function collect(
-        ISlipstreamNonfungiblePositionManager.CollectParams calldata params
+        INonfungiblePositionManager.CollectParams calldata params
     ) external payable returns (uint256 amount0, uint256 amount1) {
         Position storage p = positionsData[params.tokenId];
         amount0 = p.owed0;
@@ -241,7 +225,7 @@ contract MockCLNonfungiblePositionManager {
     }
 
     function decreaseLiquidity(
-        ISlipstreamNonfungiblePositionManager.DecreaseLiquidityParams calldata params
+        INonfungiblePositionManager.DecreaseLiquidityParams calldata params
     ) external payable returns (uint256 amount0, uint256 amount1) {
         Position storage p = positionsData[params.tokenId];
         require(params.liquidity <= p.liquidity, "liquidity");

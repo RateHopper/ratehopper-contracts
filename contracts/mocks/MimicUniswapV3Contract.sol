@@ -44,11 +44,4 @@ contract MaliciousUniswapV3Pool {
     ) external {
         IDebtHandler(targetHandler).switchFrom(fromAsset, amount, onBehalfOf, collateralAssets, "0x");
     }
-
-    /**
-     * @dev Attempt to manipulate supply/borrow without proper validation
-     */
-    function attemptMaliciousSupply(address asset, uint256 amount, address onBehalfOf) external {
-        IDebtHandler(targetHandler).supply(asset, amount, onBehalfOf, "0x");
-    }
 }

@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {DataTypes} from "../interfaces/aaveV3/DataTypes.sol";
 import "../interfaces/morpho/IMorpho.sol";
 import {IMorphoOracle} from "../interfaces/morpho/IMorphoOracle.sol";
 import {MarketParamsLib} from "../dependencies/morpho/MarketParamsLib.sol";

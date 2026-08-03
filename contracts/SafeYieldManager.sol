@@ -52,7 +52,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     mapping(uint8 => bool) public protocolEnabledForClose;
 
     event YieldHandlerUpdated(uint8 indexed protocol, address indexed oldHandler, address indexed newHandler);
-    event ProtocolStatusChanged(uint8 indexed protocol, string operationType, bool enabled);
+    event ProtocolStatusChanged(uint8 indexed protocol, bool indexed forOpen, bool enabled);
     event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
     event PerformanceFeeBpsUpdated(uint16 previousPerformanceFeeBps, uint16 newPerformanceFeeBps);
     event FeeCollectBpsUpdated(uint16 previousFeeCollectBps, uint16 newFeeCollectBps);
@@ -139,8 +139,8 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             protocolEnabledForOpen[_protocols[i]] = true;
             protocolEnabledForClose[_protocols[i]] = true;
             emit YieldHandlerUpdated(_protocols[i], address(0), _handlers[i]);
-            emit ProtocolStatusChanged(_protocols[i], "open", true);
-            emit ProtocolStatusChanged(_protocols[i], "close", true);
+            emit ProtocolStatusChanged(_protocols[i], true, true);
+            emit ProtocolStatusChanged(_protocols[i], false, true);
 
             $.minPoolLiquidity[_protocols[i]] = _minPoolLiquidity[i];
             $.minPositionLiquidity[_protocols[i]] = _minPositionLiquidity[i];
@@ -219,9 +219,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         YieldLayout storage $ = _yieldStorage();
         (uint128 residualBasis, address handler) = _pinnedPosition($, protocol, params.tokenId);
 
-        uint128 basisForExit = params.exitBps == 10_000
-            ? residualBasis
-            : Math.mulDiv(uint256(residualBasis), uint256(params.exitBps), 10_000).toUint128();
+        uint128 basisForExit = Math.mulDiv(uint256(residualBasis), uint256(params.exitBps), 10_000).toUint128();
         if (params.exitBps == 10_000) {
             delete $.residualBasisUsd6Of[protocol][params.tokenId];
             delete $.positionHandlerOf[protocol][params.tokenId];
@@ -238,35 +236,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         if (currentValueUsd6 > basisForExit) {
             uint256 profit = uint256(currentValueUsd6) - uint256(basisForExit);
             feeUsd6 = ((profit * $.performanceFeeBps) / 10_000).toUint128();
-            if (feeUsd6 > 0) {
-                (bool ok, bytes memory feeRet) = ISafe(params.onBehalfOf).execTransactionFromModuleReturnData(
-                    address(USDC),
-                    0,
-                    abi.encodeCall(IERC20.transfer, ($.treasury, uint256(feeUsd6))),
-                    ISafe.Operation.Call
-                );
-                // The module call succeeding is not enough: a non-reverting
-                // token can return false. Treat the fee as collected only
-                // when the inner transfer returned no data (non-standard
-                // token) or its first return word is exactly 1. Read the
-                // word in assembly instead of abi.decode so a malformed
-                // return value cannot revert and block the exit.
-                bool transferred;
-                if (ok) {
-                    if (feeRet.length == 0) {
-                        transferred = true;
-                    } else if (feeRet.length >= 32) {
-                        uint256 word;
-                        assembly ("memory-safe") {
-                            word := mload(add(feeRet, 0x20))
-                        }
-                        transferred = word == 1;
-                    }
-                }
-                if (!transferred) {
-                    emit FeeTransferFailed(params.onBehalfOf, params.tokenId, feeUsd6);
-                    feeUsd6 = 0;
-                }
+            if (feeUsd6 > 0 && !_trySafeTransfer(params.onBehalfOf, address(USDC), $.treasury, uint256(feeUsd6))) {
+                emit FeeTransferFailed(params.onBehalfOf, params.tokenId, feeUsd6);
+                feeUsd6 = 0;
             }
         }
 
@@ -377,6 +349,10 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         emit YieldHandlerUpdated(protocol, oldHandler, handler);
     }
 
+    /// @dev The code-length pre-check is load-bearing: for a codeless address
+    ///      `PROTOCOL()` returns empty data, and RETURN-DATA DECODING errors
+    ///      are NOT caught by try/catch — they revert reason-less in this
+    ///      contract instead of landing in the catch below.
     function _validateHandler(uint8 protocol, address handler) internal view {
         if (handler.code.length == 0) revert InvalidHandler();
         try IYieldHandler(handler).PROTOCOL() returns (uint8 handlerProtocol) {
@@ -454,7 +430,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     function setProtocolEnabledForOpen(uint8 protocol, bool enabled) external onlyPauser {
         if (yieldHandlers[protocol] == address(0)) revert HandlerNotSet();
         protocolEnabledForOpen[protocol] = enabled;
-        emit ProtocolStatusChanged(protocol, "open", enabled);
+        emit ProtocolStatusChanged(protocol, true, enabled);
     }
 
     /// @notice Emergency per-protocol disable of close/collect — the ONLY
@@ -463,7 +439,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     function setProtocolEnabledForClose(uint8 protocol, bool enabled) external onlyPauser {
         if (yieldHandlers[protocol] == address(0)) revert HandlerNotSet();
         protocolEnabledForClose[protocol] = enabled;
-        emit ProtocolStatusChanged(protocol, "close", enabled);
+        emit ProtocolStatusChanged(protocol, false, enabled);
     }
 
     /// @notice Pause NEW position opens. closeLp/collectLp stay available —
@@ -479,6 +455,32 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     // ─────────────────────────────────────────────────────────────────────
     //  Internals
     // ─────────────────────────────────────────────────────────────────────
+
+    /// @dev Module-mediated ERC20 transfer that accepts empty return data or
+    ///      the canonical true word only, and never reverts on malformed
+    ///      returndata — a failed treasury transfer must waive the fee
+    ///      instead of blocking an exit. Mirrors RatehopperUniV3Positions.
+    function _trySafeTransfer(
+        address _onBehalfOf,
+        address token,
+        address recipient,
+        uint256 amount
+    ) internal returns (bool) {
+        (bool ok, bytes memory ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(
+            token,
+            0,
+            abi.encodeCall(IERC20.transfer, (recipient, amount)),
+            ISafe.Operation.Call
+        );
+        if (!ok) return false;
+        if (ret.length == 0) return true;
+        if (ret.length < 32) return false;
+        uint256 word;
+        assembly ("memory-safe") {
+            word := mload(add(ret, 0x20))
+        }
+        return word == 1;
+    }
 
     /// @dev Basis and open-time handler of a position this contract manages.
     ///      Both are written together at open and deleted together at full

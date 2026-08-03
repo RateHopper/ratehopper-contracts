@@ -28,9 +28,6 @@ const CHAIN_CONFIG: Record<number, { chainid: number; browserURL: string }> = {
 };
 
 /**
- * Parse the Ignition journal to extract constructor args for each deployed contract.
- */
-/**
  * Ignition serializes `bigint` constructor args in the journal as tagged objects
  * (`{ _kind: "bigint", value: "10000" }`) rather than JSON numbers. Passing those
  * straight to hardhat-verify's ABI encoder throws "invalid BigNumber value" /
@@ -175,7 +172,9 @@ async function main() {
     }
 
     console.log("\n" + "=".repeat(60));
-    console.log(`\nVerification complete: ${verified} newly verified, ${alreadyVerified} already verified, ${failed} failed`);
+    console.log(
+        `\nVerification complete: ${verified} newly verified, ${alreadyVerified} already verified, ${failed} failed`,
+    );
 }
 
 main()

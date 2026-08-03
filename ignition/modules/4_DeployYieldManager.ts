@@ -35,9 +35,8 @@ const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) => abi.encode(["int24
  *
  * SafeYieldManager is the ONLY contract users enable as a Safe module; the
  * handlers are stateless delegatecall targets registered in its constructor.
- * Coexists with the previously deployed standalone
- * RatehopperUniV3Positions / RatehopperAerodromePositions — existing
- * positions keep closing through those; new positions open here.
+ * Coexists with the previously deployed standalone RatehopperUniV3Positions:
+ * existing positions keep closing there; new positions open here.
  *
  * Environment variables — resolution order is SYM_* module override, then
  * the unprefixed name shared by all yield deploy modules, then a legacy

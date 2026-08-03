@@ -204,7 +204,6 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             _safeExec(
                 p.onBehalfOf,
                 POSITION_MANAGER,
-                0,
                 abi.encodeCall(
                     INonfungiblePositionManager.decreaseLiquidity,
                     (
@@ -226,13 +225,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
         // Burn only on a full close.
         if (p.exitBps == 10_000) {
-            _safeExec(
-                p.onBehalfOf,
-                POSITION_MANAGER,
-                0,
-                abi.encodeCall(INonfungiblePositionManager.burn, (p.tokenId)),
-                9
-            );
+            _safeExec(p.onBehalfOf, POSITION_MANAGER, abi.encodeCall(INonfungiblePositionManager.burn, (p.tokenId)), 9);
         }
 
         // Swap the WETH this close produced back to USDC.
@@ -269,42 +262,27 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev Collect accrued fees through the manager so `feeCollectBps` can
     ///      be skimmed before forwarding the remainder to the Safe.
     function _collectLpFees(address _onBehalfOf, uint256 tokenId) internal {
-        (address token0, address token1, bytes memory lpPoolParam, ) = _position(tokenId);
-
-        uint256 bal0Before = IERC20(token0).balanceOf(address(this));
-        uint256 bal1Before = IERC20(token1).balanceOf(address(this));
+        uint256 wethBefore = WETH.balanceOf(address(this));
+        uint256 usdcBefore = USDC.balanceOf(address(this));
 
         _collectToRecipient(_onBehalfOf, tokenId, address(this), 6);
 
-        uint256 collected0 = IERC20(token0).balanceOf(address(this)) - bal0Before;
-        uint256 collected1 = IERC20(token1).balanceOf(address(this)) - bal1Before;
+        uint256 collectedWeth = WETH.balanceOf(address(this)) - wethBefore;
+        uint256 collectedUsdc = USDC.balanceOf(address(this)) - usdcBefore;
 
-        // Value WETH fees at the LP pool spot price; USDC needs no conversion.
-        uint128 currentValueUsd6;
-        if (collected0 > 0) {
-            uint160 sqrtPriceX96 = _validatePool(_getPool(lpPoolParam));
-            // Avoid overflow from materializing sqrtPriceX96 squared.
-            uint256 priceX96 = Math.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 1 << 96);
-            uint256 wethValueInUsdc = Math.mulDiv(collected0, priceX96, 1 << 96);
-            currentValueUsd6 = (wethValueInUsdc + collected1).toUint128();
-        } else {
-            currentValueUsd6 = collected1.toUint128();
-        }
-
-        uint256 fee0 = _chargeCollectFee(token0, collected0, _onBehalfOf, tokenId);
-        uint256 fee1 = _chargeCollectFee(token1, collected1, _onBehalfOf, tokenId);
+        uint256 wethFee = _chargeCollectFee(address(WETH), collectedWeth, _onBehalfOf, tokenId);
+        uint256 usdcFee = _chargeCollectFee(address(USDC), collectedUsdc, _onBehalfOf, tokenId);
 
         emit FeesCollected(
             _onBehalfOf,
             PROTOCOL,
             tokenId,
-            token0,
-            collected0,
-            fee0,
-            token1,
-            collected1,
-            fee1,
-            currentValueUsd6
+            address(WETH),
+            collectedWeth,
+            wethFee,
+            address(USDC),
+            collectedUsdc,
+            usdcFee
         );
     }
 
@@ -313,7 +291,6 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         _safeExec(
             _onBehalfOf,
             POSITION_MANAGER,
-            0,
             abi.encodeCall(
                 INonfungiblePositionManager.collect,
                 (
@@ -382,7 +359,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             deadline
         );
         _safeApprove(_onBehalfOf, tokenIn, SWAP_ROUTER, amountIn, approveStep);
-        _safeExec(_onBehalfOf, SWAP_ROUTER, 0, swapData, execStep);
+        _safeExec(_onBehalfOf, SWAP_ROUTER, swapData, execStep);
         _safeApprove(_onBehalfOf, tokenIn, SWAP_ROUTER, 0, resetStep);
     }
 
@@ -457,19 +434,18 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev Module-mediated ERC20 approve from the Safe. Raw `approve` is
     ///      fine for canonical WETH/USDC (no USDT-style two-step approvals).
     function _safeApprove(address _onBehalfOf, address token, address spender, uint256 amount, uint8 step) internal {
-        _safeExec(_onBehalfOf, token, 0, abi.encodeCall(IERC20.approve, (spender, amount)), step);
+        _safeExec(_onBehalfOf, token, abi.encodeCall(IERC20.approve, (spender, amount)), step);
     }
 
     /// @dev Module-mediated Safe call with inner-revert bubbling.
     function _safeExec(
         address _onBehalfOf,
         address target,
-        uint256 value,
         bytes memory data,
         uint8 step
     ) internal returns (bytes memory ret) {
         bool ok;
-        (ok, ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(target, value, data, ISafe.Operation.Call);
+        (ok, ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(target, 0, data, ISafe.Operation.Call);
         if (!ok) {
             if (ret.length > 0) Address.verifyCallResult(ok, ret);
             revert ModuleCallFailed(step);
@@ -494,7 +470,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             p.onBehalfOf,
             p.deadline
         );
-        bytes memory ret = _safeExec(p.onBehalfOf, POSITION_MANAGER, 0, mintCall, 4);
+        bytes memory ret = _safeExec(p.onBehalfOf, POSITION_MANAGER, mintCall, 4);
 
         uint256 amount0Out;
         uint256 amount1Out;

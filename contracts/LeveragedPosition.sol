@@ -49,11 +49,6 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         _;
     }
 
-    modifier onlyCriticalRole() {
-        require(registry.hasRole(CRITICAL_ROLE, msg.sender), "Caller does not have CRITICAL_ROLE");
-        _;
-    }
-
     modifier onlyTimelockCriticalRole() {
         if (msg.sender != registry.timelock()) revert OnlyTimelock();
         require(registry.hasRole(CRITICAL_ROLE, msg.sender), "Caller does not have CRITICAL_ROLE");
@@ -61,7 +56,6 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     }
 
     struct CreateCallbackData {
-        address flashloanPool;
         DebtProtocol protocol;
         address collateralAsset;
         address debtAsset;
@@ -73,7 +67,6 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
     }
 
     struct CloseCallbackData {
-        address flashloanPool;
         DebtProtocol protocol;
         address collateralAsset;
         address debtAsset;
@@ -208,7 +201,6 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         bytes memory data = abi.encode(
             OperationType.Create,
             CreateCallbackData({
-                flashloanPool: _flashloanPool,
                 protocol: _protocol,
                 collateralAsset: _collateralAsset,
                 debtAsset: _debtAsset,
@@ -269,7 +261,6 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
         bytes memory data = abi.encode(
             OperationType.Close,
             CloseCallbackData({
-                flashloanPool: _flashloanPool,
                 protocol: _protocol,
                 collateralAsset: _collateralAsset,
                 debtAsset: _debtAsset,

@@ -111,7 +111,6 @@ export function getCTokenMappingArrays(): [string[], string[]] {
 // https://docs.moonwell.fi/moonwell/protocol-information/contracts#token-contract-addresses
 export const mDAI = "0x73b06d8d18de422e269645eace15400de7462417";
 export const mUSDC = "0xedc817a28e8b93b03976fbd4a3ddbc9f7d176c22";
-export const mUSDbC = "0x703843C3379b52F9FF486c9f5892218d2a065cC8";
 export const mWETH = "0x628ff693426583D9a7FB391E54366292F509D457";
 export const mcbETH = "0x3bf93770f2d4a794c3d9ebefbaebae2a8f09a5e5";
 export const mwstETH = "0x627Fe393Bc6EdDA28e99AE648fD6fF362514304b";

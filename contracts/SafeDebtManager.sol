@@ -89,11 +89,6 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         _;
     }
 
-    modifier onlyCriticalRole() {
-        require(registry.hasRole(CRITICAL_ROLE, msg.sender), "Caller does not have CRITICAL_ROLE");
-        _;
-    }
-
     modifier onlyTimelockCriticalRole() {
         if (msg.sender != registry.timelock()) revert OnlyTimelock();
         require(registry.hasRole(CRITICAL_ROLE, msg.sender), "Caller does not have CRITICAL_ROLE");
