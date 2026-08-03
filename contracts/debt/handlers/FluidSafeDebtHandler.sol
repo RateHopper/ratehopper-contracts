@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
-import "../interfaces/safe/ISafe.sol";
-import "../Types.sol";
+import "../../interfaces/safe/ISafe.sol";
+import "../../common/Types.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "../interfaces/fluid/IFluidVault.sol";
-import "../interfaces/fluid/IFluidVaultResolver.sol";
-import "../interfaces/IDebtHandler.sol";
-import {Structs} from "../dependencies/fluid/structs.sol";
-import "../protocolsDebt/BaseDebtHandler.sol";
-import "../ProtocolRegistry.sol";
-import "../interfaces/IWETH9.sol";
+import "../../interfaces/fluid/IFluidVault.sol";
+import "../../interfaces/fluid/IFluidVaultResolver.sol";
+import "../../interfaces/IDebtHandler.sol";
+import {Structs} from "../../dependencies/fluid/structs.sol";
+import "./BaseDebtHandler.sol";
+import "../../common/ProtocolRegistry.sol";
+import "../../interfaces/IWETH9.sol";
 
 contract FluidSafeDebtHandler is BaseDebtHandler {
     using SafeERC20 for IERC20;

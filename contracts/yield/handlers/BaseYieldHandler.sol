@@ -7,11 +7,11 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-import {ISafe} from "../interfaces/safe/ISafe.sol";
-import {INonfungiblePositionManager} from "../interfaces/uniswapV3/INonfungiblePositionManager.sol";
-import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams} from "../interfaces/IYieldHandler.sol";
+import {ISafe} from "../../interfaces/safe/ISafe.sol";
+import {INonfungiblePositionManager} from "../../interfaces/uniswapV3/INonfungiblePositionManager.sol";
+import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams} from "../../interfaces/IYieldHandler.sol";
 import {YieldStorage} from "./YieldStorage.sol";
-import "../Types.sol";
+import "../../common/Types.sol";
 
 /// @dev Surface shared by Uniswap V3 pools and Aerodrome Slipstream CL pools.
 ///      `slot0` is NOT here — its return arity differs, so reading the sqrt

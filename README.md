@@ -39,7 +39,7 @@ The system consists of several key components:
 
 2. **SafeDebtManager.sol**: The main contract that orchestrates the debt switching process using flash loans.
 
-3. **Debt Handlers** (`contracts/protocolsDebt/`): Individual handlers for each supported lending protocol, all implementing `IDebtHandler` and extending `BaseDebtHandler.sol`:
+3. **Debt Handlers** (`contracts/debt/handlers/`): Individual handlers for each supported lending protocol, all implementing `IDebtHandler` and extending `BaseDebtHandler.sol`:
     - `AaveV3DebtHandler.sol`: Handles interactions with Aave V3 protocol
     - `CompoundDebtHandler.sol`: Handles interactions with Compound protocol
     - `MorphoDebtHandler.sol`: Handles interactions with Morpho protocol
@@ -59,7 +59,7 @@ The system consists of several key components:
 
     Caller passes per-call `swapAmountOutMin` and `deadline` (audit fixes C-01 / H-02). The constructor rejects any non-WETH/USDC token pair (M-08). Performance fee is charged on net profit (`currentValueUsd6 - basisUsd6`); fee-collect is charged on accrued fees only. All fee setters are gated by `CRITICAL_ROLE` on a TimelockController (H-04); `rescueToken` and similar emergency ops are gated by `DEFAULT_ADMIN_ROLE`.
 
-7. **SafeYieldManager.sol + Yield Handlers** (`contracts/protocolsYield/`): Adapter-pattern successor to (6). `SafeYieldManager` is the single Safe module users enable; it owns basis bookkeeping (`residualBasisUsd6Of`, keyed by `(uint8 protocolId, tokenId)`), the performance fee, pause / per-protocol disable switches, and the timelocked setter surface. Protocol ids are plain `uint8` (not a Solidity enum) end-to-end, so a NEW protocol registers on the deployed manager via `setYieldHandler(id, handler)` — followed by the pauser enabling open/close and the admin allow-listing pool params — with no redeploy; the `YIELD_PROTOCOL_*` constants in `Types.sol` just document the canonical id assignment (append-only). Protocol mechanics live in stateless handlers executed via delegatecall:
+7. **SafeYieldManager.sol + Yield Handlers** (`contracts/yield/`): Adapter-pattern successor to (6). `SafeYieldManager` is the single Safe module users enable; it owns basis bookkeeping (`residualBasisUsd6Of`, keyed by `(uint8 protocolId, tokenId)`), the performance fee, pause / per-protocol disable switches, and the timelocked setter surface. Protocol ids are plain `uint8` (not a Solidity enum) end-to-end, so a NEW protocol registers on the deployed manager via `setYieldHandler(id, handler)` — followed by the pauser enabling open/close and the admin allow-listing pool params — with no redeploy; the `YIELD_PROTOCOL_*` constants in `Types.sol` just document the canonical id assignment (append-only). Protocol mechanics live in stateless handlers executed via delegatecall:
     - `BaseYieldHandler.sol` — the shared `openLp`/`closeLp`/`collectLp` flow for V3-style CL protocols; protocol diffs are isolated in five virtual hooks (pool resolution, `slot0` read, swap calldata, mint calldata, `positions` decoding).
     - `UniV3YieldHandler.sol` / `AerodromeYieldHandler.sol` — concrete adapters holding protocol immutables.
     - Shared mutable state lives in an ERC-7201 namespace (`YieldStorage`, `ratehopper.storage.yield`), so handler delegatecode can never collide with the manager's inherited storage. Handlers MUST NOT declare storage variables.

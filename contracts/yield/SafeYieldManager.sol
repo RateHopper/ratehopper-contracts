@@ -10,11 +10,11 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-import {ISafe} from "./interfaces/safe/ISafe.sol";
-import {IProtocolRegistry} from "./interfaces/IProtocolRegistry.sol";
-import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams} from "./interfaces/IYieldHandler.sol";
-import {YieldStorage} from "./protocolsYield/YieldStorage.sol";
-import "./Types.sol";
+import {ISafe} from "../interfaces/safe/ISafe.sol";
+import {IProtocolRegistry} from "../interfaces/IProtocolRegistry.sol";
+import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams} from "../interfaces/IYieldHandler.sol";
+import {YieldStorage} from "./handlers/YieldStorage.sol";
+import "../common/Types.sol";
 
 /// @title SafeYieldManager
 /// @notice Single Safe-module entry point for all yield (LP) protocols —

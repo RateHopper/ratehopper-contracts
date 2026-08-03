@@ -22,12 +22,12 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 - **Types.sol**: Shared type definitions (`DebtProtocol` enum, `YIELD_PROTOCOL_*` uint8 id constants)
 - **RatehopperUniV3Positions.sol**: Legacy standalone yield module, deployed and serving existing positions; superseded by SafeYieldManager for new positions (coexistence — do not modify)
 
-### Protocol Handlers (`contracts/protocolsDebt/`)
+### Protocol Handlers (`contracts/debt/handlers/`)
 
 - **AaveV3DebtHandler.sol**, **CompoundDebtHandler.sol**, **MoonwellDebtHandler.sol**, **FluidSafeDebtHandler.sol**
 - Each implements: `getDebtAmount`, `switchIn`, `switchFrom`, `switchTo`, `repay`
 
-### Yield Handlers (`contracts/protocolsYield/`)
+### Yield Handlers (`contracts/yield/handlers/`)
 
 - **UniV3YieldHandler.sol**, **AerodromeYieldHandler.sol** extend **BaseYieldHandler.sol** (shared LP flow, protocol diffs in 5 virtual hooks)
 - Stateless delegatecall targets: MUST NOT declare storage variables; mutable state only via `YieldStorage._yieldStorage()`

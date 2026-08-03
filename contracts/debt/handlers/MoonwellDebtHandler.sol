@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
-import "../interfaces/safe/ISafe.sol";
-import "../interfaces/moonwell/IMToken.sol";
-import {IComptroller, IMoonwellOracle} from "../interfaces/moonwell/Comptroller.sol";
+import "../../interfaces/safe/ISafe.sol";
+import "../../interfaces/moonwell/IMToken.sol";
+import {IComptroller, IMoonwellOracle} from "../../interfaces/moonwell/Comptroller.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "../Types.sol";
+import "../../common/Types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "../protocolsDebt/BaseDebtHandler.sol";
-import "../interfaces/IWETH9.sol";
+import "./BaseDebtHandler.sol";
+import "../../interfaces/IWETH9.sol";
 
 contract MoonwellDebtHandler is BaseDebtHandler {
     using SafeERC20 for IERC20;

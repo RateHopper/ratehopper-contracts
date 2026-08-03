@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
-import "../Types.sol";
+import "../../common/Types.sol";
 
 /// @title YieldStorage
 /// @notice ERC-7201 namespaced storage shared by SafeYieldManager and its

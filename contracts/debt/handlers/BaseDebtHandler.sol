@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
-import "../interfaces/IDebtHandler.sol";
-import {PoolAddress} from "../dependencies/uniswapV3/PoolAddress.sol";
-import "../dependencies/uniswapV3/CallbackValidation.sol";
+import "../../interfaces/IDebtHandler.sol";
+import {PoolAddress} from "../../dependencies/uniswapV3/PoolAddress.sol";
+import "../../dependencies/uniswapV3/CallbackValidation.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import "../ProtocolRegistry.sol";
+import "../../common/ProtocolRegistry.sol";
 
 /**
  * @title BaseDebtHandler

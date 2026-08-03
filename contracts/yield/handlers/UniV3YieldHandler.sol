@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IUniswapV3Factory} from "../interfaces/uniswapV3/IUniswapV3Factory.sol";
+import {IUniswapV3Factory} from "../../interfaces/uniswapV3/IUniswapV3Factory.sol";
 import {V3StyleYieldHandler} from "./V3StyleYieldHandler.sol";
-import "../Types.sol";
+import "../../common/Types.sol";
 
 /// @title UniV3YieldHandler
 /// @notice Uniswap V3 adapter for SafeYieldManager. Pool params are

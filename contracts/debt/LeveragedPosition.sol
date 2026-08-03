@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
-import "./dependencies/uniswapV3/CallbackValidation.sol";
-import {PoolAddress} from "./dependencies/uniswapV3/PoolAddress.sol";
+import "../dependencies/uniswapV3/CallbackValidation.sol";
+import {PoolAddress} from "../dependencies/uniswapV3/PoolAddress.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {IDebtHandler} from "./interfaces/IDebtHandler.sol";
+import {IDebtHandler} from "../interfaces/IDebtHandler.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
-import "./Types.sol";
-import "./interfaces/safe/ISafe.sol";
-import "./ProtocolRegistry.sol";
+import "../common/Types.sol";
+import "../interfaces/safe/ISafe.sol";
+import "../common/ProtocolRegistry.sol";
 
 /// @title LeveragedPosition
 /// @notice Creates and manages leveraged positions on DeFi lending protocols

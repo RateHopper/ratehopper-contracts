@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IUniswapV3Factory} from "../interfaces/uniswapV3/IUniswapV3Factory.sol";
-import {V3StyleYieldHandler} from "../protocolsYield/V3StyleYieldHandler.sol";
+import {V3StyleYieldHandler} from "../yield/handlers/V3StyleYieldHandler.sol";
 
 /// @dev Test-only "future protocol" handler: V3-shaped mechanics with the
 ///      protocol id supplied at construction, proving SafeYieldManager

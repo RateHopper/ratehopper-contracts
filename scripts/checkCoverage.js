@@ -17,7 +17,7 @@ const COVERAGE_FILE = path.join(__dirname, "..", "coverage.json");
 const THRESHOLD = 95;
 
 // Production contracts subject to the gate (suffix match on the coverage key).
-const GATED = ["contracts/RatehopperUniV3Positions.sol"];
+const GATED = ["contracts/legacy/RatehopperUniV3Positions.sol"];
 
 function isGated(key) {
     const k = key.replace(/\\/g, "/");

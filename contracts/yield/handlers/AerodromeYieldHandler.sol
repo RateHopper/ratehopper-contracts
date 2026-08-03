@@ -2,41 +2,38 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {INonfungiblePositionManager} from "../interfaces/uniswapV3/INonfungiblePositionManager.sol";
-import {IUniswapV3Factory} from "../interfaces/uniswapV3/IUniswapV3Factory.sol";
-import {IUniswapV3Pool} from "../interfaces/uniswapV3/IUniswapV3Pool.sol";
-import {IV3SwapRouter} from "../interfaces/uniswapV3/IV3SwapRouter.sol";
+import {ISlipstreamNonfungiblePositionManager} from "../../interfaces/aerodrome/ISlipstreamNonfungiblePositionManager.sol";
+import {ICLFactory} from "../../interfaces/aerodrome/ICLFactory.sol";
+import {ICLPool} from "../../interfaces/aerodrome/ICLPool.sol";
+import {ISlipstreamSwapRouter} from "../../interfaces/aerodrome/ISlipstreamSwapRouter.sol";
 import {BaseYieldHandler} from "./BaseYieldHandler.sol";
+import "../../common/Types.sol";
 
-/// @title V3StyleYieldHandler
-/// @notice BaseYieldHandler hooks implemented against the canonical Uniswap
-///         V3 interfaces (factory getPool by `uint24 feeTier`, 7-field
-///         `slot0`, SwapRouter02 `exactInputSingle` without a deadline).
-///         The protocol id is a constructor argument so production handlers
-///         pin a canonical id while tests can register V3-shaped handlers
-///         under new ids without duplicating the hook bodies.
-abstract contract V3StyleYieldHandler is BaseYieldHandler {
-    IUniswapV3Factory public immutable FACTORY;
+/// @title AerodromeYieldHandler
+/// @notice Aerodrome Slipstream adapter for SafeYieldManager. Pool params
+///         are `abi.encode(int24 tickSpacing)`. Stateless — executed via
+///         delegatecall from the manager.
+contract AerodromeYieldHandler is BaseYieldHandler {
+    ICLFactory public immutable CL_FACTORY;
 
     constructor(
-        uint8 _protocol,
         address _positionManager,
         IERC20 _usdc,
         IERC20 _weth,
         address _swapRouter,
-        IUniswapV3Factory _factory
-    ) BaseYieldHandler(_protocol, _positionManager, _usdc, _weth, _swapRouter) {
-        if (address(_factory) == address(0)) revert ZeroAddress();
-        FACTORY = _factory;
+        ICLFactory _clFactory
+    ) BaseYieldHandler(YIELD_PROTOCOL_AERODROME, _positionManager, _usdc, _weth, _swapRouter) {
+        if (address(_clFactory) == address(0)) revert ZeroAddress();
+        CL_FACTORY = _clFactory;
     }
 
     function _getPool(bytes memory poolParam) internal view override returns (address) {
-        uint24 feeTier = abi.decode(poolParam, (uint24));
-        return FACTORY.getPool(address(WETH), address(USDC), feeTier);
+        int24 tickSpacing = abi.decode(poolParam, (int24));
+        return CL_FACTORY.getPool(address(WETH), address(USDC), tickSpacing);
     }
 
     function _poolSqrtPriceX96(address pool) internal view override returns (uint160 sqrtPriceX96) {
-        (sqrtPriceX96, , , , , , ) = IUniswapV3Pool(pool).slot0();
+        (sqrtPriceX96, , , , , ) = ICLPool(pool).slot0();
     }
 
     function _buildSwapCalldata(
@@ -46,18 +43,19 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
         address recipient,
         uint256 amountIn,
         uint256 amountOutMin,
-        uint256 /* deadline — SwapRouter02 has no deadline field */
+        uint256 deadline
     ) internal pure override returns (bytes memory) {
-        uint24 feeTier = abi.decode(poolParam, (uint24));
+        int24 tickSpacing = abi.decode(poolParam, (int24));
         return
             abi.encodeCall(
-                IV3SwapRouter.exactInputSingle,
+                ISlipstreamSwapRouter.exactInputSingle,
                 (
-                    IV3SwapRouter.ExactInputSingleParams({
+                    ISlipstreamSwapRouter.ExactInputSingleParams({
                         tokenIn: tokenIn,
                         tokenOut: tokenOut,
-                        fee: feeTier,
+                        tickSpacing: tickSpacing,
                         recipient: recipient,
+                        deadline: deadline,
                         amountIn: amountIn,
                         amountOutMinimum: amountOutMin,
                         sqrtPriceLimitX96: 0
@@ -77,15 +75,15 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
         address recipient,
         uint256 deadline
     ) internal view override returns (bytes memory) {
-        uint24 feeTier = abi.decode(lpPoolParam, (uint24));
+        int24 tickSpacing = abi.decode(lpPoolParam, (int24));
         return
             abi.encodeCall(
-                INonfungiblePositionManager.mint,
+                ISlipstreamNonfungiblePositionManager.mint,
                 (
-                    INonfungiblePositionManager.MintParams({
+                    ISlipstreamNonfungiblePositionManager.MintParams({
                         token0: address(WETH),
                         token1: address(USDC),
-                        fee: feeTier,
+                        tickSpacing: tickSpacing,
                         tickLower: tickLower,
                         tickUpper: tickUpper,
                         amount0Desired: wethDesired,
@@ -93,7 +91,8 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
                         amount0Min: amount0Min,
                         amount1Min: amount1Min,
                         recipient: recipient,
-                        deadline: deadline
+                        deadline: deadline,
+                        sqrtPriceX96: 0
                     })
                 )
             );
@@ -102,10 +101,10 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
     function _position(
         uint256 tokenId
     ) internal view override returns (address token0, address token1, bytes memory lpPoolParam, uint128 liquidity) {
-        uint24 feeTier;
-        (, , token0, token1, feeTier, , , liquidity, , , , ) = INonfungiblePositionManager(POSITION_MANAGER).positions(
-            tokenId
-        );
-        lpPoolParam = abi.encode(feeTier);
+        int24 tickSpacing;
+        (, , token0, token1, tickSpacing, , , liquidity, , , , ) = ISlipstreamNonfungiblePositionManager(
+            POSITION_MANAGER
+        ).positions(tokenId);
+        lpPoolParam = abi.encode(tickSpacing);
     }
 }

@@ -19,7 +19,9 @@ export const protocolHelperMap = new Map<DebtProtocols, any>([
     [DebtProtocols.MOONWELL, MoonwellHelper],
 ]);
 
-export const defaultProvider = new ethers.JsonRpcProvider(process.env.BASE_RPC_URL || "https://mainnet.base.org");
+// Read through Hardhat's fork provider so repeated integration-test calls share
+// its pinned state and cache instead of hammering the upstream RPC directly.
+export const defaultProvider = ethers.provider;
 
 export async function approve(tokenAddress: string, spenderAddress: string, signer: any) {
     const token = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
@@ -29,9 +31,7 @@ export async function approve(tokenAddress: string, spenderAddress: string, sign
 }
 
 export async function getDecimals(tokenAddress: string): Promise<number> {
-    const provider = new ethers.JsonRpcProvider(process.env.BASE_RPC_URL || "https://mainnet.base.org");
-
-    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, ethers.provider);
     return await tokenContract.decimals();
 }
 
@@ -78,27 +78,44 @@ export async function getParaswapData(
         version: 6.2,
     };
 
-    try {
-        const response = await axios.get(url, { params });
-        if (!response?.data?.txParams || !response?.data?.priceRoute) {
-            throw new Error("Invalid response from ParaSwap API");
+    let lastError: unknown;
+    // ParaSwap occasionally returns a transient 5xx or cannot build a route
+    // with the preferred exclusions. Retry first, then allow Uniswap V2 while
+    // continuing to exclude Uniswap V3 (the flash-loan callback conflict).
+    const exclusions = [params.excludeDEXS, "UniswapV3,BalancerV3"];
+    for (const excludeDEXS of exclusions) {
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                const response = await axios.get(url, {
+                    params: { ...params, excludeDEXS },
+                    timeout: 30_000,
+                });
+                if (!response?.data?.txParams || !response?.data?.priceRoute) {
+                    throw new Error("Invalid response from ParaSwap API");
+                }
+
+                console.log("selected dex:", response.data.priceRoute.bestRoute[0].swaps[0].swapExchanges[0].exchange);
+
+                // add 2% slippage(must be set by user)
+                const amountPlusSlippage = (BigInt(response.data.priceRoute.srcAmount) * 1020n) / 1000n;
+
+                console.log("amountPlusSlippage:", amountPlusSlippage);
+
+                return {
+                    srcAmount: amountPlusSlippage,
+                    swapData: response.data.txParams.data,
+                };
+            } catch (error) {
+                lastError = error;
+                if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+            }
         }
-
-        console.log("selected dex:", response.data.priceRoute.bestRoute[0].swaps[0].swapExchanges[0].exchange);
-
-        // add 2% slippage(must be set by user)
-        const amountPlusSlippage = (BigInt(response.data.priceRoute.srcAmount) * 1020n) / 1000n;
-
-        console.log("amountPlusSlippage:", amountPlusSlippage);
-
-        return {
-            srcAmount: amountPlusSlippage,
-            swapData: response.data.txParams.data,
-        };
-    } catch (error) {
-        console.error("Error fetching data from ParaSwap API:", error);
-        throw new Error("Failed to fetch ParaSwap data");
     }
+
+    const detail = axios.isAxiosError(lastError)
+        ? `HTTP ${lastError.response?.status ?? "network error"}: ${JSON.stringify(lastError.response?.data ?? {})}`
+        : String(lastError);
+    throw new Error(`Failed to fetch ParaSwap data after retries (${detail})`);
 }
 
 export async function fundETH(receiverAddress: string) {

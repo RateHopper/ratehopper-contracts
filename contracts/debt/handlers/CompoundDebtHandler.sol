@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
-import {IComet, AssetInfo} from "../interfaces/compound/IComet.sol";
+import {IComet, AssetInfo} from "../../interfaces/compound/IComet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {CollateralAsset} from "../Types.sol";
+import {CollateralAsset} from "../../common/Types.sol";
 import "./BaseDebtHandler.sol";
 
 contract CompoundDebtHandler is BaseDebtHandler {

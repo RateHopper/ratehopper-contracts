@@ -2,15 +2,15 @@
 pragma solidity ^0.8.28;
 
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IPoolV3} from "../interfaces/aaveV3/IPoolV3.sol";
+import {IPoolV3} from "../../interfaces/aaveV3/IPoolV3.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {DataTypes} from "../interfaces/aaveV3/DataTypes.sol";
-import {IAaveProtocolDataProvider} from "../interfaces/aaveV3/IAaveProtocolDataProvider.sol";
-import {IAaveOracle} from "../interfaces/aaveV3/IAaveOracle.sol";
-import {IPoolAddressesProvider} from "../interfaces/aaveV3/IPoolAddressesProvider.sol";
+import {DataTypes} from "../../interfaces/aaveV3/DataTypes.sol";
+import {IAaveProtocolDataProvider} from "../../interfaces/aaveV3/IAaveProtocolDataProvider.sol";
+import {IAaveOracle} from "../../interfaces/aaveV3/IAaveOracle.sol";
+import {IPoolAddressesProvider} from "../../interfaces/aaveV3/IPoolAddressesProvider.sol";
 import "./BaseDebtHandler.sol";
-import "../ProtocolRegistry.sol";
+import "../../common/ProtocolRegistry.sol";
 
 contract AaveV3DebtHandler is BaseDebtHandler {
     using SafeERC20 for IERC20;

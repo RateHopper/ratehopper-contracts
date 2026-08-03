@@ -9,12 +9,12 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-import {INonfungiblePositionManager} from "./interfaces/uniswapV3/INonfungiblePositionManager.sol";
-import {IUniswapV3Factory} from "./interfaces/uniswapV3/IUniswapV3Factory.sol";
-import {IUniswapV3Pool} from "./interfaces/uniswapV3/IUniswapV3Pool.sol";
-import {ISafe} from "./interfaces/safe/ISafe.sol";
+import {INonfungiblePositionManager} from "../interfaces/uniswapV3/INonfungiblePositionManager.sol";
+import {IUniswapV3Factory} from "../interfaces/uniswapV3/IUniswapV3Factory.sol";
+import {IUniswapV3Pool} from "../interfaces/uniswapV3/IUniswapV3Pool.sol";
+import {ISafe} from "../interfaces/safe/ISafe.sol";
 
-import {IProtocolRegistry} from "./interfaces/IProtocolRegistry.sol";
+import {IProtocolRegistry} from "../interfaces/IProtocolRegistry.sol";
 
 /// @title RatehopperUniV3Positions
 /// @notice Atomic Uniswap V3 WETH/USDC LP lifecycle helper for Gnosis Safes:

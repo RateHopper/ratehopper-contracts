@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
-import "../Types.sol";
+import "../common/Types.sol";
 
 interface IDebtHandler {
     function getDebtAmount(address asset, address onBehalfOf, bytes calldata extraData) external returns (uint256);

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "../interfaces/IDebtHandler.sol";
-import "../Types.sol";
+import "../common/Types.sol";
 
 /**
  * @title MaliciousUniswapV3Pool
