@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISlipstreamNonfungiblePositionManager} from "../interfaces/aerodrome/ISlipstreamNonfungiblePositionManager.sol";
 
 // ─────────────────────────────────────────────────────────────────────────
-//  Slipstream (Aerodrome CL) mocks for RatehopperAerodromePositions tests.
+//  Slipstream (Aerodrome CL) mocks for the SafeYieldManager / AerodromeYieldHandler tests.
 //
 //  These mirror the Uniswap mocks in RatehopperMocks.sol but carry the three
 //  load-bearing Slipstream deltas so the helper's tickSpacing-keyed flow and

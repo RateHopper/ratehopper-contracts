@@ -4,7 +4,6 @@ const path = require("path");
 const contracts = [
     "LeveragedPosition",
     "RatehopperUniV3Positions",
-    "RatehopperAerodromePositions",
     "SafeDebtManager",
     "SafeExecTransactionWrapper",
     "SafeYieldManager",

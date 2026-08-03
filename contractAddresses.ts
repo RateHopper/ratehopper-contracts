@@ -27,7 +27,7 @@ export const UNISWAP_V3_NPM_ADDRESS = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f
 export const UNISWAP_V3_SWAP_ROUTER_ADDRESS = "0x2626664c2603336E57B271c5C0b26F421741e481";
 
 // Aerodrome Slipstream (CL) — the concentrated-liquidity product (NOT the V2
-// AMM `IRouter`). Used by RatehopperAerodromePositions for unstaked WETH/USDC
+// AMM `IRouter`). Used by AerodromeYieldHandler for unstaked WETH/USDC
 // LPs. The canonical contracts and live WETH/USDC spacing-100 pool are also
 // exercised by test/safeYieldManagerAerodromeFork.ts on a pinned Base fork.
 export const AERODROME_CL_FACTORY_ADDRESS = "0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A";

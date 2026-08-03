@@ -28,9 +28,9 @@ import "./Types.sol";
 ///         in the ERC-7201 `YieldStorage` namespace so handler delegatecode
 ///         can never collide with this contract's inherited storage.
 ///         Coexists with the previously deployed standalone
-///         RatehopperUniV3Positions / RatehopperAerodromePositions
-///         contracts: positions opened there have no basis recorded here and
-///         are rejected with `UnknownPosition` (and vice versa).
+///         RatehopperUniV3Positions contract: positions opened there have no
+///         basis recorded here and are rejected with `UnknownPosition` (and
+///         vice versa).
 contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStorage {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;

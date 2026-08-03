@@ -103,6 +103,11 @@
     },
     {
         "inputs": [],
+        "name": "FailedCall",
+        "type": "error"
+    },
+    {
+        "inputs": [],
         "name": "FeeAboveMax",
         "type": "error"
     },

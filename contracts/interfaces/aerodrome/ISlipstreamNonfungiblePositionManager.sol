@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 // Minimal vendored interface for Aerodrome Slipstream's Nonfungible Position
-// Manager. Only the surface RatehopperAerodromePositions calls is declared.
+// Manager. Only the surface AerodromeYieldHandler calls is declared.
 //
 // Load-bearing differences from Uniswap V3's INonfungiblePositionManager:
 //   - `MintParams` carries `int24 tickSpacing` instead of `uint24 fee`, plus a
