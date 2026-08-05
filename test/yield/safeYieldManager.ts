@@ -1030,7 +1030,9 @@ describe("SafeYieldManager", function () {
             await (await uniNpm.setMintLiquidity(1)).wait();
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
             await expect(
-                manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER, { exitBps: 5_000 })),
+                manager
+                    .connect(operatorEOA)
+                    .closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER, { exitBps: 5_000 })),
             ).to.be.revertedWithCustomError(manager, "InvalidExitBps");
         });
 
@@ -1049,10 +1051,12 @@ describe("SafeYieldManager", function () {
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
             await (await uniRouter.setOutput(300_000n)).wait();
 
-            const tx = manager.connect(operatorEOA).closeLp(
-                UNISWAP_V3,
-                closeParams(safeAddr, 1, FEE_TIER, { swapAmountOutMin: 300_000n, expectedSwapOut: 300_000n }),
-            );
+            const tx = manager
+                .connect(operatorEOA)
+                .closeLp(
+                    UNISWAP_V3,
+                    closeParams(safeAddr, 1, FEE_TIER, { swapAmountOutMin: 300_000n, expectedSwapOut: 300_000n }),
+                );
             await expect(tx)
                 .to.emit(manager, "PositionClosed")
                 .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 800_000n, 0n, 10_000);
@@ -1190,20 +1194,21 @@ describe("SafeYieldManager", function () {
             await (
                 await uniRouter.setCallback(
                     managerAddr,
-                    manager.interface.encodeFunctionData("collectLp", [UNISWAP_V3, collectParams(safeAddr, 1, FEE_TIER)]),
+                    manager.interface.encodeFunctionData("collectLp", [
+                        UNISWAP_V3,
+                        collectParams(safeAddr, 1, FEE_TIER),
+                    ]),
                 )
             ).wait();
             await expect(
-                manager
-                    .connect(operatorEOA)
-                    .collectLp(
-                        UNISWAP_V3,
-                        collectParams(safeAddr, 1, FEE_TIER, {
-                            swapWethToUsdc: true,
-                            swapAmountOutMin: 95_000n,
-                            expectedSwapOut: 95_000n,
-                        }),
-                    ),
+                manager.connect(operatorEOA).collectLp(
+                    UNISWAP_V3,
+                    collectParams(safeAddr, 1, FEE_TIER, {
+                        swapWethToUsdc: true,
+                        swapAmountOutMin: 95_000n,
+                        expectedSwapOut: 95_000n,
+                    }),
+                ),
             ).to.be.revertedWithCustomError(manager, "ReentrancyGuardReentrantCall");
         });
 
@@ -1379,6 +1384,375 @@ describe("SafeYieldManager", function () {
         it("unpause rejects non-pausers", async function () {
             const { manager, stranger } = await loadFixture(deployYieldManagerHarness);
             await expect(manager.connect(stranger).unpause()).to.be.revertedWithCustomError(manager, "NotAuthorized");
+        });
+    });
+
+    describe("switchLp", function () {
+        function switchParams(
+            safeAddr: string,
+            tokenId: bigint | number,
+            closeSwapPoolParam: string,
+            openPoolParam: string,
+            overrides: Record<string, any> = {},
+        ) {
+            return {
+                onBehalfOf: safeAddr,
+                tokenId,
+                closeSwapAmountOutMin: 600_000n,
+                closeExpectedSwapOut: 600_000n,
+                closeSlippageBps: SLIP,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                minUsdcOut: 0,
+                closeSwapPoolParam,
+                tickLower: -100,
+                tickUpper: 100,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                openSwapAmountOutMin: WETH_OUT,
+                openExpectedSwapOut: WETH_OUT,
+                openSlippageBps: SLIP,
+                lpPoolParam: openPoolParam,
+                openSwapPoolParam: openPoolParam,
+                deadline: DEADLINE,
+                ...overrides,
+            };
+        }
+
+        it("moves a position across protocols carrying the original basis without fee", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, usdc, uniNpm, clNpm, uniRouter, aeroHandler } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(600_000n)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING)),
+            )
+                .to.emit(manager, "PositionSwitched")
+                .withArgs(safeAddr, UNISWAP_V3, AERODROME, 1n, 1n, USDC_AMOUNT, 1_100_000n, 1_100_000n, USDC_AMOUNT, 0);
+
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(0);
+            expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.equal(ZERO);
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(USDC_AMOUNT);
+            expect(await manager.positionHandlerOf(AERODROME, 1)).to.equal(await aeroHandler.getAddress());
+            expect(await uniNpm.ownerOf(1)).to.equal(ZERO);
+            expect(await clNpm.ownerOf(1)).to.equal(safeAddr);
+            expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+        });
+
+        it("settles the performance fee against the original basis at the real exit", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, usdc, uniRouter, clRouter } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(600_000n)).wait();
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING))
+            ).wait();
+
+            await (await clRouter.setOutput(600_000n)).wait();
+            await expect(
+                manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, {
+                        swapAmountOutMin: 600_000n,
+                        expectedSwapOut: 600_000n,
+                    }),
+                ),
+            )
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_150_000n, 15_000n, 10_000);
+            expect(await usdc.balanceOf(treasury.address)).to.equal(15_000n);
+        });
+
+        it("supports switching pool params within the same protocol", async function () {
+            const { manager, deployer, operatorEOA, safeAddr, uniNpm, uniRouter } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, BAD_FEE_TIER, true)).wait();
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(600_000n)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, UNISWAP_V3, switchParams(safeAddr, 1, FEE_TIER, BAD_FEE_TIER)),
+            )
+                .to.emit(manager, "PositionSwitched")
+                .withArgs(
+                    safeAddr,
+                    UNISWAP_V3,
+                    UNISWAP_V3,
+                    1n,
+                    2n,
+                    USDC_AMOUNT,
+                    1_100_000n,
+                    1_100_000n,
+                    USDC_AMOUNT,
+                    0,
+                );
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 2)).to.equal(USDC_AMOUNT);
+            expect(await uniNpm.ownerOf(2)).to.equal(safeAddr);
+        });
+
+        it("moves a position from Aerodrome back to Uniswap V3", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clRouter, uniNpm, uniHandler } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING))).wait();
+            await (await clRouter.setOutput(600_000n)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(AERODROME, UNISWAP_V3, switchParams(safeAddr, 1, TICK_SPACING, FEE_TIER)),
+            ).to.emit(manager, "PositionSwitched");
+
+            expect(await clNpm.ownerOf(1)).to.equal(ZERO);
+            expect(await uniNpm.ownerOf(1)).to.equal(safeAddr);
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(0);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(USDC_AMOUNT);
+            expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.equal(await uniHandler.getAddress());
+        });
+
+        it("rolls the close leg and bookkeeping back when the replacement open fails", async function () {
+            const { manager, operatorEOA, stranger, safeAddr, uniNpm, uniRouter, clNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(600_000n)).wait();
+            await (await clNpm.setMintOwnerOverride(stranger.address)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING)),
+            ).to.be.revertedWithCustomError(manager, "LpNotOnSafe");
+
+            expect(await uniNpm.ownerOf(1)).to.equal(safeAddr);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(USDC_AMOUNT);
+            expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.not.equal(ZERO);
+            expect(await clNpm.nextId()).to.equal(1);
+        });
+
+        it("deducts undeployed value from the basis carried to the replacement LP", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, usdc, uniRouter, clNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(600_000n)).wait();
+            await (await clNpm.setMintUsageBps(5_000)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING)),
+            )
+                .to.emit(manager, "PositionSwitched")
+                .withArgs(safeAddr, UNISWAP_V3, AERODROME, 1n, 1n, USDC_AMOUNT, 1_100_000n, 550_000n, 450_000n, 0);
+
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(450_000n);
+            expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+        });
+
+        it("charges the fee on undeployed value that exceeds the old basis", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, usdc, uniRouter, clNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(1_500_000n)).wait();
+            await (await clNpm.setMintUsageBps(2_500)).wait();
+
+            await expect(
+                manager.connect(operatorEOA).switchLp(
+                    UNISWAP_V3,
+                    AERODROME,
+                    switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING, {
+                        closeSwapAmountOutMin: 1_500_000n,
+                        closeExpectedSwapOut: 1_500_000n,
+                    }),
+                ),
+            )
+                .to.emit(manager, "PositionSwitched")
+                .withArgs(safeAddr, UNISWAP_V3, AERODROME, 1n, 1n, USDC_AMOUNT, 2_000_000n, 500_000n, 0, 50_000n);
+
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(0);
+            expect(await manager.positionHandlerOf(AERODROME, 1)).to.not.equal(ZERO);
+            expect(await usdc.balanceOf(treasury.address)).to.equal(50_000n);
+        });
+
+        it("keeps a zero-basis replacement position managed through its pinned handler", async function () {
+            const { manager, operatorEOA, safeAddr, uniRouter, clRouter, clNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(1_500_000n)).wait();
+            await (await clNpm.setMintUsageBps(2_500)).wait();
+            await (
+                await manager.connect(operatorEOA).switchLp(
+                    UNISWAP_V3,
+                    AERODROME,
+                    switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING, {
+                        closeSwapAmountOutMin: 1_500_000n,
+                        closeExpectedSwapOut: 1_500_000n,
+                    }),
+                )
+            ).wait();
+
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(0);
+            await (await clRouter.setOutput(600_000n)).wait();
+            await expect(
+                manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, {
+                        swapAmountOutMin: 600_000n,
+                        expectedSwapOut: 600_000n,
+                    }),
+                ),
+            ).to.emit(manager, "PositionClosed");
+            expect(await manager.positionHandlerOf(AERODROME, 1)).to.equal(ZERO);
+        });
+
+        it("waives a switch-time performance fee when its transfer fails", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, usdc, uniRouter, clNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(1_500_000n)).wait();
+            await (await clNpm.setMintUsageBps(2_500)).wait();
+            await (await usdc.setFalseTransferTo(treasury.address)).wait();
+
+            const tx = manager.connect(operatorEOA).switchLp(
+                UNISWAP_V3,
+                AERODROME,
+                switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING, {
+                    closeSwapAmountOutMin: 1_500_000n,
+                    closeExpectedSwapOut: 1_500_000n,
+                }),
+            );
+            await expect(tx).to.emit(manager, "FeeTransferFailed").withArgs(safeAddr, 1n, 50_000n);
+            await expect(tx)
+                .to.emit(manager, "PositionSwitched")
+                .withArgs(safeAddr, UNISWAP_V3, AERODROME, 1n, 1n, USDC_AMOUNT, 2_000_000n, 500_000n, 0, 0);
+            expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+        });
+
+        it("skips the switch-time transfer when the performance fee is zero", async function () {
+            const { manager, deployer, operatorEOA, safeAddr, treasury, usdc, uniRouter, clNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(deployer).setPerformanceFeeBps(0)).wait();
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(1_500_000n)).wait();
+            await (await clNpm.setMintUsageBps(2_500)).wait();
+
+            const tx = manager.connect(operatorEOA).switchLp(
+                UNISWAP_V3,
+                AERODROME,
+                switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING, {
+                    closeSwapAmountOutMin: 1_500_000n,
+                    closeExpectedSwapOut: 1_500_000n,
+                }),
+            );
+            await expect(tx).to.not.emit(manager, "FeeTransferFailed");
+            await expect(tx)
+                .to.emit(manager, "PositionSwitched")
+                .withArgs(safeAddr, UNISWAP_V3, AERODROME, 1n, 1n, USDC_AMOUNT, 2_000_000n, 500_000n, 0, 0);
+            expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+        });
+
+        it("enforces gating: pause, per-protocol switches, and missing handlers", async function () {
+            const { manager, operatorEOA, pauser, safeAddr } = await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            const params = switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING);
+            const call = () => manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, params);
+
+            await (await manager.connect(pauser).pause()).wait();
+            await expect(call()).to.be.revertedWithCustomError(manager, "EnforcedPause");
+            await (await manager.connect(pauser).unpause()).wait();
+
+            await (await manager.connect(pauser).setProtocolEnabledForClose(UNISWAP_V3, false)).wait();
+            await expect(call()).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
+            await (await manager.connect(pauser).setProtocolEnabledForClose(UNISWAP_V3, true)).wait();
+
+            await (await manager.connect(pauser).setProtocolEnabledForOpen(AERODROME, false)).wait();
+            await expect(call()).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
+            await (await manager.connect(pauser).setProtocolEnabledForOpen(AERODROME, true)).wait();
+
+            await expect(manager.connect(operatorEOA).switchLp(UNISWAP_V3, 200, params)).to.be.revertedWithCustomError(
+                manager,
+                "HandlerNotSet",
+            );
+        });
+
+        it("rejects unauthorized callers, expired deadlines, and unknown positions", async function () {
+            const { manager, operatorEOA, stranger, safeAddr } = await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+
+            await expect(
+                manager
+                    .connect(stranger)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING)),
+            ).to.be.revertedWithCustomError(manager, "NotAuthorized");
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(
+                        UNISWAP_V3,
+                        AERODROME,
+                        switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING, { deadline: 1 }),
+                    ),
+            ).to.be.revertedWithCustomError(manager, "DeadlineExpired");
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 99, FEE_TIER, TICK_SPACING)),
+            ).to.be.revertedWithCustomError(manager, "UnknownPosition");
+        });
+
+        it("enforces the caller's minUsdcOut on the close leg", async function () {
+            const { manager, operatorEOA, safeAddr, uniRouter } = await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(600_000n)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(
+                        UNISWAP_V3,
+                        AERODROME,
+                        switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING, { minUsdcOut: 2_000_000n }),
+                    ),
+            ).to.be.revertedWithCustomError(manager, "MinUsdcOutNotMet");
+        });
+
+        it("rejects a switch that realizes zero USDC", async function () {
+            const { manager, operatorEOA, safeAddr, uniNpm } = await loadFixture(deployYieldManagerHarness);
+            await (await uniNpm.setMintLiquidity(0)).wait();
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING)),
+            ).to.be.revertedWithCustomError(manager, "InvalidUsdcAmount");
+        });
+
+        it("blocks reentrant switchLp through the swap callback", async function () {
+            const { manager, operatorEOA, safeAddr, uniRouter } = await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(600_000n)).wait();
+            await (
+                await uniRouter.setCallback(
+                    await manager.getAddress(),
+                    manager.interface.encodeFunctionData("switchLp", [
+                        UNISWAP_V3,
+                        AERODROME,
+                        switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING),
+                    ]),
+                )
+            ).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING)),
+            ).to.be.revertedWithCustomError(manager, "ReentrancyGuardReentrantCall");
         });
     });
 });

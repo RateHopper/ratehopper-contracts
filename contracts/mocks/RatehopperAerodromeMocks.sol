@@ -110,10 +110,16 @@ contract MockCLNonfungiblePositionManager {
 
     // Config applied to the next `mint`.
     uint128 public mintLiquidity = 1_000_000;
+    uint16 public mintUsageBps = 10_000;
     address public mintOwnerOverride;
 
     function setMintLiquidity(uint128 value) external {
         mintLiquidity = value;
+    }
+
+    function setMintUsageBps(uint16 value) external {
+        require(value <= 10_000, "usage bps");
+        mintUsageBps = value;
     }
 
     function setMintOwnerOverride(address account) external {
@@ -164,8 +170,8 @@ contract MockCLNonfungiblePositionManager {
         ISlipstreamNonfungiblePositionManager.MintParams calldata params
     ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
         tokenId = nextId++;
-        amount0 = params.amount0Desired;
-        amount1 = params.amount1Desired;
+        amount0 = (params.amount0Desired * mintUsageBps) / 10_000;
+        amount1 = (params.amount1Desired * mintUsageBps) / 10_000;
         if (amount0 > 0) IERC20(params.token0).transferFrom(msg.sender, address(this), amount0);
         if (amount1 > 0) IERC20(params.token1).transferFrom(msg.sender, address(this), amount1);
         liquidity = mintLiquidity;

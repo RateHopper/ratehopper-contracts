@@ -16,6 +16,34 @@ import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams} from "../in
 import {YieldStorage} from "./handlers/YieldStorage.sol";
 import "../common/Types.sol";
 
+/// @notice Parameters for atomically moving a full position to another
+///         WETH/USDC pool (different protocol and/or pool param). The close
+///         leg's realized USDC becomes the open leg's input, so no
+///         `usdcAmount` is supplied.
+struct SwitchLpParams {
+    address onBehalfOf;
+    uint256 tokenId;
+    // close leg (exitBps is always 10_000)
+    uint256 closeSwapAmountOutMin;
+    uint256 closeExpectedSwapOut;
+    uint16 closeSlippageBps;
+    uint256 decreaseAmount0Min;
+    uint256 decreaseAmount1Min;
+    uint256 minUsdcOut;
+    bytes closeSwapPoolParam;
+    // open leg
+    int24 tickLower;
+    int24 tickUpper;
+    uint256 mintAmount0Min;
+    uint256 mintAmount1Min;
+    uint256 openSwapAmountOutMin;
+    uint256 openExpectedSwapOut;
+    uint16 openSlippageBps;
+    bytes lpPoolParam;
+    bytes openSwapPoolParam;
+    uint256 deadline;
+}
+
 /// @title SafeYieldManager
 /// @notice Single Safe-module entry point for all yield (LP) protocols —
 ///         the yield-side counterpart of SafeDebtManager. Users enable this
@@ -253,6 +281,136 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         );
     }
 
+    /// @notice Atomically move a full position to another WETH/USDC pool —
+    ///         a different protocol, a different fee tier / tick spacing, or
+    ///         both. The close leg realizes the position to USDC through the
+    ///         pinned handler; the open leg supplies that exact USDC to the
+    ///         target protocol's current handler.
+    /// @dev    The original basis is carried onto the replacement position
+    ///         after deducting value left outside the new LP (return of basis
+    ///         first). A performance fee is charged during the switch only if
+    ///         that undeployed value exceeds the old basis; profit that stays
+    ///         invested remains deferred until the real exit. A switch opens
+    ///         new exposure, hence `whenNotPaused` (unlike exits) plus BOTH
+    ///         per-protocol switches: `protocolEnabledForClose[from]` and
+    ///         `protocolEnabledForOpen[to]`.
+    function switchLp(
+        uint8 fromProtocol,
+        uint8 toProtocol,
+        SwitchLpParams calldata params
+    ) external nonReentrant whenNotPaused onlyOperatorOrSafe(params.onBehalfOf) returns (uint256 newTokenId) {
+        if (block.timestamp > params.deadline) revert DeadlineExpired();
+        if (!protocolEnabledForClose[fromProtocol]) revert ProtocolDisabled();
+        address openHandler = yieldHandlers[toProtocol];
+        if (openHandler == address(0)) revert HandlerNotSet();
+        if (!protocolEnabledForOpen[toProtocol]) revert ProtocolDisabled();
+
+        YieldLayout storage $ = _yieldStorage();
+        (uint128 residualBasis, address closeHandler) = _pinnedPosition($, fromProtocol, params.tokenId);
+        delete $.residualBasisUsd6Of[fromProtocol][params.tokenId];
+        delete $.positionHandlerOf[fromProtocol][params.tokenId];
+
+        uint128 realizedUsd6 = _switchCloseLeg(closeHandler, params, residualBasis);
+        if (realizedUsd6 == 0) revert InvalidUsdcAmount();
+        uint128 deployedUsd6;
+        (newTokenId, deployedUsd6) = _switchOpenLeg(openHandler, params, realizedUsd6);
+
+        // Every supported handler computes deployed value from amounts used
+        // out of this exact input, so a bad future handler reporting more
+        // than `realizedUsd6` fails here by checked arithmetic.
+        uint128 undeployedUsd6 = realizedUsd6 - deployedUsd6;
+        uint128 carriedBasisUsd6 = residualBasis > undeployedUsd6 ? residualBasis - undeployedUsd6 : 0;
+        uint128 feeUsd6;
+        if (undeployedUsd6 > residualBasis) {
+            uint256 realizedProfit = uint256(undeployedUsd6) - uint256(residualBasis);
+            feeUsd6 = ((realizedProfit * $.performanceFeeBps) / 10_000).toUint128();
+            if (feeUsd6 > 0 && !_trySafeTransfer(params.onBehalfOf, address(USDC), $.treasury, uint256(feeUsd6))) {
+                emit FeeTransferFailed(params.onBehalfOf, params.tokenId, feeUsd6);
+                feeUsd6 = 0;
+            }
+        }
+
+        $.residualBasisUsd6Of[toProtocol][newTokenId] = carriedBasisUsd6;
+        $.positionHandlerOf[toProtocol][newTokenId] = openHandler;
+
+        emit PositionSwitched(
+            params.onBehalfOf,
+            fromProtocol,
+            toProtocol,
+            params.tokenId,
+            newTokenId,
+            residualBasis,
+            realizedUsd6,
+            deployedUsd6,
+            carriedBasisUsd6,
+            feeUsd6
+        );
+    }
+
+    /// @dev Full close of the old position via its pinned handler; returns
+    ///      the USDC the close realized onto the Safe.
+    function _switchCloseLeg(
+        address handler,
+        SwitchLpParams calldata p,
+        uint128 basisForExit
+    ) internal returns (uint128) {
+        bytes memory ret = _delegateToHandler(
+            handler,
+            abi.encodeCall(
+                IYieldHandler.closeLp,
+                (
+                    CloseLpParams({
+                        onBehalfOf: p.onBehalfOf,
+                        tokenId: p.tokenId,
+                        exitBps: 10_000,
+                        swapAmountOutMin: p.closeSwapAmountOutMin,
+                        expectedSwapOut: p.closeExpectedSwapOut,
+                        slippageBps: p.closeSlippageBps,
+                        decreaseAmount0Min: p.decreaseAmount0Min,
+                        decreaseAmount1Min: p.decreaseAmount1Min,
+                        deadline: p.deadline,
+                        minUsdcOut: p.minUsdcOut,
+                        swapPoolParam: p.closeSwapPoolParam
+                    }),
+                    basisForExit
+                )
+            )
+        );
+        return abi.decode(ret, (uint128));
+    }
+
+    /// @dev Open the replacement position through the target protocol's
+    ///      current handler with the USDC the close leg realized.
+    function _switchOpenLeg(
+        address handler,
+        SwitchLpParams calldata p,
+        uint128 usdcAmount
+    ) internal returns (uint256 tokenId, uint128 deployedUsd6) {
+        bytes memory ret = _delegateToHandler(
+            handler,
+            abi.encodeCall(
+                IYieldHandler.openLp,
+                (
+                    OpenLpParams({
+                        onBehalfOf: p.onBehalfOf,
+                        usdcAmount: uint256(usdcAmount),
+                        tickLower: p.tickLower,
+                        tickUpper: p.tickUpper,
+                        mintAmount0Min: p.mintAmount0Min,
+                        mintAmount1Min: p.mintAmount1Min,
+                        swapAmountOutMin: p.openSwapAmountOutMin,
+                        expectedSwapOut: p.openExpectedSwapOut,
+                        slippageBps: p.openSlippageBps,
+                        deadline: p.deadline,
+                        lpPoolParam: p.lpPoolParam,
+                        swapPoolParam: p.openSwapPoolParam
+                    })
+                )
+            )
+        );
+        (tokenId, deployedUsd6, , ) = abi.decode(ret, (uint256, uint128, uint128, uint128));
+    }
+
     /// @notice Harvest accrued LP fees of a position opened through this
     ///         contract without exiting it.
     /// @dev    Same exit-friendly gating as `closeLp`: runs through the
@@ -483,18 +641,20 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     }
 
     /// @dev Basis and open-time handler of a position this contract manages.
-    ///      Both are written together at open and deleted together at full
-    ///      close, so a nonzero basis implies a pinned handler; the second
-    ///      check is a defensive invariant.
+    ///      The handler is the managed-position sentinel because a switch can
+    ///      legitimately carry zero basis when the old basis was fully
+    ///      returned outside the replacement LP.
     function _pinnedPosition(
         YieldLayout storage $,
         uint8 protocol,
         uint256 tokenId
     ) internal view returns (uint128 residualBasis, address handler) {
-        residualBasis = $.residualBasisUsd6Of[protocol][tokenId];
-        if (residualBasis == 0) revert UnknownPosition();
         handler = $.positionHandlerOf[protocol][tokenId];
-        if (handler == address(0)) revert HandlerNotSet();
+        residualBasis = $.residualBasisUsd6Of[protocol][tokenId];
+        if (handler == address(0)) {
+            if (residualBasis == 0) revert UnknownPosition();
+            revert HandlerNotSet();
+        }
     }
 
     /// @dev Delegatecall into a handler, bubbling its revert data.

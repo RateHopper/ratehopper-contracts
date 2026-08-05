@@ -725,6 +725,73 @@
         "inputs": [
             {
                 "indexed": true,
+                "internalType": "address",
+                "name": "onBehalfOf",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "uint8",
+                "name": "fromProtocol",
+                "type": "uint8"
+            },
+            {
+                "indexed": true,
+                "internalType": "uint8",
+                "name": "toProtocol",
+                "type": "uint8"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "oldTokenId",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "newTokenId",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "oldBasisUsd6",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "realizedUsd6",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "deployedUsd6",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "carriedBasisUsd6",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "feeUsd6",
+                "type": "uint128"
+            }
+        ],
+        "name": "PositionSwitched",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
                 "internalType": "uint8",
                 "name": "protocol",
                 "type": "uint8"
@@ -1746,6 +1813,132 @@
             }
         ],
         "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint8",
+                "name": "fromProtocol",
+                "type": "uint8"
+            },
+            {
+                "internalType": "uint8",
+                "name": "toProtocol",
+                "type": "uint8"
+            },
+            {
+                "components": [
+                    {
+                        "internalType": "address",
+                        "name": "onBehalfOf",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "tokenId",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "closeSwapAmountOutMin",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "closeExpectedSwapOut",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint16",
+                        "name": "closeSlippageBps",
+                        "type": "uint16"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "decreaseAmount0Min",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "decreaseAmount1Min",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "minUsdcOut",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "bytes",
+                        "name": "closeSwapPoolParam",
+                        "type": "bytes"
+                    },
+                    {
+                        "internalType": "int24",
+                        "name": "tickLower",
+                        "type": "int24"
+                    },
+                    {
+                        "internalType": "int24",
+                        "name": "tickUpper",
+                        "type": "int24"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "mintAmount0Min",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "mintAmount1Min",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "openSwapAmountOutMin",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "openExpectedSwapOut",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint16",
+                        "name": "openSlippageBps",
+                        "type": "uint16"
+                    },
+                    {
+                        "internalType": "bytes",
+                        "name": "lpPoolParam",
+                        "type": "bytes"
+                    },
+                    {
+                        "internalType": "bytes",
+                        "name": "openSwapPoolParam",
+                        "type": "bytes"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "deadline",
+                        "type": "uint256"
+                    }
+                ],
+                "internalType": "struct SwitchLpParams",
+                "name": "params",
+                "type": "tuple"
+            }
+        ],
+        "name": "switchLp",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "newTokenId",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "nonpayable",
         "type": "function"
     },
     {
