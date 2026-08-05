@@ -98,7 +98,9 @@ contract MockRegistry {
 ///         let tests exercise the `ModuleCallFailed` (typed) and revert-bubble
 ///         branches of `_safeApprove` / `_safeExec` / `_safeMintLp`.
 contract MockSafeHarness {
-    // 0 = execute normally, 1 = fail with empty returndata, 2 = fail with `failData`.
+    // 0 = execute normally, 1 = fail with empty returndata, 2 = fail with
+    // `failData`, 3 = report success with `failData` as returndata without
+    // executing (drives the returndata-shape branches of `_trySafeTransfer`).
     mapping(address => uint8) public failMode;
     bytes public failData;
 
@@ -121,7 +123,24 @@ contract MockSafeHarness {
         uint8 mode = failMode[to];
         if (mode == 1) return (false, "");
         if (mode == 2) return (false, failData);
+        if (mode == 3) return (true, failData);
         (success, returnData) = to.call{value: value}(data);
+    }
+}
+
+/// @notice Handler stand-in whose every entry point reverts with EMPTY
+///         returndata, driving SafeYieldManager's `HandlerCallFailed`
+///         fallback branch in `_delegateToHandler`. `PROTOCOL()` is real so
+///         `setYieldHandler`'s validation accepts it.
+contract MockRevertingYieldHandler {
+    uint8 public immutable PROTOCOL;
+
+    constructor(uint8 _protocol) {
+        PROTOCOL = _protocol;
+    }
+
+    fallback() external {
+        revert();
     }
 }
 

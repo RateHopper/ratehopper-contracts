@@ -16,6 +16,7 @@
         "size": "npx hardhat size-contracts",
         "coverage": "node --max-old-space-size=12288 ./node_modules/.bin/hardhat coverage",
         "coverage:rhp": "node --max-old-space-size=12288 ./node_modules/.bin/hardhat coverage --testfiles \"test/legacy/ratehopperUniV3Positions*.ts\"",
+        "coverage:gated": "node --max-old-space-size=12288 ./node_modules/.bin/hardhat coverage --testfiles \"test/{legacy/ratehopperUniV3Positions*.ts,yield/safeYieldManager.ts}\"",
         "coverage:check": "node scripts/checkCoverage.js",
         "lint:sol": "npx solhint 'contracts/**/*.sol'",
         "format": "npx prettier --write 'contracts/**/*.sol'",

@@ -45,7 +45,7 @@ const requireAddress = makeRequireAddress("DeployRegistryOnly");
  *  - TIMELOCK_ADMIN:         Used by TimelockControllerModule when REGISTRY_TIMELOCK is unset.
  *                            Falls back to ADMIN_ADDRESS.
  *  - TIMELOCK_DELAY:         Used by TimelockControllerModule when REGISTRY_TIMELOCK is unset.
- *                            Defaults to 28800 seconds.
+ *                            Defaults to 172800 seconds (2 days).
  *  - DEPLOYER_PRIVATE_KEY:   Deployer key (set in hardhat.config.ts).
  *
  * Usage:

@@ -5,10 +5,10 @@
 // Istanbul format: per-file `b` maps a branchId to an array of per-outcome hit
 // counts). Run AFTER a coverage run that exercises the gated contracts.
 //
-// Scope: only RatehopperUniV3Positions.sol is gated for now. The legacy
-// debt-swap contracts and protocol handlers depend on Base-fork suites that
-// are not yet fully covered; add their paths to GATED once their coverage is
-// brought up.
+// Scope: RatehopperUniV3Positions.sol (legacy) and the SafeYieldManager
+// stack. The debt-swap contracts and protocol handlers depend on Base-fork
+// suites that are not yet fully covered; add their paths to GATED once their
+// coverage is brought up.
 
 const fs = require("fs");
 const path = require("path");
@@ -17,7 +17,15 @@ const COVERAGE_FILE = path.join(__dirname, "..", "coverage.json");
 const THRESHOLD = 95;
 
 // Production contracts subject to the gate (suffix match on the coverage key).
-const GATED = ["contracts/legacy/RatehopperUniV3Positions.sol"];
+const GATED = [
+    "contracts/legacy/RatehopperUniV3Positions.sol",
+    "contracts/yield/SafeYieldManager.sol",
+    "contracts/yield/handlers/BaseYieldHandler.sol",
+    "contracts/yield/handlers/V3StyleYieldHandler.sol",
+    "contracts/yield/handlers/UniV3YieldHandler.sol",
+    "contracts/yield/handlers/AerodromeYieldHandler.sol",
+    "contracts/yield/handlers/YieldStorage.sol",
+];
 
 function isGated(key) {
     const k = key.replace(/\\/g, "/");

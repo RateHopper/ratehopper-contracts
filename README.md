@@ -32,7 +32,7 @@ RateHopper Contracts is a smart contract system that enables users to automatica
 The system consists of several key components:
 
 1. **Governance & Access Control**:
-    - `TimelockController`: OpenZeppelin's timelock implementation with 8-hour delay by default for critical operations
+    - `TimelockController`: OpenZeppelin's timelock implementation with 2-day delay by default for critical operations
     - `ProtocolRegistry.sol`: Central registry with hybrid access control:
         - `DEFAULT_ADMIN_ROLE`: For routine operations (whitelist, token mappings) - immediate execution
         - `CRITICAL_ROLE`: For critical operations (setParaswapV6, setOperator) - requires timelock
@@ -196,7 +196,7 @@ MIN_POOL_LIQUIDITY=0          # Optional. Floor on pool.liquidity() for spot-pri
 
 # Optional — TimelockController sub-module (shared by all deploys)
 TIMELOCK_ADMIN=0x...          # Proposer + executor on the new timelock. Falls back to ADMIN_ADDRESS
-TIMELOCK_DELAY=28800          # Min delay before queued ops execute (seconds). Default 28800 (8 hours)
+TIMELOCK_DELAY=172800         # Min delay before queued ops execute (seconds). Default 172800 (2 days)
 
 # Optional — per-module overrides: the same suffix with the module prefix wins
 # over the shared name, e.g. SYM_TREASURY / RHP_MAX_FEE_BPS.
@@ -400,7 +400,7 @@ This script:
 
 ### Timelock Operations
 
-Critical `ProtocolRegistry` setters (`setParaswapV6`, `setOperator`) carry `CRITICAL_ROLE` and revert unless `msg.sender` is the timelock, so they must be scheduled and executed through the `TimelockController` (8-hour delay by default). Each script is a two-step flow: schedule, wait for the delay, then re-run with `EXECUTE=true` reusing the same `OPERATION_ID` printed during scheduling.
+Critical `ProtocolRegistry` setters (`setParaswapV6`, `setOperator`) carry `CRITICAL_ROLE` and revert unless `msg.sender` is the timelock, so they must be scheduled and executed through the `TimelockController` (2-day delay by default). Each script is a two-step flow: schedule, wait for the delay, then re-run with `EXECUTE=true` reusing the same `OPERATION_ID` printed during scheduling.
 
 #### Finding the TimelockController address
 
@@ -457,7 +457,7 @@ The contracts include several security features:
 
 ### Access Control & Governance
 
-- **Timelock Controller**: 8-hour delay by default for critical operations (Paraswap and operator updates)
+- **Timelock Controller**: 2-day delay by default for critical operations (Paraswap and operator updates)
 - **Hybrid Access Control**:
     - `DEFAULT_ADMIN_ROLE`: For routine operations (immediate execution)
     - `CRITICAL_ROLE`: For critical operations (requires timelock)

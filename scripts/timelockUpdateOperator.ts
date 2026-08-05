@@ -6,7 +6,7 @@ import { ethers } from "hardhat";
  * `setOperator` is a CRITICAL_ROLE function that can ONLY be called by the timelock,
  * so it must go through the two-step process:
  * 1. Schedule the operation (requires PROPOSER_ROLE)
- * 2. Wait for the timelock delay (8 hours by default)
+ * 2. Wait for the timelock delay (2 days by default)
  * 3. Execute the operation (requires EXECUTOR_ROLE)
  *
  * Usage:
