@@ -2,7 +2,7 @@ import { ethers } from "hardhat";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { Contract, MaxUint256 } from "ethers";
 import cometAbi from "../../../externalAbi/compound/comet.json";
-import { approve, defaultProvider, formatAmount } from "../utils";
+import { approve, defaultProvider, formatAmount, getDecimals } from "../utils";
 import {
     AERO_ADDRESS,
     cbBTC_ADDRESS,
@@ -88,30 +88,36 @@ export class CompoundHelper {
         collateralTokenAddress = cbETH_ADDRESS,
         customBorrowAmount?: bigint,
     ): Promise<MetaTransactionData[]> {
-        const cbETHContract = new ethers.Contract(cbETH_ADDRESS, ERC20_ABI, defaultProvider);
+        const cometAddress = cometAddressMap.get(debtTokenAddress)!;
+        const collateralContract = new ethers.Contract(collateralTokenAddress, ERC20_ABI, defaultProvider);
         const approveTransactionData: MetaTransactionData = {
-            to: cbETH_ADDRESS,
+            to: collateralTokenAddress,
             value: "0",
-            data: cbETHContract.interface.encodeFunctionData("approve", [USDC_COMET_ADDRESS, ethers.parseEther("1")]),
+            data: collateralContract.interface.encodeFunctionData("approve", [cometAddress, ethers.MaxUint256]),
             operation: OperationType.Call,
         };
 
-        const cometContract = new ethers.Contract(USDC_COMET_ADDRESS, cometAbi, defaultProvider);
+        const cometContract = new ethers.Contract(cometAddress, cometAbi, defaultProvider);
+        const collateralDecimals = await getDecimals(collateralTokenAddress);
+        const debtDecimals = await getDecimals(debtTokenAddress);
 
         const supplyTransactionData: MetaTransactionData = {
-            to: USDC_COMET_ADDRESS,
+            to: cometAddress,
             value: "0",
             data: cometContract.interface.encodeFunctionData("supply", [
-                cbETH_ADDRESS,
-                ethers.parseEther(DEFAULT_SUPPLY_AMOUNT),
+                collateralTokenAddress,
+                ethers.parseUnits(DEFAULT_SUPPLY_AMOUNT, collateralDecimals),
             ]),
             operation: OperationType.Call,
         };
 
         const borrowTransactionData: MetaTransactionData = {
-            to: USDC_COMET_ADDRESS,
+            to: cometAddress,
             value: "0",
-            data: cometContract.interface.encodeFunctionData("withdraw", [USDC_ADDRESS, ethers.parseUnits("1", 6)]),
+            data: cometContract.interface.encodeFunctionData("withdraw", [
+                debtTokenAddress,
+                customBorrowAmount ?? ethers.parseUnits("1", debtDecimals),
+            ]),
             operation: OperationType.Call,
         };
 

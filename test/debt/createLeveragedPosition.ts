@@ -1,4 +1,10 @@
-import { time, loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
+import {
+    time,
+    loadFixture,
+    SnapshotRestorer,
+    takeSnapshot,
+    clearSnapshots,
+} from "@nomicfoundation/hardhat-toolbox/network-helpers";
 const { expect } = require("chai");
 import { ethers } from "hardhat";
 
@@ -7,7 +13,8 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { LeveragedPosition } from "../../typechain-types";
 import morphoAbi from "../../externalAbi/morpho/morpho.json";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { approve, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "../helpers/utils";
+import { approve, fundSignerWithETH, getDecimals, getParaswapData } from "../helpers/utils";
+import { protocolHelperMap } from "../helpers/protocolHelperMap";
 
 import {
     USDC_ADDRESS,
@@ -45,9 +52,20 @@ describe("Create leveraged position", function () {
     let aaveV3Helper: AaveV3Helper;
     let compoundHelper: CompoundHelper;
     let morphoHelper: MorphoHelper;
+    let suiteSnapshot: SnapshotRestorer;
 
     const defaultTargetSupplyAmount = "0.002";
     const cbBTCPrincipleAmount = 0.00006;
+
+    this.beforeAll(async () => {
+        await clearSnapshots();
+        suiteSnapshot = await takeSnapshot();
+    });
+
+    this.afterAll(async () => {
+        await suiteSnapshot.restore();
+        await clearSnapshots();
+    });
 
     this.beforeEach(async () => {
         impersonatedSigner = await ethers.getImpersonatedSigner(TEST_ADDRESS);

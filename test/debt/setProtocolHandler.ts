@@ -1,4 +1,4 @@
-import { loadFixture, time, setNextBlockBaseFeePerGas } from "@nomicfoundation/hardhat-toolbox/network-helpers";
+import { time, setNextBlockBaseFeePerGas } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { deploySafeContractFixture, deployHandlers } from "../helpers/deployUtils";
@@ -51,7 +51,7 @@ describe("Set Protocol Handler", function () {
         }
 
         it("should allow address with CRITICAL_ROLE (timelock) to update handler via schedule/execute", async function () {
-            const { leveragedPosition, timelock } = await loadFixture(deployLeveragedPositionWithRegistry);
+            const { leveragedPosition, timelock } = await deployLeveragedPositionWithRegistry();
 
             // Get current handler
             const oldHandler = await leveragedPosition.protocolHandlers(DebtProtocols.AAVE_V3);
@@ -87,7 +87,7 @@ describe("Set Protocol Handler", function () {
         });
 
         it("should reject a caller that is not the immutable timelock", async function () {
-            const { leveragedPosition } = await loadFixture(deployLeveragedPositionWithRegistry);
+            const { leveragedPosition } = await deployLeveragedPositionWithRegistry();
             const [, nonOwner] = await ethers.getSigners();
 
             const newHandler = ethers.Wallet.createRandom().address;
@@ -98,7 +98,7 @@ describe("Set Protocol Handler", function () {
         });
 
         it("should revert if new handler is zero address", async function () {
-            const { leveragedPosition, timelock } = await loadFixture(deployLeveragedPositionWithRegistry);
+            const { leveragedPosition, timelock } = await deployLeveragedPositionWithRegistry();
 
             // Encode the setProtocolHandler call with zero address
             const callData = leveragedPosition.interface.encodeFunctionData("setProtocolHandler", [
@@ -123,7 +123,7 @@ describe("Set Protocol Handler", function () {
         });
 
         it("should allow updating an existing handler to a new address", async function () {
-            const { leveragedPosition, timelock } = await loadFixture(deployLeveragedPositionWithRegistry);
+            const { leveragedPosition, timelock } = await deployLeveragedPositionWithRegistry();
 
             // Get current handler for AAVE_V3
             const oldHandler = await leveragedPosition.protocolHandlers(DebtProtocols.AAVE_V3);
@@ -158,7 +158,7 @@ describe("Set Protocol Handler", function () {
         });
 
         it("should not let a CRITICAL_ROLE grantee bypass the immutable timelock", async function () {
-            const { leveragedPosition, protocolRegistry } = await loadFixture(deployLeveragedPositionWithRegistry);
+            const { leveragedPosition, protocolRegistry } = await deployLeveragedPositionWithRegistry();
             const [, newAdmin] = await ethers.getSigners();
 
             // Grant CRITICAL_ROLE to newAdmin via registry
@@ -171,7 +171,7 @@ describe("Set Protocol Handler", function () {
         });
 
         it("should revert execution if timelock delay has not passed", async function () {
-            const { leveragedPosition, timelock } = await loadFixture(deployLeveragedPositionWithRegistry);
+            const { leveragedPosition, timelock } = await deployLeveragedPositionWithRegistry();
 
             const newHandler = ethers.Wallet.createRandom().address;
 
@@ -197,7 +197,7 @@ describe("Set Protocol Handler", function () {
 
     describe("SafeDebtManager", function () {
         it("should allow address with CRITICAL_ROLE (timelock) to update handler via schedule/execute", async function () {
-            const { safeModule, protocolRegistry } = await loadFixture(deploySafeContractFixture);
+            const { safeModule, protocolRegistry } = await deploySafeContractFixture();
 
             // Get the timelock contract
             const timelockAddress = await protocolRegistry.timelock();
@@ -237,7 +237,7 @@ describe("Set Protocol Handler", function () {
         });
 
         it("should reject a caller that is not the immutable timelock", async function () {
-            const { safeModule } = await loadFixture(deploySafeContractFixture);
+            const { safeModule } = await deploySafeContractFixture();
             const [, nonOwner] = await ethers.getSigners();
 
             const newHandler = ethers.Wallet.createRandom().address;
@@ -248,7 +248,7 @@ describe("Set Protocol Handler", function () {
         });
 
         it("should revert if new handler is zero address", async function () {
-            const { safeModule, protocolRegistry } = await loadFixture(deploySafeContractFixture);
+            const { safeModule, protocolRegistry } = await deploySafeContractFixture();
 
             // Get the timelock contract
             const timelockAddress = await protocolRegistry.timelock();
@@ -277,7 +277,7 @@ describe("Set Protocol Handler", function () {
         });
 
         it("should allow updating an existing handler to a new address", async function () {
-            const { safeModule, protocolRegistry } = await loadFixture(deploySafeContractFixture);
+            const { safeModule, protocolRegistry } = await deploySafeContractFixture();
 
             // Get the timelock contract
             const timelockAddress = await protocolRegistry.timelock();
@@ -316,7 +316,7 @@ describe("Set Protocol Handler", function () {
         });
 
         it("should not let a CRITICAL_ROLE grantee bypass the immutable timelock", async function () {
-            const { safeModule, protocolRegistry } = await loadFixture(deploySafeContractFixture);
+            const { safeModule, protocolRegistry } = await deploySafeContractFixture();
             const [, newAdmin] = await ethers.getSigners();
 
             // Grant CRITICAL_ROLE to newAdmin via registry
@@ -329,7 +329,7 @@ describe("Set Protocol Handler", function () {
         });
 
         it("should revert execution if timelock delay has not passed", async function () {
-            const { safeModule, protocolRegistry } = await loadFixture(deploySafeContractFixture);
+            const { safeModule, protocolRegistry } = await deploySafeContractFixture();
 
             // Get the timelock contract
             const timelockAddress = await protocolRegistry.timelock();

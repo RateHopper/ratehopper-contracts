@@ -5,7 +5,13 @@ import Safe from "@safe-global/protocol-kit";
 import { cbETH_ADDRESS, DEFAULT_SUPPLY_AMOUNT, DebtProtocols, USDC_ADDRESS, WETH_ADDRESS } from "../helpers/constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import {
+    clearSnapshots,
+    loadFixture,
+    SnapshotRestorer,
+    takeSnapshot,
+    time,
+} from "@nomicfoundation/hardhat-network-helpers";
 import { eip1193Provider, fundETH, fundSignerWithETH } from "../helpers/utils";
 import { FLUID_cbETH_USDC_VAULT, FLUID_WETH_USDC_VAULT, FluidHelper } from "../helpers/protocolsDebt/fluid";
 import { CompoundHelper, USDC_COMET_ADDRESS } from "../helpers/protocolsDebt/compound";
@@ -27,6 +33,17 @@ describe("Safe wallet exit function tests", function () {
     let safeModuleContract: any;
     let safeModuleAddress: string;
     let helpers: ReturnType<typeof createSafeTestHelpers>;
+    let suiteSnapshot: SnapshotRestorer;
+
+    this.beforeAll(async () => {
+        await clearSnapshots();
+        suiteSnapshot = await takeSnapshot();
+    });
+
+    this.afterAll(async () => {
+        await suiteSnapshot.restore();
+        await clearSnapshots();
+    });
 
     this.beforeEach(async () => {
         const signers = await ethers.getSigners();

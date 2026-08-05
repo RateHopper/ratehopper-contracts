@@ -7,7 +7,8 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { LeveragedPosition } from "../../typechain-types";
 import morphoAbi from "../../externalAbi/morpho/morpho.json";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { approve, getDecimals, getParaswapData, protocolHelperMap } from "../helpers/utils";
+import { approve, getDecimals, getParaswapData } from "../helpers/utils";
+import { protocolHelperMap } from "../helpers/protocolHelperMap";
 import { DebtProtocols } from "../helpers/constants";
 
 describe.skip("Upgrade contract", function () {

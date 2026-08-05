@@ -18,7 +18,7 @@ import FluidVaultAbi from "../../externalAbi/fluid/fluidVaultT1.json";
 import { expect } from "chai";
 import { getGasOptions, deployLeveragedPositionContractFixture } from "../helpers/deployUtils";
 import { MaxUint256 } from "ethers";
-import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
+import { SnapshotRestorer, takeSnapshot } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { safeAddress } from "../helpers/safeTestContext";
 
 describe("SafeExecTransactionWrapper", function () {
@@ -29,8 +29,11 @@ describe("SafeExecTransactionWrapper", function () {
     let safeWallet: Safe;
     let wrapperContract: any;
     let wrapperAddress: string;
+    let snapshot: SnapshotRestorer;
 
     this.beforeEach(async () => {
+        snapshot = await takeSnapshot();
+
         // Fund the signer wallet (TESTING_SAFE_OWNER_KEY) with ETH for gas fees
         await fundSignerWithETH(signer.address);
 
@@ -52,6 +55,8 @@ describe("SafeExecTransactionWrapper", function () {
     });
 
     this.afterEach(async () => {
+        await snapshot.restore();
+
         // Force garbage collection to free memory
         if (global.gc) {
             global.gc();

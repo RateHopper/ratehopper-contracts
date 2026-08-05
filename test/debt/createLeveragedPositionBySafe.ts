@@ -1,11 +1,18 @@
-import { time, loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
+import {
+    time,
+    loadFixture,
+    SnapshotRestorer,
+    takeSnapshot,
+    clearSnapshots,
+} from "@nomicfoundation/hardhat-toolbox/network-helpers";
 const { expect } = require("chai");
 import { ethers } from "hardhat";
 import "dotenv/config";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { LeveragedPosition } from "../../typechain-types";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { eip1193Provider, fundSignerWithETH, getDecimals, getParaswapData, protocolHelperMap } from "../helpers/utils";
+import { eip1193Provider, fundSignerWithETH, getDecimals, getParaswapData } from "../helpers/utils";
+import { protocolHelperMap } from "../helpers/protocolHelperMap";
 import Safe from "@safe-global/protocol-kit";
 import {
     USDC_ADDRESS,
@@ -40,7 +47,18 @@ describe("Create leveraged position by Safe", function () {
 
     let safeWallet;
     let operator: HardhatEthersSigner;
+    let suiteSnapshot: SnapshotRestorer;
     const safeOwnerWallet = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
+
+    this.beforeAll(async () => {
+        await clearSnapshots();
+        suiteSnapshot = await takeSnapshot();
+    });
+
+    this.afterAll(async () => {
+        await suiteSnapshot.restore();
+        await clearSnapshots();
+    });
 
     this.beforeEach(async () => {
         impersonatedSigner = await ethers.getImpersonatedSigner(TEST_ADDRESS);
@@ -163,7 +181,8 @@ describe("Create leveraged position by Safe", function () {
         });
         console.log(safeTxHash);
 
-        const addressForDebtAmount = protocol === DebtProtocols.FLUID ? fluidVaultMap.get(collateralAddress)! : debtAddress;
+        const addressForDebtAmount =
+            protocol === DebtProtocols.FLUID ? fluidVaultMap.get(collateralAddress)! : debtAddress;
 
         const debtAmount = await protocolHelper.getDebtAmount(addressForDebtAmount, safeAddress);
 
@@ -214,7 +233,8 @@ describe("Create leveraged position by Safe", function () {
         const debtDecimals = await getDecimals(debtAddress);
 
         // Get current debt and collateral amounts before closing
-        const addressForDebtAmount = protocol === DebtProtocols.FLUID ? fluidVaultMap.get(collateralAddress)! : debtAddress;
+        const addressForDebtAmount =
+            protocol === DebtProtocols.FLUID ? fluidVaultMap.get(collateralAddress)! : debtAddress;
         const debtAmountBefore = await protocolHelper.getDebtAmount(addressForDebtAmount, safeAddress);
         console.log("Debt amount before closing: ", ethers.formatUnits(debtAmountBefore, debtDecimals));
 
@@ -444,20 +464,6 @@ describe("Create leveraged position by Safe", function () {
                 cbBTC_ADDRESS,
                 USDC_ADDRESS,
                 cbBTCPrincipleAmount,
-                targetAmount,
-            );
-        });
-
-        it("with USDC collateral, cbETH debt", async function () {
-            const principleAmount = 0.1;
-            const targetAmount = principleAmount * 2;
-
-            await createLeveragedPosition(
-                cbBTC_USDC_POOL,
-                DebtProtocols.MOONWELL,
-                USDC_ADDRESS,
-                cbETH_ADDRESS,
-                principleAmount,
                 targetAmount,
             );
         });

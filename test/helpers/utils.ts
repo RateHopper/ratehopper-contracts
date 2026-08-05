@@ -1,23 +1,8 @@
 import { ethers } from "hardhat";
 import { Eip1193Provider, RequestArguments } from "@safe-global/protocol-kit";
-import { DebtProtocols } from "./constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MaxUint256 } from "ethers";
-
-import { AaveV3Helper } from "./protocolsDebt/aaveV3";
-import { CompoundHelper } from "./protocolsDebt/compound";
-import { MorphoHelper } from "./protocolsDebt/morpho";
-import { MoonwellHelper } from "./protocolsDebt/moonwell";
-import { FluidHelper } from "./protocolsDebt/fluid";
 import axios from "axios";
-
-export const protocolHelperMap = new Map<DebtProtocols, any>([
-    [DebtProtocols.AAVE_V3, AaveV3Helper],
-    [DebtProtocols.COMPOUND, CompoundHelper],
-    [DebtProtocols.MORPHO, MorphoHelper],
-    [DebtProtocols.FLUID, FluidHelper],
-    [DebtProtocols.MOONWELL, MoonwellHelper],
-]);
 
 // Read through Hardhat's fork provider so repeated integration-test calls share
 // its pinned state and cache instead of hammering the upstream RPC directly.
@@ -87,7 +72,6 @@ export async function getParaswapData(
     const routeOptions = preferredDEX
         ? [{ includeDEXS: preferredDEX }]
         : [
-              { excludeDEXS: defaultExclusions },
               { includeDEXS: "UniswapV4" },
               { includeDEXS: "AerodromeSlipstream" },
               { includeDEXS: "AerodromeSlipstreamNewFactory" },
@@ -95,6 +79,7 @@ export async function getParaswapData(
               { includeDEXS: "MaverickV2" },
               { includeDEXS: "SwapBasedV3" },
               { includeDEXS: "Alien" },
+              { excludeDEXS: defaultExclusions },
           ];
     for (const routeOption of routeOptions) {
         for (let attempt = 1; attempt <= 2; attempt++) {
