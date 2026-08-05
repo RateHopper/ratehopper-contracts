@@ -35,7 +35,7 @@ import {
 
 // ─── Configuration ───────────────────────────────────────────────────────
 const SAFE_ADDRESS: string = "0x7319ac30a862f2bf6b146793a42f411215c819ce";
-const USDC_AMOUNT = "0.5";
+const USDC_AMOUNT = "0.1";
 const PROTOCOL_NAME: "aerodrome" | "univ3" = "aerodrome";
 const SLIPPAGE_BPS: bigint = 100n;
 // Aerodrome tick spacing (100 or 200) — used when PROTOCOL_NAME is "aerodrome"
@@ -49,7 +49,7 @@ const MINT_AMOUNT1_MIN = 0n;
 // Empty = use the ignition-deployed address for chain 8453
 const MANAGER_ADDRESS_OVERRIDE = "";
 // true = print the resolved params and calldata without executing
-const DRY_RUN = false;
+const DRY_RUN = true;
 // ─────────────────────────────────────────────────────────────────────────
 
 const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];

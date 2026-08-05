@@ -750,6 +750,13 @@ describe("SafeYieldManager", function () {
             ).to.be.revertedWithCustomError(manager, "InvalidHandler");
         });
 
+        it("rejects a handler contract without PROTOCOL()", async function () {
+            const { manager, deployer, usdc } = await loadFixture(deployYieldManagerHarness);
+            await expect(
+                manager.connect(deployer).setYieldHandler(UNISWAP_V3, await usdc.getAddress()),
+            ).to.be.revertedWithCustomError(manager, "InvalidHandler");
+        });
+
         it("admin setters enforce role and bounds", async function () {
             const { manager, deployer, stranger } = await loadFixture(deployYieldManagerHarness);
             await expect(manager.connect(stranger).setMaxSlippageBps(500)).to.be.revertedWithCustomError(
@@ -766,6 +773,10 @@ describe("SafeYieldManager", function () {
             await (await manager.connect(deployer).setMinPoolLiquidity(UNISWAP_V3, 123)).wait();
             expect(await manager.minPoolLiquidity(UNISWAP_V3)).to.equal(123);
             expect(await manager.minPoolLiquidity(AERODROME)).to.equal(0);
+
+            await (await manager.connect(deployer).setMinPositionLiquidity(UNISWAP_V3, 456)).wait();
+            expect(await manager.minPositionLiquidity(UNISWAP_V3)).to.equal(456);
+            expect(await manager.minPositionLiquidity(AERODROME)).to.equal(0);
         });
 
         it("rescues ERC20 and ERC721 held by the manager", async function () {

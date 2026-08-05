@@ -93,7 +93,8 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
         const pool = new ethers.Contract(poolAddress, POOL_ABI, ethers.provider);
         expect(await pool.token0()).to.equal(WETH_ADDRESS);
         expect(await pool.token1()).to.equal(USDC_ADDRESS);
-        const [sqrtPriceX96, tick] = await pool.slot0();
+        const [sqrtPriceRaw, tick] = await pool.slot0();
+        const sqrtPriceX96 = BigInt(sqrtPriceRaw);
         const alignedTick = Math.floor(Number(tick) / TICK_SPACING) * TICK_SPACING;
         const spotUsdcToWeth = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);
         const spotWethToUsdc = (amount: bigint) => (amount * sqrtPriceX96 * sqrtPriceX96) >> 192n;
