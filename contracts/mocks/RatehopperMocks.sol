@@ -106,6 +106,13 @@ contract MockSafeHarness {
 
     receive() external payable {}
 
+    /// @dev Real deployed Safes accept ERC721 transfers via the default
+    ///      fallback handler's `onERC721Received`. Needed so a gauge's
+    ///      `safeTransferFrom` back to the Safe on unstake succeeds here too.
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
+    }
+
     function setFail(address target, uint8 mode) external {
         failMode[target] = mode;
     }
@@ -160,11 +167,16 @@ contract MockSwapRouter {
     }
 
     uint256 public output;
+    mapping(address => uint256) public outputFor;
     address public callbackTarget;
     bytes public callbackData;
 
     function setOutput(uint256 newOutput) external {
         output = newOutput;
+    }
+
+    function setOutputFor(address tokenOut, uint256 newOutput) external {
+        outputFor[tokenOut] = newOutput;
     }
 
     function setCallback(address target, bytes calldata data) external {
@@ -184,7 +196,7 @@ contract MockSwapRouter {
         if (params.amountIn > 0) {
             IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
         }
-        amountOut = output;
+        amountOut = outputFor[params.tokenOut] != 0 ? outputFor[params.tokenOut] : output;
         if (amountOut > 0) {
             IERC20(params.tokenOut).transfer(params.recipient, amountOut);
         }
@@ -210,16 +222,24 @@ contract MockUniswapV3Pool {
     }
 }
 
-/// @notice Factory stub returning a single configurable pool for any lookup.
+/// @notice Factory stub returning a single configurable default pool for any
+///         lookup, with optional per-(pair, fee) overrides for multi-pool
+///         tests (arbitrary-pair support).
 contract MockUniswapV3Factory {
     address public pool;
+    mapping(bytes32 => address) public keyedPools;
 
     function setPool(address newPool) external {
         pool = newPool;
     }
 
-    function getPool(address, address, uint24) external view returns (address) {
-        return pool;
+    function setPoolFor(address token0, address token1, uint24 fee, address newPool) external {
+        keyedPools[keccak256(abi.encode(token0, token1, fee))] = newPool;
+    }
+
+    function getPool(address token0, address token1, uint24 fee) external view returns (address) {
+        address keyed = keyedPools[keccak256(abi.encode(token0, token1, fee))];
+        return keyed != address(0) ? keyed : pool;
     }
 }
 

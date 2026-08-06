@@ -13,7 +13,11 @@ const FEE_TIER = 500;
 // Uniswap V3 tick spacing for the 0.05% fee tier.
 const TICK_SPACING = 10;
 const FORK_BLOCK = Number(process.env.BASE_FORK_BLOCK_NUMBER ?? 49_470_000);
-const POOL_PARAM = ethers.AbiCoder.defaultAbiCoder().encode(["uint24"], [FEE_TIER]);
+const POOL_PARAM = ethers.AbiCoder.defaultAbiCoder().encode(
+    ["address", "address", "uint24"],
+    [WETH_ADDRESS, USDC_ADDRESS, FEE_TIER],
+);
+const ZERO_LEG = { amountOutMin: 0, expectedOut: 0, poolParam: "0x" };
 
 const ERC20_ABI = [
     "function balanceOf(address) view returns (uint256)",
@@ -61,7 +65,6 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
         const handler = await Handler.deploy(
             UNISWAP_V3_NPM_ADDRESS,
             USDC_ADDRESS,
-            WETH_ADDRESS,
             UNISWAP_V3_SWAP_ROUTER_ADDRESS,
             UNISWAP_V3_FACTORY_ADDRESS,
         );
@@ -118,19 +121,26 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             tickUpper: alignedTick + 1_000,
             mintAmount0Min: 0,
             mintAmount1Min: 0,
-            swapAmountOutMin: (expectedSwapOut * 9_900n) / 10_000n,
-            expectedSwapOut,
+            swap0: {
+                amountOutMin: (expectedSwapOut * 9_900n) / 10_000n,
+                expectedOut: expectedSwapOut,
+                poolParam: POOL_PARAM,
+            },
+            swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
             lpPoolParam: POOL_PARAM,
-            swapPoolParam: POOL_PARAM,
+            stakeInGauge: false,
         };
 
         await expect(
             manager.connect(operator).openLp(UNISWAP_V3, {
                 ...openParams,
-                expectedSwapOut: expectedSwapOut * 2n,
-                swapAmountOutMin: (expectedSwapOut * 2n * 9_900n) / 10_000n,
+                swap0: {
+                    amountOutMin: (expectedSwapOut * 2n * 9_900n) / 10_000n,
+                    expectedOut: expectedSwapOut * 2n,
+                    poolParam: POOL_PARAM,
+                },
             }),
         ).to.be.revertedWith("Too little received");
 
@@ -147,17 +157,16 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             manager.connect(operator).collectLp(UNISWAP_V3, {
                 onBehalfOf: safeAddress,
                 tokenId,
-                swapWethToUsdc: false,
-                swapAmountOutMin: 0,
-                expectedSwapOut: 0,
+                swapFeesToUsdc: false,
+                swap0: ZERO_LEG,
+                swap1: ZERO_LEG,
                 slippageBps: 0,
                 deadline,
-                swapPoolParam: POOL_PARAM,
             }),
         ).to.emit(manager, "FeesCollected");
 
-        const wethToLp: bigint = opened.args.wethToLp;
-        const usdcToLp: bigint = opened.args.usdcToLp;
+        const wethToLp: bigint = opened.args.amount0ToLp;
+        const usdcToLp: bigint = opened.args.amount1ToLp;
         // shareOfOriginalBps: fraction of the ORIGINAL position this close
         // removes, driving spot-price estimates of the swap and total output.
         const closeParams = (exitBps: number, shareOfOriginalBps: bigint) => {
@@ -168,14 +177,17 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps,
-                swapAmountOutMin: (expectedOut * 9_700n) / 10_000n,
-                expectedSwapOut: expectedOut,
+                swap0: {
+                    amountOutMin: (expectedOut * 9_700n) / 10_000n,
+                    expectedOut,
+                    poolParam: POOL_PARAM,
+                },
+                swap1: ZERO_LEG,
                 slippageBps: 300,
                 decreaseAmount0Min: 0,
                 decreaseAmount1Min: 0,
                 deadline,
                 minUsdcOut: ((usdcShare + expectedOut) * 9_500n) / 10_000n,
-                swapPoolParam: POOL_PARAM,
             };
         };
 

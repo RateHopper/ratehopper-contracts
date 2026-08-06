@@ -1,12 +1,29 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
-/// @notice Parameters for opening an LP position. Protocol-specific pool
-///         selection is carried in `lpPoolParam` / `swapPoolParam` as
-///         ABI-encoded bytes so new protocols with richer pool identifiers
-///         (e.g. Uniswap V4 `PoolKey`) fit without changing this interface:
-///           - Uniswap V3:  abi.encode(uint24 feeTier)
-///           - Aerodrome:   abi.encode(int24 tickSpacing)
+/// @notice One USDC<->pool-token swap leg. `poolParam` selects the pool the
+///         swap routes through (same ABI-encoded shape as LP pool params, so
+///         it also pins the pair being traded). A leg whose pool token IS
+///         USDC needs no swap and is ignored entirely — leave its fields
+///         zero/empty.
+struct SwapLeg {
+    uint256 amountOutMin;
+    uint256 expectedOut;
+    bytes poolParam;
+}
+
+/// @notice Parameters for opening an LP position. Pool selection is carried
+///         in `lpPoolParam` / `SwapLeg.poolParam` as ABI-encoded bytes so new
+///         protocols with richer pool identifiers (e.g. Uniswap V4 `PoolKey`)
+///         fit without changing this interface. The pair is part of the pool
+///         identity:
+///           - Uniswap V3:  abi.encode(address token0, address token1, uint24 feeTier)
+///           - Aerodrome:   abi.encode(address token0, address token1, int24 tickSpacing)
+///         Funding is always USDC: `usdcAmount` is split in half per side and
+///         each non-USDC side is swapped through its leg's pool.
+/// @dev    `stakeInGauge` is an opt-in: when true the freshly-minted NFT is
+///         staked into the protocol's gauge (Aerodrome only — handlers without
+///         a gauge revert `GaugeStakingNotSupported`). closeLp auto-unstakes.
 struct OpenLpParams {
     address onBehalfOf;
     uint256 usdcAmount;
@@ -14,39 +31,43 @@ struct OpenLpParams {
     int24 tickUpper;
     uint256 mintAmount0Min;
     uint256 mintAmount1Min;
-    uint256 swapAmountOutMin;
-    uint256 expectedSwapOut;
+    /// @dev USDC -> token0 leg (ignored when token0 == USDC).
+    SwapLeg swap0;
+    /// @dev USDC -> token1 leg (ignored when token1 == USDC).
+    SwapLeg swap1;
     uint16 slippageBps;
     uint256 deadline;
     bytes lpPoolParam;
-    bytes swapPoolParam;
+    bool stakeInGauge;
 }
 
 /// @notice Parameters for closing (partially or fully) an LP position.
+///         Withdrawn non-USDC legs are swapped back to USDC.
 struct CloseLpParams {
     address onBehalfOf;
     uint256 tokenId;
     uint16 exitBps;
-    uint256 swapAmountOutMin;
-    uint256 expectedSwapOut;
+    /// @dev token0 -> USDC leg (ignored when token0 == USDC).
+    SwapLeg swap0;
+    /// @dev token1 -> USDC leg (ignored when token1 == USDC).
+    SwapLeg swap1;
     uint16 slippageBps;
     uint256 decreaseAmount0Min;
     uint256 decreaseAmount1Min;
     uint256 deadline;
     uint256 minUsdcOut;
-    bytes swapPoolParam;
 }
 
 /// @notice Parameters for harvesting accrued LP fees without exiting.
 struct CollectLpParams {
     address onBehalfOf;
     uint256 tokenId;
-    bool swapWethToUsdc;
-    uint256 swapAmountOutMin;
-    uint256 expectedSwapOut;
+    /// @dev Swap harvested non-USDC fees to USDC through the legs below.
+    bool swapFeesToUsdc;
+    SwapLeg swap0;
+    SwapLeg swap1;
     uint16 slippageBps;
     uint256 deadline;
-    bytes swapPoolParam;
 }
 
 /// @title IYieldHandler
@@ -66,11 +87,11 @@ interface IYieldHandler {
 
     /// @return tokenId   Newly minted LP NFT id (owned by the Safe).
     /// @return basisUsd6 USDC-equivalent value of the freshly minted LP.
-    /// @return usedWeth  WETH consumed by the mint.
-    /// @return usedUsdc  USDC consumed by the mint.
+    /// @return used0     token0 consumed by the mint.
+    /// @return used1     token1 consumed by the mint.
     function openLp(
         OpenLpParams calldata params
-    ) external returns (uint256 tokenId, uint128 basisUsd6, uint128 usedWeth, uint128 usedUsdc);
+    ) external returns (uint256 tokenId, uint128 basisUsd6, uint128 used0, uint128 used1);
 
     /// @param basisForExit The manager-computed (exitBps-prorated) basis for
     ///                     this close; used only for the zero-liquidity

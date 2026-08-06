@@ -62,8 +62,8 @@ abstract contract YieldStorage {
         uint8 indexed protocol,
         uint256 indexed tokenId,
         uint256 usdcInput,
-        uint128 wethToLp,
-        uint128 usdcToLp,
+        uint128 amount0ToLp,
+        uint128 amount1ToLp,
         uint128 currentValueUsd6
     );
     event PositionSwitched(

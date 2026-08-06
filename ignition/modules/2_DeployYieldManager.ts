@@ -5,6 +5,7 @@ import {
     AERODROME_CL_FACTORY_ADDRESS,
     AERODROME_SLIPSTREAM_NPM_ADDRESS,
     AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
+    AERODROME_VOTER_ADDRESS,
     PROTOCOL_REGISTRY_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
     UNISWAP_V3_NPM_ADDRESS,
@@ -22,12 +23,18 @@ const abi = AbiCoder.defaultAbiCoder();
 const UNISWAP_V3 = YieldProtocol.UNISWAP_V3;
 const AERODROME = YieldProtocol.AERODROME;
 
-// Default pool-param allow-lists, matching the standalone helpers' deploy
-// defaults: Uniswap V3 fee tiers {100, 500, 3000} (10000 deliberately
-// excluded — thin pool, cheap slot0 manipulation); Aerodrome Slipstream tick
-// spacings {100, 200}.
-const UNIV3_POOL_PARAMS = [100, 500, 3000].map((feeTier) => abi.encode(["uint24"], [feeTier]));
-const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) => abi.encode(["int24"], [tickSpacing]));
+// Default pool-param allow-lists — pool params carry the pair:
+// abi.encode(token0, token1, feeTier | tickSpacing). WETH/USDC pools with
+// Uniswap V3 fee tiers {100, 500, 3000} (10000 deliberately excluded — thin
+// pool, cheap slot0 manipulation); Aerodrome Slipstream tick spacings
+// {100, 200}. Additional pairs are allow-listed post-deploy via
+// setPoolParamAllowed.
+const UNIV3_POOL_PARAMS = [100, 500, 3000].map((feeTier) =>
+    abi.encode(["address", "address", "uint24"], [WETH_ADDRESS, USDC_ADDRESS, feeTier]),
+);
+const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) =>
+    abi.encode(["address", "address", "int24"], [WETH_ADDRESS, USDC_ADDRESS, tickSpacing]),
+);
 
 /**
  * Deployment module for the yield adapter stack (AP-4817):
@@ -112,7 +119,6 @@ export default buildModule("DeployYieldManager", (m) => {
     const uniV3YieldHandler = m.contract("UniV3YieldHandler", [
         UNISWAP_V3_NPM_ADDRESS,
         USDC_ADDRESS,
-        WETH_ADDRESS,
         UNISWAP_V3_SWAP_ROUTER_ADDRESS,
         UNISWAP_V3_FACTORY_ADDRESS,
     ]);
@@ -120,9 +126,9 @@ export default buildModule("DeployYieldManager", (m) => {
     const aerodromeYieldHandler = m.contract("AerodromeYieldHandler", [
         AERODROME_SLIPSTREAM_NPM_ADDRESS,
         USDC_ADDRESS,
-        WETH_ADDRESS,
         AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
         AERODROME_CL_FACTORY_ADDRESS,
+        AERODROME_VOTER_ADDRESS,
     ]);
 
     const safeYieldManager = m.contract(

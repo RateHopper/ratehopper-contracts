@@ -12,35 +12,34 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../interfaces/safe/ISafe.sol";
 import {IProtocolRegistry} from "../interfaces/IProtocolRegistry.sol";
-import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams} from "../interfaces/IYieldHandler.sol";
+import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, SwapLeg} from "../interfaces/IYieldHandler.sol";
 import {YieldStorage} from "./handlers/YieldStorage.sol";
 import "../common/Types.sol";
 
-/// @notice Parameters for atomically moving a full position to another
-///         WETH/USDC pool (different protocol and/or pool param). The close
-///         leg's realized USDC becomes the open leg's input, so no
-///         `usdcAmount` is supplied.
+/// @notice Parameters for atomically moving a full position to another pool
+///         (different protocol, pair and/or pool param). The close leg's
+///         realized USDC becomes the open leg's input, so no `usdcAmount` is
+///         supplied. Swap legs follow the SwapLeg convention: legs whose pool
+///         token IS USDC are ignored.
 struct SwitchLpParams {
     address onBehalfOf;
     uint256 tokenId;
     // close leg (exitBps is always 10_000)
-    uint256 closeSwapAmountOutMin;
-    uint256 closeExpectedSwapOut;
+    SwapLeg closeSwap0;
+    SwapLeg closeSwap1;
     uint16 closeSlippageBps;
     uint256 decreaseAmount0Min;
     uint256 decreaseAmount1Min;
     uint256 minUsdcOut;
-    bytes closeSwapPoolParam;
     // open leg
     int24 tickLower;
     int24 tickUpper;
     uint256 mintAmount0Min;
     uint256 mintAmount1Min;
-    uint256 openSwapAmountOutMin;
-    uint256 openExpectedSwapOut;
+    SwapLeg openSwap0;
+    SwapLeg openSwap1;
     uint16 openSlippageBps;
     bytes lpPoolParam;
-    bytes openSwapPoolParam;
     uint256 deadline;
 }
 
@@ -213,9 +212,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
 
         bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.openLp, (params)));
         uint128 basisUsd6;
-        uint128 usedWeth;
-        uint128 usedUsdc;
-        (tokenId, basisUsd6, usedWeth, usedUsdc) = abi.decode(ret, (uint256, uint128, uint128, uint128));
+        uint128 used0;
+        uint128 used1;
+        (tokenId, basisUsd6, used0, used1) = abi.decode(ret, (uint256, uint128, uint128, uint128));
 
         // Persist the open-time basis so closes always price against an
         // on-chain value neither the Safe nor the operator can attest, and
@@ -225,7 +224,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         $.residualBasisUsd6Of[protocol][tokenId] = basisUsd6;
         $.positionHandlerOf[protocol][tokenId] = handler;
 
-        emit PositionOpened(params.onBehalfOf, protocol, tokenId, params.usdcAmount, usedWeth, usedUsdc, basisUsd6);
+        emit PositionOpened(params.onBehalfOf, protocol, tokenId, params.usdcAmount, used0, used1, basisUsd6);
     }
 
     /// @notice Close (partially or fully) an LP position opened through this
@@ -281,9 +280,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         );
     }
 
-    /// @notice Atomically move a full position to another WETH/USDC pool —
-    ///         a different protocol, a different fee tier / tick spacing, or
-    ///         both. The close leg realizes the position to USDC through the
+    /// @notice Atomically move a full position to another pool — a different
+    ///         protocol, a different pair, a different fee tier / tick
+    ///         spacing, or any mix. The close leg realizes the position to USDC through the
     ///         pinned handler; the open leg supplies that exact USDC to the
     ///         target protocol's current handler.
     /// @dev    The original basis is carried onto the replacement position
@@ -363,14 +362,13 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
                         onBehalfOf: p.onBehalfOf,
                         tokenId: p.tokenId,
                         exitBps: 10_000,
-                        swapAmountOutMin: p.closeSwapAmountOutMin,
-                        expectedSwapOut: p.closeExpectedSwapOut,
+                        swap0: p.closeSwap0,
+                        swap1: p.closeSwap1,
                         slippageBps: p.closeSlippageBps,
                         decreaseAmount0Min: p.decreaseAmount0Min,
                         decreaseAmount1Min: p.decreaseAmount1Min,
                         deadline: p.deadline,
-                        minUsdcOut: p.minUsdcOut,
-                        swapPoolParam: p.closeSwapPoolParam
+                        minUsdcOut: p.minUsdcOut
                     }),
                     basisForExit
                 )
@@ -398,12 +396,15 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
                         tickUpper: p.tickUpper,
                         mintAmount0Min: p.mintAmount0Min,
                         mintAmount1Min: p.mintAmount1Min,
-                        swapAmountOutMin: p.openSwapAmountOutMin,
-                        expectedSwapOut: p.openExpectedSwapOut,
+                        swap0: p.openSwap0,
+                        swap1: p.openSwap1,
                         slippageBps: p.openSlippageBps,
                         deadline: p.deadline,
                         lpPoolParam: p.lpPoolParam,
-                        swapPoolParam: p.openSwapPoolParam
+                        // Switch re-opens the leg unstaked; gauge staking is only
+                        // offered on the direct openLp path (SwitchLpParams has no
+                        // stake flag).
+                        stakeInGauge: false
                     })
                 )
             )

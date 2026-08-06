@@ -14,8 +14,7 @@ contract MockNextYieldHandler is V3StyleYieldHandler {
         uint8 _protocolId,
         address _positionManager,
         IERC20 _usdc,
-        IERC20 _weth,
         address _swapRouter,
         IUniswapV3Factory _factory
-    ) V3StyleYieldHandler(_protocolId, _positionManager, _usdc, _weth, _swapRouter, _factory) {}
+    ) V3StyleYieldHandler(_protocolId, _positionManager, _usdc, _swapRouter, _factory) {}
 }

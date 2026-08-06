@@ -12,6 +12,7 @@ import {BaseYieldHandler} from "./BaseYieldHandler.sol";
 /// @notice BaseYieldHandler hooks implemented against the canonical Uniswap
 ///         V3 interfaces (factory getPool by `uint24 feeTier`, 7-field
 ///         `slot0`, SwapRouter02 `exactInputSingle` without a deadline).
+///         Pool params are `abi.encode(token0, token1, uint24 feeTier)`.
 ///         The protocol id is a constructor argument so production handlers
 ///         pin a canonical id while tests can register V3-shaped handlers
 ///         under new ids without duplicating the hook bodies.
@@ -22,17 +23,26 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
         uint8 _protocol,
         address _positionManager,
         IERC20 _usdc,
-        IERC20 _weth,
         address _swapRouter,
         IUniswapV3Factory _factory
-    ) BaseYieldHandler(_protocol, _positionManager, _usdc, _weth, _swapRouter) {
+    ) BaseYieldHandler(_protocol, _positionManager, _usdc, _swapRouter) {
         if (address(_factory) == address(0)) revert ZeroAddress();
         FACTORY = _factory;
     }
 
+    function _decodePoolParam(
+        bytes memory poolParam
+    ) internal pure returns (address token0, address token1, uint24 feeTier) {
+        (token0, token1, feeTier) = abi.decode(poolParam, (address, address, uint24));
+    }
+
+    function _poolTokens(bytes memory poolParam) internal pure override returns (address token0, address token1) {
+        (token0, token1, ) = _decodePoolParam(poolParam);
+    }
+
     function _getPool(bytes memory poolParam) internal view override returns (address) {
-        uint24 feeTier = abi.decode(poolParam, (uint24));
-        return FACTORY.getPool(address(WETH), address(USDC), feeTier);
+        (address token0, address token1, uint24 feeTier) = _decodePoolParam(poolParam);
+        return FACTORY.getPool(token0, token1, feeTier);
     }
 
     function _poolSqrtPriceX96(address pool) internal view override returns (uint160 sqrtPriceX96) {
@@ -48,7 +58,7 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
         uint256 amountOutMin,
         uint256 /* deadline — SwapRouter02 has no deadline field */
     ) internal pure override returns (bytes memory) {
-        uint24 feeTier = abi.decode(poolParam, (uint24));
+        (, , uint24 feeTier) = _decodePoolParam(poolParam);
         return
             abi.encodeCall(
                 IV3SwapRouter.exactInputSingle,
@@ -70,26 +80,26 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
         bytes memory lpPoolParam,
         int24 tickLower,
         int24 tickUpper,
-        uint256 wethDesired,
-        uint256 usdcDesired,
+        uint256 amount0Desired,
+        uint256 amount1Desired,
         uint256 amount0Min,
         uint256 amount1Min,
         address recipient,
         uint256 deadline
-    ) internal view override returns (bytes memory) {
-        uint24 feeTier = abi.decode(lpPoolParam, (uint24));
+    ) internal pure override returns (bytes memory) {
+        (address token0, address token1, uint24 feeTier) = _decodePoolParam(lpPoolParam);
         return
             abi.encodeCall(
                 INonfungiblePositionManager.mint,
                 (
                     INonfungiblePositionManager.MintParams({
-                        token0: address(WETH),
-                        token1: address(USDC),
+                        token0: token0,
+                        token1: token1,
                         fee: feeTier,
                         tickLower: tickLower,
                         tickUpper: tickUpper,
-                        amount0Desired: wethDesired,
-                        amount1Desired: usdcDesired,
+                        amount0Desired: amount0Desired,
+                        amount1Desired: amount1Desired,
                         amount0Min: amount0Min,
                         amount1Min: amount1Min,
                         recipient: recipient,
@@ -106,6 +116,6 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
         (, , token0, token1, feeTier, , , liquidity, , , , ) = INonfungiblePositionManager(POSITION_MANAGER).positions(
             tokenId
         );
-        lpPoolParam = abi.encode(feeTier);
+        lpPoolParam = abi.encode(token0, token1, feeTier);
     }
 }

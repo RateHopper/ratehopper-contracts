@@ -37,16 +37,21 @@ contract MockSlipstreamSwapRouter {
     }
 
     uint256 public output;
+    mapping(address => uint256) public outputFor;
 
     function setOutput(uint256 newOutput) external {
         output = newOutput;
+    }
+
+    function setOutputFor(address tokenOut, uint256 newOutput) external {
+        outputFor[tokenOut] = newOutput;
     }
 
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
         if (params.amountIn > 0) {
             IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
         }
-        amountOut = output;
+        amountOut = outputFor[params.tokenOut] != 0 ? outputFor[params.tokenOut] : output;
         if (amountOut > 0) {
             IERC20(params.tokenOut).transfer(params.recipient, amountOut);
         }
@@ -73,16 +78,24 @@ contract MockCLPool {
     }
 }
 
-/// @notice Factory stub returning a single configurable pool for any lookup.
+/// @notice Factory stub returning a single configurable default pool for any
+///         lookup, with optional per-(pair, tickSpacing) overrides for
+///         multi-pool tests (arbitrary-pair support).
 contract MockCLFactory {
     address public pool;
+    mapping(bytes32 => address) public keyedPools;
 
     function setPool(address newPool) external {
         pool = newPool;
     }
 
-    function getPool(address, address, int24) external view returns (address) {
-        return pool;
+    function setPoolFor(address token0, address token1, int24 tickSpacing, address newPool) external {
+        keyedPools[keccak256(abi.encode(token0, token1, tickSpacing))] = newPool;
+    }
+
+    function getPool(address token0, address token1, int24 tickSpacing) external view returns (address) {
+        address keyed = keyedPools[keccak256(abi.encode(token0, token1, tickSpacing))];
+        return keyed != address(0) ? keyed : pool;
     }
 }
 
@@ -90,7 +103,9 @@ contract MockCLFactory {
 ///         per-tokenId owner / pair / liquidity / principal / owed, keyed by
 ///         `int24 tickSpacing` (not fee), and implements mint / positions /
 ///         ownerOf / collect / decreaseLiquidity / burn so the full LP
-///         lifecycle can be driven on a plain network.
+///         lifecycle can be driven on a plain network. Also carries just
+///         enough ERC721 surface (approve / getApproved / transferFrom) for
+///         MockCLGauge to move the NFT in the gauge-staking tests.
 contract MockCLNonfungiblePositionManager {
     struct Position {
         address owner;
@@ -106,6 +121,7 @@ contract MockCLNonfungiblePositionManager {
     }
 
     mapping(uint256 => Position) public positionsData;
+    mapping(uint256 => address) public getApproved;
     uint256 public nextId = 1;
 
     // Config applied to the next `mint`.
@@ -218,6 +234,21 @@ contract MockCLNonfungiblePositionManager {
         return positionsData[tokenId].owner;
     }
 
+    /// @dev Minimal ERC721 `approve`: only the current owner may set it.
+    function approve(address to, uint256 tokenId) external {
+        require(msg.sender == positionsData[tokenId].owner, "not owner");
+        getApproved[tokenId] = to;
+    }
+
+    /// @dev Minimal ERC721 `transferFrom`: caller must be the owner or the
+    ///      approved address, `from` must match the current owner.
+    function transferFrom(address from, address to, uint256 tokenId) external {
+        require(from == positionsData[tokenId].owner, "wrong owner");
+        require(msg.sender == from || msg.sender == getApproved[tokenId], "not authorized");
+        positionsData[tokenId].owner = to;
+        getApproved[tokenId] = address(0);
+    }
+
     function collect(
         INonfungiblePositionManager.CollectParams calldata params
     ) external payable returns (uint256 amount0, uint256 amount1) {
@@ -250,5 +281,53 @@ contract MockCLNonfungiblePositionManager {
         Position storage p = positionsData[tokenId];
         require(p.liquidity == 0, "not empty");
         delete positionsData[tokenId];
+    }
+}
+
+/// @notice Settable pool -> gauge registry stub for `IVoter`, driving
+///         AerodromeYieldHandler's `_stakeInGauge` / `_unstakeIfStaked` hooks.
+contract MockVoter {
+    mapping(address => address) private _gauges;
+
+    function setGauge(address pool, address gauge) external {
+        _gauges[pool] = gauge;
+    }
+
+    function gauges(address pool) external view returns (address) {
+        return _gauges[pool];
+    }
+}
+
+/// @dev Tiny local ERC721 surface so MockCLGauge can move the NFT without
+///      depending on the full MockCLNonfungiblePositionManager type.
+interface IMockERC721Transfer {
+    function transferFrom(address from, address to, uint256 tokenId) external;
+}
+
+/// @notice Minimal `ICLGauge` stub: `deposit` pulls the NFT from the caller
+///         (the Safe, which must have approved this gauge), `withdraw` sends
+///         it back. Mirrors the real gauge's custody-by-transfer behavior
+///         closely enough to drive the handler's ownership checks.
+contract MockCLGauge {
+    address public immutable NFT;
+
+    constructor(address _nft) {
+        NFT = _nft;
+    }
+
+    function deposit(uint256 tokenId) external {
+        IMockERC721Transfer(NFT).transferFrom(msg.sender, address(this), tokenId);
+    }
+
+    function withdraw(uint256 tokenId) external {
+        IMockERC721Transfer(NFT).transferFrom(address(this), msg.sender, tokenId);
+    }
+
+    event RewardClaimed(uint256 indexed tokenId, address indexed to);
+
+    /// @dev Mock reward claim — records the call so tests can assert collectLp
+    ///      routed a staked position to the gauge instead of reverting.
+    function getReward(uint256 tokenId) external {
+        emit RewardClaimed(tokenId, msg.sender);
     }
 }
