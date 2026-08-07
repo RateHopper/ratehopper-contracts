@@ -60,6 +60,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     address private immutable __self = address(this);
 
     error OnlyDelegatecall();
+    error TokenApprovalFailed(address token);
     /// @notice Thrown when `OpenLpParams.stakeInGauge` is set for a protocol
     ///         whose handler has no gauge (e.g. Uniswap V3).
     error GaugeStakingNotSupported();
@@ -124,10 +125,11 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
     /// @dev Stake the just-minted NFT into the protocol's gauge. Default: the
     ///      protocol has no gauge, so opting in reverts. Aerodrome overrides it.
-    function _stakeInGauge(address /* _onBehalfOf */, uint256 /* tokenId */, bytes memory /* lpPoolParam */)
-        internal
-        virtual
-    {
+    function _stakeInGauge(
+        address /* _onBehalfOf */,
+        uint256 /* tokenId */,
+        bytes memory /* lpPoolParam */
+    ) internal virtual {
         revert GaugeStakingNotSupported();
     }
 
@@ -137,15 +139,12 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     function _unstakeIfStaked(address /* _onBehalfOf */, uint256 /* tokenId */) internal virtual {}
 
     /// @dev Harvest gauge rewards for a STAKED `tokenId` to the Safe and report
-    ///      that it handled the collect (so the caller skips the position-fee
-    ///      collect, which would revert on the gauge-owned NFT). Default: no
-    ///      gauge → returns false and the normal fee collect runs. Aerodrome
-    ///      overrides it; returns false for unstaked positions.
-    function _collectStakedRewardIfStaked(address /* _onBehalfOf */, uint256 /* tokenId */)
-        internal
-        virtual
-        returns (bool)
-    {
+    ///      whether the NFT must be temporarily unstaked for the normal LP-fee
+    ///      collect. Default: no gauge → false. Aerodrome overrides it.
+    function _collectStakedRewardIfStaked(
+        address /* _onBehalfOf */,
+        uint256 /* tokenId */
+    ) internal virtual returns (bool) {
         return false;
     }
 
@@ -264,12 +263,14 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
     /// @inheritdoc IYieldHandler
     function collectLp(CollectLpParams calldata p) external onlyDelegatecall {
-        // A staked position is owned by the gauge, not the Safe: harvest its
-        // gauge rewards (AERO) to the Safe and stop. Unstaked / non-gauge
-        // positions fall through to the normal LP-fee collect below.
-        if (_collectStakedRewardIfStaked(p.onBehalfOf, p.tokenId)) return;
+        (address token0, address token1, bytes memory lpPoolParam, ) = _position(p.tokenId);
 
-        (address token0, address token1, , ) = _position(p.tokenId);
+        // A staked position is owned by the gauge, so claim its incentives,
+        // temporarily return the NFT to the Safe, harvest the position's LP
+        // trading fees, then restore the stake. Returning after getReward would
+        // silently leave all trading fees uncollected until the final close.
+        bool wasStaked = _collectStakedRewardIfStaked(p.onBehalfOf, p.tokenId);
+        if (wasStaked) _unstakeIfStaked(p.onBehalfOf, p.tokenId);
         if (IERC721(POSITION_MANAGER).ownerOf(p.tokenId) != p.onBehalfOf) revert LpNotOnSafe();
 
         // Swap params are validated only on the swap path; the no-swap
@@ -291,6 +292,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
                 _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, 34, 35, 36);
             }
         }
+
+        if (wasStaked) _stakeInGauge(p.onBehalfOf, p.tokenId, lpPoolParam);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -479,9 +482,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         if (leg.amountOutMin < (leg.expectedOut * (10_000 - slippageBps)) / 10_000) {
             revert SwapMinBelowSlippageFloor();
         }
-        (address expect0, address expect1) = token < address(USDC)
-            ? (token, address(USDC))
-            : (address(USDC), token);
+        (address expect0, address expect1) = token < address(USDC) ? (token, address(USDC)) : (address(USDC), token);
         _validatePool(_getPool(leg.poolParam), expect0, expect1);
     }
 
@@ -507,12 +508,13 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         if (floor > 0 && IPoolMinimal(pool).liquidity() < floor) revert PoolTooThin();
     }
 
-    /// @dev Module-mediated ERC20 approve from the Safe. Raw `approve` is
-    ///      fine even for USDT-style tokens: every approval here transitions
-    ///      through zero (set for the operation, reset right after), and the
-    ///      Safe module call never decodes a return value.
+    /// @dev Module-mediated ERC20 approve from the Safe. Supports both
+    ///      standard bool-returning tokens and no-return tokens, and rejects a
+    ///      false return so a failed zero-reset cannot leave router allowance
+    ///      live after an otherwise-successful operation.
     function _safeApprove(address _onBehalfOf, address token, address spender, uint256 amount, uint8 step) internal {
-        _safeExec(_onBehalfOf, token, abi.encodeCall(IERC20.approve, (spender, amount)), step);
+        bytes memory ret = _safeExec(_onBehalfOf, token, abi.encodeCall(IERC20.approve, (spender, amount)), step);
+        if (ret.length > 0 && !abi.decode(ret, (bool))) revert TokenApprovalFailed(token);
     }
 
     /// @dev Module-mediated Safe call with inner-revert bubbling.

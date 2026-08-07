@@ -27,6 +27,7 @@ contract MockERC20 is IERC20 {
 
     address public falseTransferTo;
     address public revertTransferTo;
+    bool public falseApproveZero;
 
     constructor(string memory _name, string memory _symbol, uint8 _decimals) {
         name = _name;
@@ -42,6 +43,10 @@ contract MockERC20 is IERC20 {
         revertTransferTo = account;
     }
 
+    function setFalseApproveZero(bool value) external {
+        falseApproveZero = value;
+    }
+
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
         totalSupply += amount;
@@ -49,6 +54,7 @@ contract MockERC20 is IERC20 {
     }
 
     function approve(address spender, uint256 amount) external override returns (bool) {
+        if (amount == 0 && falseApproveZero) return false;
         allowance[msg.sender][spender] = amount;
         emit Approval(msg.sender, spender, amount);
         return true;

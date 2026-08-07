@@ -991,8 +991,8 @@ describe("SafeYieldManager", function () {
             expect(await clNpm.ownerOf(1)).to.equal(ZERO);
         });
 
-        it("harvests gauge rewards on collectLp for a staked Aerodrome position (stays staked)", async function () {
-            const { manager, operatorEOA, safeAddr, clNpm, clPool, voter } =
+        it("harvests gauge rewards and LP fees for a staked Aerodrome position, then restakes", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, weth, usdc, clNpm, clPool, voter } =
                 await loadFixture(deployYieldManagerHarness);
 
             const Gauge = await ethers.getContractFactory("MockCLGauge");
@@ -1006,12 +1006,30 @@ describe("SafeYieldManager", function () {
                 .openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stakeInGauge: true }));
             expect(await clNpm.ownerOf(1)).to.equal(gaugeAddr);
 
-            // A staked position's collect claims gauge rewards to the Safe and does not revert.
+            await (await clNpm.setOwed(1, 100_000n, 40_000n)).wait();
+            const safeWethBefore = await weth.balanceOf(safeAddr);
+            const safeUsdcBefore = await usdc.balanceOf(safeAddr);
+
             await expect(manager.connect(operatorEOA).collectLp(AERODROME, collectParams(safeAddr, 1, TICK_SPACING)))
                 .to.emit(gauge, "RewardClaimed")
-                .withArgs(1n, safeAddr);
+                .withArgs(1n, safeAddr)
+                .and.to.emit(manager, "FeesCollected")
+                .withArgs(
+                    safeAddr,
+                    AERODROME,
+                    1n,
+                    await weth.getAddress(),
+                    100_000n,
+                    2_500n,
+                    await usdc.getAddress(),
+                    40_000n,
+                    1_000n,
+                );
 
-            // Collect harvests rewards without unstaking — the NFT stays in the gauge.
+            expect(await weth.balanceOf(treasury.address)).to.equal(2_500n);
+            expect(await usdc.balanceOf(treasury.address)).to.equal(1_000n);
+            expect((await weth.balanceOf(safeAddr)) - safeWethBefore).to.equal(97_500n);
+            expect((await usdc.balanceOf(safeAddr)) - safeUsdcBefore).to.equal(39_000n);
             expect(await clNpm.ownerOf(1)).to.equal(gaugeAddr);
         });
 
@@ -1490,6 +1508,20 @@ describe("SafeYieldManager", function () {
     });
 
     describe("arbitrary pairs (two-leg swaps)", function () {
+        it("reverts the whole open when a token rejects the final approval reset", async function () {
+            const { manager, operatorEOA, safeAddr, weth, uniNpm, uniHandler } =
+                await loadFixture(deployYieldManagerHarness);
+
+            await (await weth.setFalseApproveZero(true)).wait();
+            await expect(
+                manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER)),
+            ).to.be.revertedWithCustomError(uniHandler, "TokenApprovalFailed");
+
+            // The revert rolls the mint and the initial router approval back.
+            expect(await uniNpm.nextId()).to.equal(1n);
+            expect(await weth.allowance(safeAddr, await uniNpm.getAddress())).to.equal(0n);
+        });
+
         it("opens and closes a non-USDC pair position by swapping both legs through USDC", async function () {
             const { manager, deployer, operatorEOA, safeAddr, usdc, usdcAddr, uniFactory, uniNpm, uniRouter } =
                 await loadFixture(deployYieldManagerHarness);

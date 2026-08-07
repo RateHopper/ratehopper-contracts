@@ -57,9 +57,8 @@ contract AerodromeYieldHandler is BaseYieldHandler {
     }
 
     /// @dev When `tokenId` is staked in its pool's gauge, claim its accrued AERO
-    ///      emissions to the Safe and report handled (the staked NFT is owned by
-    ///      the gauge, so the position-fee collect cannot run); otherwise report
-    ///      not-handled so the base runs the normal LP-fee collect.
+    ///      emissions to the Safe and report that the base must temporarily
+    ///      unstake it to collect the position's LP trading fees.
     function _collectStakedRewardIfStaked(address _onBehalfOf, uint256 tokenId) internal override returns (bool) {
         (, , bytes memory lpPoolParam, ) = _position(tokenId);
         address gauge = VOTER.gauges(_getPool(lpPoolParam));
