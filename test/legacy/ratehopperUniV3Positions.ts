@@ -2,7 +2,6 @@ import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import dotenv from "dotenv";
 dotenv.config();
-import Safe from "@safe-global/protocol-kit";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 
 import {
@@ -14,7 +13,7 @@ import {
     WETH_ADDRESS,
 } from "../helpers/constants";
 import { FLUID_VAULT_RESOLVER, FLUID_WETH_USDC_VAULT, FluidHelper } from "../helpers/protocolsDebt/fluid";
-import { eip1193Provider, fundSignerWithETH } from "../helpers/utils";
+import { fundSignerWithETH } from "../helpers/utils";
 import FluidVaultAbi from "../../externalAbi/fluid/fluidVaultT1.json";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -24,7 +23,44 @@ import FluidVaultAbi from "../../externalAbi/fluid/fluidVaultT1.json";
 const UNISWAP_V3_NPM_ADDRESS = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
 const WETH_USDC_500_POOL = "0xd0b53D9277642d899DF5C87A3966A349A798F224";
 
-const safeAddress = process.env.TESTING_SAFE_WALLET_ADDRESS!;
+// Set per test in the fork suite's beforeEach: a freshly deployed
+// MockSafeHarness, so the suite is self-contained (no env-configured
+// on-chain Safe whose owner set can rotate out from under a pinned key).
+let safeAddress: string;
+
+/// Protocol-kit-shaped adapter over MockSafeHarness so the existing
+/// createTransaction / createEnableModuleTx / executeTransaction call sites
+/// run unchanged. The harness executes any module call without registration,
+/// so enableModule is a no-op; inner reverts (which the harness converts to a
+/// false success flag) are re-thrown so failures stay loud.
+class MockSafeWallet {
+    constructor(private readonly harness: any) {}
+
+    async createEnableModuleTx(_module: string): Promise<{ transactions: MetaTransactionData[] }> {
+        return { transactions: [] };
+    }
+
+    async createTransaction(tx: { transactions: MetaTransactionData[] }): Promise<{
+        transactions: MetaTransactionData[];
+    }> {
+        return tx;
+    }
+
+    async executeTransaction(tx: { transactions: MetaTransactionData[] }): Promise<void> {
+        for (const t of tx.transactions) {
+            const [ok, ret] = await this.harness.execTransactionFromModuleReturnData.staticCall(
+                t.to,
+                t.value,
+                t.data,
+                0,
+            );
+            if (!ok) {
+                throw new Error(`Safe inner call to ${t.to} reverted (returndata: ${ret})`);
+            }
+            await (await this.harness.execTransactionFromModuleReturnData(t.to, t.value, t.data, 0)).wait();
+        }
+    }
+}
 
 // Fee config
 const MAX_FEE_BPS = 2000;
@@ -852,16 +888,13 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
     this.timeout(300_000);
 
     let signer: ethers.Wallet;
-    let safeWallet: Awaited<ReturnType<typeof Safe.init>>;
+    let safeWallet: MockSafeWallet;
 
     beforeEach(async function () {
-        if (!process.env.TESTING_SAFE_OWNER_KEY || !process.env.TESTING_SAFE_WALLET_ADDRESS) {
-            this.skip();
-        }
         // Reset the fork between tests so each starts from a clean Base
-        // mainnet snapshot. The env-driven Safe is referenced by address
-        // (not redeployed), so without this reset state from one test
-        // (e.g. an unrepaid Fluid debt) leaks into the next.
+        // mainnet snapshot, then deploy a fresh MockSafeHarness as the Safe —
+        // without the reset, state from one test (e.g. an unrepaid Fluid
+        // debt) leaks into the next.
         await network.provider.request({
             method: "hardhat_reset",
             params: [
@@ -874,15 +907,15 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
             ],
         });
 
-        signer = new ethers.Wallet(process.env.TESTING_SAFE_OWNER_KEY!, ethers.provider);
+        const Harness = await ethers.getContractFactory("MockSafeHarness");
+        const harness = await Harness.deploy();
+        await harness.waitForDeployment();
+        safeAddress = await harness.getAddress();
+        safeWallet = new MockSafeWallet(harness);
+
+        signer = new ethers.Wallet(ethers.Wallet.createRandom().privateKey, ethers.provider);
         await fundSignerWithETH(signer.address, "10");
         await fundSignerWithETH(safeAddress, "10");
-
-        safeWallet = await Safe.init({
-            provider: eip1193Provider,
-            signer: process.env.TESTING_SAFE_OWNER_KEY,
-            safeAddress,
-        });
     });
 
     it("closes an LP-backed Fluid debt position end-to-end via openLp + closeLp", async function () {
@@ -897,7 +930,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
         console.log("\n  ─── Deployed addresses ───");
         console.log(`    RatehopperUniV3Positions: ${rhpAddress}`);
         console.log(`    SafeDebtManager:     ${safeDebtManagerAddress}`);
-        console.log(`    Safe (env-driven):   ${safeAddress}`);
+        console.log(`    Safe (MockSafeHarness): ${safeAddress}`);
         console.log(`    Treasury:            ${treasury.address}`);
 
         // 1. Enable both modules on the Safe: SafeDebtManager (for exit's
@@ -1049,7 +1082,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
 
         console.log("\n  ─── openLp setup ───");
         console.log(`    RatehopperUniV3Positions: ${rhpAddress}`);
-        console.log(`    Safe (env-driven):   ${safeAddress}`);
+        console.log(`    Safe (MockSafeHarness): ${safeAddress}`);
 
         // 1. Enable RatehopperUniV3Positions as a Safe module so openLp can drive
         //    the swap + LP mint via Safe.execTransactionFromModule.
@@ -1149,7 +1182,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
 
         console.log("\n  ─── collectLp setup ───");
         console.log(`    RatehopperUniV3Positions: ${rhpAddress}`);
-        console.log(`    Safe (env-driven):   ${safeAddress}`);
+        console.log(`    Safe (MockSafeHarness): ${safeAddress}`);
         console.log(`    Treasury:            ${treasury.address}`);
         console.log(`    feeCollectBps:       ${COLLECT_FEE_BPS} (${COLLECT_FEE_BPS / 100}%)`);
 
@@ -1473,7 +1506,7 @@ describe("RatehopperUniV3Positions - integration (Base fork)", function () {
 
         console.log("\n  ─── operator-path setup ───");
         console.log(`    RatehopperUniV3Positions: ${rhpAddress}`);
-        console.log(`    Safe (env-driven):   ${safeAddress}`);
+        console.log(`    Safe (MockSafeHarness): ${safeAddress}`);
         console.log(`    Operator EOA:        ${operatorEOA.address}`);
         console.log(`    Stranger EOA:        ${stranger.address}`);
 
