@@ -163,8 +163,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         uint256 half0 = p.usdcAmount / 2;
         uint256 half1 = p.usdcAmount - half0;
 
-        (uint256 desired0, uint256 spent0) = _acquireSide(p, token0, half0, p.swap0, 20, 3, 21);
-        (uint256 desired1, uint256 spent1) = _acquireSide(p, token1, half1, p.swap1, 31, 32, 33);
+        uint256 desired0 = _acquireSide(p, token0, half0, p.swap0, 20, 3, 21);
+        uint256 desired1 = _acquireSide(p, token1, half1, p.swap1, 31, 32, 33);
 
         _safeApprove(p.onBehalfOf, token0, POSITION_MANAGER, desired0, 22);
         _safeApprove(p.onBehalfOf, token1, POSITION_MANAGER, desired1, 23);
@@ -176,10 +176,10 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         _safeApprove(p.onBehalfOf, token0, POSITION_MANAGER, 0, 24);
         _safeApprove(p.onBehalfOf, token1, POSITION_MANAGER, 0, 25);
 
-        if (IERC721(POSITION_MANAGER).ownerOf(tokenId) != p.onBehalfOf) revert LpNotOnSafe();
+        _requireOwnedBy(p.onBehalfOf, tokenId);
 
         // Value each leg at its just-executed swap rate (identity for USDC).
-        basisUsd6 = (_legValueUsdc(token0, used0, spent0, desired0) + _legValueUsdc(token1, used1, spent1, desired1))
+        basisUsd6 = (_legValueUsdc(token0, used0, half0, desired0) + _legValueUsdc(token1, used1, half1, desired1))
             .toUint128();
 
         // Opt-in gauge stake. Runs AFTER the ownerOf==Safe check and basis so
@@ -195,25 +195,25 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         CloseLpParams calldata p,
         uint128 basisForExit
     ) external onlyDelegatecall returns (uint128 currentValueUsd6) {
-        (address token0, address token1, , ) = _position(p.tokenId);
-        if (token0 != address(USDC)) _validateSwapLeg(token0, p.swap0, p.slippageBps);
-        if (token1 != address(USDC)) _validateSwapLeg(token1, p.swap1, p.slippageBps);
+        (address token0, address token1, , uint128 liquidity) = _position(p.tokenId);
+        _validateSwapLeg(token0, p.swap0, p.slippageBps);
+        _validateSwapLeg(token1, p.swap1, p.slippageBps);
         // A staked position is owned by the gauge; unstake it back to the Safe
         // first so the ownership guard and the existing decrease/collect/burn/swap
         // flow run unchanged. No-op for non-gauge protocols or an unstaked NFT.
         _unstakeIfStaked(p.onBehalfOf, p.tokenId);
-        if (IERC721(POSITION_MANAGER).ownerOf(p.tokenId) != p.onBehalfOf) revert LpNotOnSafe();
+        _requireOwnedBy(p.onBehalfOf, p.tokenId);
 
-        // Measure only deltas from this close.
-        uint256 t0Before = IERC20(token0).balanceOf(p.onBehalfOf);
-        uint256 t1Before = IERC20(token1).balanceOf(p.onBehalfOf);
+        // Measure only deltas from this close (USDC sides need no snapshot —
+        // their swap leg is skipped and the USDC delta is measured below).
+        uint256 t0Before = token0 == address(USDC) ? 0 : IERC20(token0).balanceOf(p.onBehalfOf);
+        uint256 t1Before = token1 == address(USDC) ? 0 : IERC20(token1).balanceOf(p.onBehalfOf);
         uint256 usdcBefore = USDC.balanceOf(p.onBehalfOf);
 
         // Harvest fees before principal so feeCollectBps does not tax capital.
         _collectLpFees(p.onBehalfOf, p.tokenId, token0, token1);
 
         // On full close, remove exact liquidity so burn can succeed.
-        (, , , uint128 liquidity) = _position(p.tokenId);
         uint128 liquidityToRemove = p.exitBps == 10_000
             ? liquidity
             : Math.mulDiv(uint256(liquidity), uint256(p.exitBps), 10_000).toUint128();
@@ -253,8 +253,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         }
 
         // Swap the non-USDC legs this close produced back to USDC.
-        if (token0 != address(USDC)) _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, 26, 10, 27);
-        if (token1 != address(USDC)) _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, 34, 35, 36);
+        _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, 26, 10, 27);
+        _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, 34, 35, 36);
 
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
         // Caller's final-value guard on gross realized USDC.
@@ -271,26 +271,24 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         // silently leave all trading fees uncollected until the final close.
         bool wasStaked = _collectStakedRewardIfStaked(p.onBehalfOf, p.tokenId);
         if (wasStaked) _unstakeIfStaked(p.onBehalfOf, p.tokenId);
-        if (IERC721(POSITION_MANAGER).ownerOf(p.tokenId) != p.onBehalfOf) revert LpNotOnSafe();
+        _requireOwnedBy(p.onBehalfOf, p.tokenId);
 
         // Swap params are validated only on the swap path; the no-swap
         // path intentionally ignores them.
+        uint256 t0Before;
+        uint256 t1Before;
         if (p.swapFeesToUsdc) {
             if (block.timestamp > p.deadline) revert DeadlineExpired();
-            if (token0 != address(USDC)) _validateSwapLeg(token0, p.swap0, p.slippageBps);
-            if (token1 != address(USDC)) _validateSwapLeg(token1, p.swap1, p.slippageBps);
+            _validateSwapLeg(token0, p.swap0, p.slippageBps);
+            _validateSwapLeg(token1, p.swap1, p.slippageBps);
+            t0Before = token0 == address(USDC) ? 0 : IERC20(token0).balanceOf(p.onBehalfOf);
+            t1Before = token1 == address(USDC) ? 0 : IERC20(token1).balanceOf(p.onBehalfOf);
         }
 
-        uint256 t0Before = IERC20(token0).balanceOf(p.onBehalfOf);
-        uint256 t1Before = IERC20(token1).balanceOf(p.onBehalfOf);
         _collectLpFees(p.onBehalfOf, p.tokenId, token0, token1);
         if (p.swapFeesToUsdc) {
-            if (token0 != address(USDC)) {
-                _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, 26, 10, 27);
-            }
-            if (token1 != address(USDC)) {
-                _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, 34, 35, 36);
-            }
+            _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, 26, 10, 27);
+            _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, 34, 35, 36);
         }
 
         if (wasStaked) _stakeInGauge(p.onBehalfOf, p.tokenId, lpPoolParam);
@@ -302,7 +300,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
     /// @dev Acquire one mint side from its USDC half: identity for USDC, a
     ///      leg-validated swap for any other token. Returns the amount now
-    ///      available for the mint and the USDC spent acquiring it.
+    ///      available for the mint.
     function _acquireSide(
         OpenLpParams calldata p,
         address token,
@@ -311,8 +309,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         uint8 approveStep,
         uint8 execStep,
         uint8 resetStep
-    ) internal returns (uint256 received, uint256 spentUsdc) {
-        if (token == address(USDC)) return (halfUsdc, halfUsdc);
+    ) internal returns (uint256 received) {
+        if (token == address(USDC)) return halfUsdc;
 
         _validateSwapLeg(token, leg, p.slippageBps);
         // Only consume tokens produced by this call, never pre-existing ones.
@@ -332,19 +330,24 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         received = IERC20(token).balanceOf(p.onBehalfOf) - balanceBefore;
         // Avoid accidental one-sided mints after a zero-output swap.
         if (received == 0) revert SwapFailed();
-        spentUsdc = halfUsdc;
     }
 
     /// @dev USDC value of a mint leg: the used amount itself for USDC, else
-    ///      the used amount priced at the leg's just-executed swap rate.
+    ///      the used amount priced at the leg's just-executed swap rate
+    ///      (`halfUsdc` bought `received`, the mint consumed `used` of it).
     function _legValueUsdc(
         address token,
         uint128 used,
-        uint256 spentUsdc,
+        uint256 halfUsdc,
         uint256 received
     ) internal view returns (uint256) {
         if (token == address(USDC)) return uint256(used);
-        return Math.mulDiv(uint256(used), spentUsdc, received);
+        return Math.mulDiv(uint256(used), halfUsdc, received);
+    }
+
+    /// @dev Require the Safe to own `tokenId` on the position manager.
+    function _requireOwnedBy(address _onBehalfOf, uint256 tokenId) internal view {
+        if (IERC721(POSITION_MANAGER).ownerOf(tokenId) != _onBehalfOf) revert LpNotOnSafe();
     }
 
     /// @dev Collect accrued fees through the manager so `feeCollectBps` can
@@ -441,7 +444,9 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         _safeApprove(_onBehalfOf, tokenIn, SWAP_ROUTER, 0, resetStep);
     }
 
-    /// @dev Swap the `token` the Safe accrued since `balanceBefore` back to USDC.
+    /// @dev Swap the `token` the Safe accrued since `balanceBefore` back to
+    ///      USDC. No-op for the USDC side itself — its "delta" IS the realized
+    ///      output, measured by the caller.
     function _swapDeltaToUsdc(
         address _onBehalfOf,
         address token,
@@ -452,6 +457,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         uint8 execStep,
         uint8 resetStep
     ) internal {
+        if (token == address(USDC)) return;
         uint256 delta = IERC20(token).balanceOf(_onBehalfOf) - balanceBefore;
         if (delta > 0) {
             _swapViaSafe(
@@ -472,8 +478,10 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev Ties `slippageBps` to the caller's quoter-derived min-out, checks
     ///      the leg's pool param against the allow-list, and pins the leg's
     ///      pool to the {token, USDC} pair so swaps can only route through a
-    ///      pool that actually trades the leg's token against USDC.
+    ///      pool that actually trades the leg's token against USDC. The USDC
+    ///      side of a pair has no swap, so its (ignored) leg is not validated.
     function _validateSwapLeg(address token, SwapLeg calldata leg, uint16 slippageBps) internal view {
+        if (token == address(USDC)) return;
         if (slippageBps == 0) revert SlippageTooLow();
         if (slippageBps > _yieldStorage().maxSlippageBps) revert SlippageAboveMax();
         _validatePoolParamAllowed(leg.poolParam);

@@ -1,0 +1,88 @@
+import fs from "fs";
+import path from "path";
+
+/**
+ * Shared helpers for the openLpBySafe / closeLpBySafe / switchLpBySafe ops
+ * scripts: minimal ABI fragments, the ignition deployment lookup, tick /
+ * liquidity math, and the receipt-polling workaround. One copy so a slot0
+ * arity, deployment key, or math change cannot drift between the scripts.
+ */
+
+export const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];
+export const UNIV3_FACTORY_ABI = ["function getPool(address,address,uint24) view returns (address)"];
+export const AERO_FACTORY_ABI = ["function getPool(address,address,int24) view returns (address)"];
+export const UNIV3_POOL_ABI = [
+    "function slot0() view returns (uint160,int24,uint16,uint16,uint16,uint8,bool)",
+    "function tickSpacing() view returns (int24)",
+];
+export const AERO_POOL_ABI = ["function slot0() view returns (uint160,int24,uint16,uint16,uint16,bool)"];
+export const UNIV3_NPM_ABI = [
+    "function ownerOf(uint256) view returns (address)",
+    "function positions(uint256) view returns (uint96,address,address,address,uint24,int24,int24,uint128,uint256,uint256,uint128,uint128)",
+];
+export const AERO_NPM_ABI = [
+    "function ownerOf(uint256) view returns (address)",
+    "function positions(uint256) view returns (uint96,address,address,address,int24,int24,int24,uint128,uint256,uint256,uint128,uint128)",
+];
+
+export const Q96 = 1n << 96n;
+
+export function deployedManagerAddress(): string {
+    const file = path.join(__dirname, "../ignition/deployments/chain-8453/deployed_addresses.json");
+    const deployed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return deployed["DeployYieldManager#SafeYieldManager"];
+}
+
+export function resolveOwnerKey(): string {
+    return (
+        process.env.TESTING_SAFE_OWNER_KEY ||
+        process.env.SAFE_OWNER_PRIVATE_KEY ||
+        process.env.DEPLOYER_PRIVATE_KEY ||
+        ""
+    );
+}
+
+export function alignTick(tick: number, spacing: number): number {
+    return Math.floor(tick / spacing) * spacing;
+}
+
+export function sqrtRatioAtTick(tick: number): bigint {
+    return BigInt(Math.floor(Math.sqrt(1.0001 ** tick) * 2 ** 96));
+}
+
+// Token amounts withdrawn when removing `liquidity` from [tickLower, tickUpper]
+// at the current price.
+export function amountsForLiquidity(
+    sqrtPriceX96: bigint,
+    tickLower: number,
+    tickUpper: number,
+    liquidity: bigint,
+): { amount0: bigint; amount1: bigint } {
+    const sqrtA = sqrtRatioAtTick(tickLower);
+    const sqrtB = sqrtRatioAtTick(tickUpper);
+    if (sqrtPriceX96 <= sqrtA) {
+        return { amount0: (liquidity * (sqrtB - sqrtA) * Q96) / (sqrtA * sqrtB), amount1: 0n };
+    }
+    if (sqrtPriceX96 >= sqrtB) {
+        return { amount0: 0n, amount1: (liquidity * (sqrtB - sqrtA)) / Q96 };
+    }
+    return {
+        amount0: (liquidity * (sqrtB - sqrtPriceX96) * Q96) / (sqrtPriceX96 * sqrtB),
+        amount1: (liquidity * (sqrtPriceX96 - sqrtA)) / Q96,
+    };
+}
+
+// HardhatEthersProvider does not implement waitForTransaction — poll instead.
+export async function waitForReceipt(
+    provider: { getTransactionReceipt(hash: string): Promise<{ status: number | null; blockNumber: number; logs: ReadonlyArray<{ address: string; topics: ReadonlyArray<string>; data: string }> } | null> },
+    hash: string,
+) {
+    let receipt = await provider.getTransactionReceipt(hash);
+    for (let i = 0; i < 60 && !receipt; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        receipt = await provider.getTransactionReceipt(hash);
+    }
+    if (!receipt) throw new Error(`Timed out waiting for transaction: ${hash}`);
+    if (receipt.status !== 1) throw new Error(`Transaction failed: ${hash}`);
+    return receipt;
+}

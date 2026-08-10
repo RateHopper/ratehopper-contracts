@@ -8,15 +8,13 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
 } from "../../contractAddresses";
+import { encodeAerodromePoolParam } from "../../contractAddresses";
+import { ZERO_LEG, leg } from "../helpers/utils";
 
 const AERODROME = 1;
 const TICK_SPACING = 100;
 const FORK_BLOCK = Number(process.env.BASE_FORK_BLOCK_NUMBER ?? 49_470_000);
-const POOL_PARAM = ethers.AbiCoder.defaultAbiCoder().encode(
-    ["address", "address", "int24"],
-    [WETH_ADDRESS, USDC_ADDRESS, TICK_SPACING],
-);
-const ZERO_LEG = { amountOutMin: 0, expectedOut: 0, poolParam: "0x" };
+const POOL_PARAM = encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, TICK_SPACING);
 
 const ERC20_ABI = [
     "function balanceOf(address) view returns (uint256)",
@@ -30,6 +28,73 @@ const POOL_ABI = [
 ];
 const NPM_ABI = ["function ownerOf(uint256) view returns (address)"];
 const VOTER_ABI = ["function gauges(address) view returns (address)"];
+
+async function deployAeroStack() {
+    const [admin, operator, treasury, pauser] = await ethers.getSigners();
+
+    const Registry = await ethers.getContractFactory("MockRegistry");
+    const registry = await Registry.deploy();
+    await registry.waitForDeployment();
+    await (await registry.setOperator(operator.address)).wait();
+
+    const Safe = await ethers.getContractFactory("MockSafeHarness");
+    const safe = await Safe.deploy();
+    await safe.waitForDeployment();
+    const safeAddress = await safe.getAddress();
+
+    const Handler = await ethers.getContractFactory("AerodromeYieldHandler");
+    const handler = await Handler.deploy(
+        AERODROME_SLIPSTREAM_NPM_ADDRESS,
+        USDC_ADDRESS,
+        AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
+        AERODROME_CL_FACTORY_ADDRESS,
+        AERODROME_VOTER_ADDRESS,
+    );
+    await handler.waitForDeployment();
+
+    const Manager = await ethers.getContractFactory("SafeYieldManager");
+    const manager = await Manager.deploy(
+        await registry.getAddress(),
+        USDC_ADDRESS,
+        [AERODROME],
+        [await handler.getAddress()],
+        [[POOL_PARAM]],
+        [0],
+        [0],
+        treasury.address,
+        1_000,
+        250,
+        2_000,
+        admin.address,
+        admin.address,
+        pauser.address,
+    );
+    await manager.waitForDeployment();
+
+    return { operator, treasury, safeAddress, handler, manager };
+}
+
+async function readAeroPool() {
+    const factory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, FACTORY_ABI, ethers.provider);
+    const poolAddress: string = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, TICK_SPACING);
+    expect(poolAddress).to.not.equal(ethers.ZeroAddress);
+    const pool = new ethers.Contract(poolAddress, POOL_ABI, ethers.provider);
+    const [sqrtPriceRaw, tick] = await pool.slot0();
+    const sqrtPriceX96 = BigInt(sqrtPriceRaw);
+    const alignedTick = Math.floor(Number(tick) / TICK_SPACING) * TICK_SPACING;
+    return { poolAddress, pool, sqrtPriceX96, alignedTick };
+}
+
+// The live pool is a convenient deterministic USDC holder on the fork.
+// Impersonation only mutates the disposable fork state.
+async function fundSafeUsdc(poolAddress: string, safeAddress: string, amount: bigint) {
+    await network.provider.send("hardhat_setBalance", [poolAddress, "0x8AC7230489E80000"]);
+    const poolSigner = await ethers.getImpersonatedSigner(poolAddress);
+    const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, ethers.provider);
+    await (await (usdc.connect(poolSigner) as any).transfer(safeAddress, amount)).wait();
+    await network.provider.send("hardhat_stopImpersonatingAccount", [poolAddress]);
+    return usdc;
+}
 
 describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
     this.timeout(300_000);
@@ -49,68 +114,15 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
     });
 
     it("opens, collects, partially closes, and fully closes a real Slipstream position", async function () {
-        const [admin, operator, treasury, pauser] = await ethers.getSigners();
-
-        const Registry = await ethers.getContractFactory("MockRegistry");
-        const registry = await Registry.deploy();
-        await registry.waitForDeployment();
-        await (await registry.setOperator(operator.address)).wait();
-
-        const Safe = await ethers.getContractFactory("MockSafeHarness");
-        const safe = await Safe.deploy();
-        await safe.waitForDeployment();
-        const safeAddress = await safe.getAddress();
-
-        const Handler = await ethers.getContractFactory("AerodromeYieldHandler");
-        const handler = await Handler.deploy(
-            AERODROME_SLIPSTREAM_NPM_ADDRESS,
-            USDC_ADDRESS,
-            AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
-            AERODROME_CL_FACTORY_ADDRESS,
-            AERODROME_VOTER_ADDRESS,
-        );
-        await handler.waitForDeployment();
-
-        const Manager = await ethers.getContractFactory("SafeYieldManager");
-        const manager = await Manager.deploy(
-            await registry.getAddress(),
-            USDC_ADDRESS,
-            [AERODROME],
-            [await handler.getAddress()],
-            [[POOL_PARAM]],
-            [0],
-            [0],
-            treasury.address,
-            1_000,
-            250,
-            2_000,
-            admin.address,
-            admin.address,
-            pauser.address,
-        );
-        await manager.waitForDeployment();
-
-        const factory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, FACTORY_ABI, ethers.provider);
-        const poolAddress: string = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, TICK_SPACING);
-        expect(poolAddress).to.not.equal(ethers.ZeroAddress);
-
-        const pool = new ethers.Contract(poolAddress, POOL_ABI, ethers.provider);
+        const { operator, safeAddress, manager } = await deployAeroStack();
+        const { poolAddress, pool, sqrtPriceX96, alignedTick } = await readAeroPool();
         expect(await pool.token0()).to.equal(WETH_ADDRESS);
         expect(await pool.token1()).to.equal(USDC_ADDRESS);
-        const [sqrtPriceRaw, tick] = await pool.slot0();
-        const sqrtPriceX96 = BigInt(sqrtPriceRaw);
-        const alignedTick = Math.floor(Number(tick) / TICK_SPACING) * TICK_SPACING;
         const spotUsdcToWeth = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);
         const spotWethToUsdc = (amount: bigint) => (amount * sqrtPriceX96 * sqrtPriceX96) >> 192n;
 
-        // The live pool is a convenient deterministic USDC holder on the
-        // fork. Impersonation only mutates the disposable fork state.
-        await network.provider.send("hardhat_setBalance", [poolAddress, "0x8AC7230489E80000"]);
-        const poolSigner = await ethers.getImpersonatedSigner(poolAddress);
-        const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, ethers.provider);
         const input = ethers.parseUnits("10", 6);
-        await (await (usdc.connect(poolSigner) as any).transfer(safeAddress, input)).wait();
-        await network.provider.send("hardhat_stopImpersonatingAccount", [poolAddress]);
+        const usdc = await fundSafeUsdc(poolAddress, safeAddress, input);
 
         const block = await ethers.provider.getBlock("latest");
         const deadline = BigInt(block!.timestamp + 3_600);
@@ -122,11 +134,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             tickUpper: alignedTick + 1_000,
             mintAmount0Min: 0,
             mintAmount1Min: 0,
-            swap0: {
-                amountOutMin: (expectedSwapOut * 9_900n) / 10_000n,
-                expectedOut: expectedSwapOut,
-                poolParam: POOL_PARAM,
-            },
+            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
@@ -137,11 +145,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         await expect(
             manager.connect(operator).openLp(AERODROME, {
                 ...openParams,
-                swap0: {
-                    amountOutMin: (expectedSwapOut * 2n * 9_900n) / 10_000n,
-                    expectedOut: expectedSwapOut * 2n,
-                    poolParam: POOL_PARAM,
-                },
+                swap0: leg((expectedSwapOut * 2n * 9_900n) / 10_000n, expectedSwapOut * 2n, POOL_PARAM),
             }),
         ).to.be.revertedWith("Too little received");
 
@@ -178,11 +182,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps,
-                swap0: {
-                    amountOutMin: (expectedOut * 9_700n) / 10_000n,
-                    expectedOut,
-                    poolParam: POOL_PARAM,
-                },
+                swap0: leg((expectedOut * 9_700n) / 10_000n, expectedOut, POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 decreaseAmount0Min: 0,
@@ -209,68 +209,17 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
     });
 
     it("stakes the minted position into the real Voter's gauge and unstakes it on close", async function () {
-        const [admin, operator, treasury, pauser] = await ethers.getSigners();
-
-        const Registry = await ethers.getContractFactory("MockRegistry");
-        const registry = await Registry.deploy();
-        await registry.waitForDeployment();
-        await (await registry.setOperator(operator.address)).wait();
-
-        const Safe = await ethers.getContractFactory("MockSafeHarness");
-        const safe = await Safe.deploy();
-        await safe.waitForDeployment();
-        const safeAddress = await safe.getAddress();
-
-        const Handler = await ethers.getContractFactory("AerodromeYieldHandler");
-        const handler = await Handler.deploy(
-            AERODROME_SLIPSTREAM_NPM_ADDRESS,
-            USDC_ADDRESS,
-            AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
-            AERODROME_CL_FACTORY_ADDRESS,
-            AERODROME_VOTER_ADDRESS,
-        );
-        await handler.waitForDeployment();
-
-        const Manager = await ethers.getContractFactory("SafeYieldManager");
-        const manager = await Manager.deploy(
-            await registry.getAddress(),
-            USDC_ADDRESS,
-            [AERODROME],
-            [await handler.getAddress()],
-            [[POOL_PARAM]],
-            [0],
-            [0],
-            treasury.address,
-            1_000,
-            250,
-            2_000,
-            admin.address,
-            admin.address,
-            pauser.address,
-        );
-        await manager.waitForDeployment();
-
-        const factory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, FACTORY_ABI, ethers.provider);
-        const poolAddress: string = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, TICK_SPACING);
-        expect(poolAddress).to.not.equal(ethers.ZeroAddress);
+        const { operator, safeAddress, manager } = await deployAeroStack();
+        const { poolAddress, sqrtPriceX96, alignedTick } = await readAeroPool();
+        const spotUsdcToWeth = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);
+        const spotWethToUsdc = (amount: bigint) => (amount * sqrtPriceX96 * sqrtPriceX96) >> 192n;
 
         const voter = new ethers.Contract(AERODROME_VOTER_ADDRESS, VOTER_ABI, ethers.provider);
         const gaugeAddress: string = await voter.gauges(poolAddress);
         expect(gaugeAddress).to.not.equal(ethers.ZeroAddress);
 
-        const pool = new ethers.Contract(poolAddress, POOL_ABI, ethers.provider);
-        const [sqrtPriceRaw, tick] = await pool.slot0();
-        const sqrtPriceX96 = BigInt(sqrtPriceRaw);
-        const alignedTick = Math.floor(Number(tick) / TICK_SPACING) * TICK_SPACING;
-        const spotUsdcToWeth = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);
-        const spotWethToUsdc = (amount: bigint) => (amount * sqrtPriceX96 * sqrtPriceX96) >> 192n;
-
-        await network.provider.send("hardhat_setBalance", [poolAddress, "0x8AC7230489E80000"]);
-        const poolSigner = await ethers.getImpersonatedSigner(poolAddress);
-        const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, ethers.provider);
         const input = ethers.parseUnits("10", 6);
-        await (await (usdc.connect(poolSigner) as any).transfer(safeAddress, input)).wait();
-        await network.provider.send("hardhat_stopImpersonatingAccount", [poolAddress]);
+        const usdc = await fundSafeUsdc(poolAddress, safeAddress, input);
 
         const block = await ethers.provider.getBlock("latest");
         const deadline = BigInt(block!.timestamp + 3_600);
@@ -282,11 +231,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             tickUpper: alignedTick + 1_000,
             mintAmount0Min: 0,
             mintAmount1Min: 0,
-            swap0: {
-                amountOutMin: (expectedSwapOut * 9_900n) / 10_000n,
-                expectedOut: expectedSwapOut,
-                poolParam: POOL_PARAM,
-            },
+            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
@@ -312,11 +257,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             onBehalfOf: safeAddress,
             tokenId,
             exitBps: 10_000,
-            swap0: {
-                amountOutMin: (expectedOut * 9_700n) / 10_000n,
-                expectedOut,
-                poolParam: POOL_PARAM,
-            },
+            swap0: leg((expectedOut * 9_700n) / 10_000n, expectedOut, POOL_PARAM),
             swap1: ZERO_LEG,
             slippageBps: 300,
             decreaseAmount0Min: 0,

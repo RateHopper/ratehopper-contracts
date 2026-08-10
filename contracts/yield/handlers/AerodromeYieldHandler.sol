@@ -45,13 +45,22 @@ contract AerodromeYieldHandler is BaseYieldHandler {
         _safeExec(_onBehalfOf, gauge, abi.encodeCall(ICLGauge.deposit, (tokenId)), 29);
     }
 
+    /// @dev The pool gauge currently holding `tokenId`, or address(0) when the
+    ///      position is unstaked or its pool has no gauge — the single
+    ///      definition of "staked" shared by the hooks below.
+    function _stakedGaugeOf(uint256 tokenId) internal view returns (address) {
+        (, , bytes memory lpPoolParam, ) = _position(tokenId);
+        address gauge = VOTER.gauges(_getPool(lpPoolParam));
+        if (gauge == address(0) || IERC721(POSITION_MANAGER).ownerOf(tokenId) != gauge) return address(0);
+        return gauge;
+    }
+
     /// @dev Withdraw `tokenId` from its pool's gauge back to the Safe when it is
     ///      staked (gauge owns the NFT); a no-op otherwise so unstaked and
     ///      no-gauge positions close normally.
     function _unstakeIfStaked(address _onBehalfOf, uint256 tokenId) internal override {
-        (, , bytes memory lpPoolParam, ) = _position(tokenId);
-        address gauge = VOTER.gauges(_getPool(lpPoolParam));
-        if (gauge != address(0) && IERC721(POSITION_MANAGER).ownerOf(tokenId) == gauge) {
+        address gauge = _stakedGaugeOf(tokenId);
+        if (gauge != address(0)) {
             _safeExec(_onBehalfOf, gauge, abi.encodeCall(ICLGauge.withdraw, (tokenId)), 30);
         }
     }
@@ -60,13 +69,10 @@ contract AerodromeYieldHandler is BaseYieldHandler {
     ///      emissions to the Safe and report that the base must temporarily
     ///      unstake it to collect the position's LP trading fees.
     function _collectStakedRewardIfStaked(address _onBehalfOf, uint256 tokenId) internal override returns (bool) {
-        (, , bytes memory lpPoolParam, ) = _position(tokenId);
-        address gauge = VOTER.gauges(_getPool(lpPoolParam));
-        if (gauge != address(0) && IERC721(POSITION_MANAGER).ownerOf(tokenId) == gauge) {
-            _safeExec(_onBehalfOf, gauge, abi.encodeCall(ICLGauge.getReward, (tokenId)), 37);
-            return true;
-        }
-        return false;
+        address gauge = _stakedGaugeOf(tokenId);
+        if (gauge == address(0)) return false;
+        _safeExec(_onBehalfOf, gauge, abi.encodeCall(ICLGauge.getReward, (tokenId)), 37);
+        return true;
     }
 
     function _decodePoolParam(

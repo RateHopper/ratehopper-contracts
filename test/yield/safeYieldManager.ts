@@ -2,7 +2,8 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
-import { YieldProtocol } from "../../contractAddresses";
+import { YieldProtocol, encodeAerodromePoolParam, encodeUniV3PoolParam } from "../../contractAddresses";
+import { ZERO_LEG, leg } from "../helpers/utils";
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Mock-driven suite for SafeYieldManager + UniV3YieldHandler /
@@ -37,12 +38,6 @@ let TICK_SPACING: string;
 const USDC_AMOUNT = 1_000_000n;
 const HALF = USDC_AMOUNT / 2n;
 const WETH_OUT = 2_000_000n; // WETH produced by the openLp swap
-
-function leg(amountOutMin: bigint | number, expectedOut: bigint | number, poolParam: string) {
-    return { amountOutMin, expectedOut, poolParam };
-}
-
-const ZERO_LEG = { amountOutMin: 0, expectedOut: 0, poolParam: "0x" };
 
 function openParams(safeAddr: string, poolParam: string, overrides: Record<string, any> = {}) {
     return {
@@ -115,9 +110,9 @@ async function deployYieldManagerHarness() {
     const wethAddr = await weth.getAddress();
     const usdcAddr = await usdc.getAddress();
 
-    FEE_TIER = abi.encode(["address", "address", "uint24"], [wethAddr, usdcAddr, 500]);
-    BAD_FEE_TIER = abi.encode(["address", "address", "uint24"], [wethAddr, usdcAddr, 10000]);
-    TICK_SPACING = abi.encode(["address", "address", "int24"], [wethAddr, usdcAddr, 100]);
+    FEE_TIER = encodeUniV3PoolParam(wethAddr, usdcAddr, 500);
+    BAD_FEE_TIER = encodeUniV3PoolParam(wethAddr, usdcAddr, 10000);
+    TICK_SPACING = encodeAerodromePoolParam(wethAddr, usdcAddr, 100);
 
     // Uniswap V3 side
     const UniPool = await ethers.getContractFactory("MockUniswapV3Pool");
@@ -1508,6 +1503,30 @@ describe("SafeYieldManager", function () {
     });
 
     describe("arbitrary pairs (two-leg swaps)", function () {
+        async function deployNonUsdcPair(harness: {
+            manager: any;
+            deployer: any;
+            uniFactory: any;
+        }) {
+            const ERC = await ethers.getContractFactory("MockERC20");
+            const a = await ERC.deploy("Wrapped BTC", "WBTC", 8);
+            const b = await ERC.deploy("Tether USD", "USDT", 6);
+            await a.waitForDeployment();
+            await b.waitForDeployment();
+            const [tokenX, tokenY] =
+                (await a.getAddress()).toLowerCase() < (await b.getAddress()).toLowerCase() ? [a, b] : [b, a];
+            const xAddr = await tokenX.getAddress();
+            const yAddr = await tokenY.getAddress();
+
+            const LP_PARAM = encodeUniV3PoolParam(xAddr, yAddr, 500);
+            const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
+            const lpPool = await Pool.deploy(xAddr, yAddr, Q96, 10n ** 18n);
+            await (await harness.uniFactory.setPoolFor(xAddr, yAddr, 500, await lpPool.getAddress())).wait();
+            await (await harness.manager.connect(harness.deployer).setPoolParamAllowed(UNISWAP_V3, LP_PARAM, true)).wait();
+
+            return { tokenX, tokenY, xAddr, yAddr, LP_PARAM, Pool };
+        }
+
         it("reverts the whole open when a token rejects the final approval reset", async function () {
             const { manager, operatorEOA, safeAddr, weth, uniNpm, uniHandler } =
                 await loadFixture(deployYieldManagerHarness);
@@ -1523,34 +1542,21 @@ describe("SafeYieldManager", function () {
         });
 
         it("opens and closes a non-USDC pair position by swapping both legs through USDC", async function () {
-            const { manager, deployer, operatorEOA, safeAddr, usdc, usdcAddr, uniFactory, uniNpm, uniRouter } =
-                await loadFixture(deployYieldManagerHarness);
+            const harness = await loadFixture(deployYieldManagerHarness);
+            const { manager, deployer, operatorEOA, safeAddr, usdc, usdcAddr, uniFactory, uniNpm, uniRouter } = harness;
+            const { tokenX, tokenY, xAddr, yAddr, LP_PARAM, Pool } = await deployNonUsdcPair(harness);
 
-            const ERC = await ethers.getContractFactory("MockERC20");
-            const a = await ERC.deploy("Wrapped BTC", "WBTC", 8);
-            const b = await ERC.deploy("Tether USD", "USDT", 6);
-            await a.waitForDeployment();
-            await b.waitForDeployment();
-            const [tokenX, tokenY] =
-                (await a.getAddress()).toLowerCase() < (await b.getAddress()).toLowerCase() ? [a, b] : [b, a];
-            const xAddr = await tokenX.getAddress();
-            const yAddr = await tokenY.getAddress();
-
-            const LP_PARAM = abi.encode(["address", "address", "uint24"], [xAddr, yAddr, 500]);
             const [swapX0, swapX1] = xAddr.toLowerCase() < usdcAddr.toLowerCase() ? [xAddr, usdcAddr] : [usdcAddr, xAddr];
             const [swapY0, swapY1] = yAddr.toLowerCase() < usdcAddr.toLowerCase() ? [yAddr, usdcAddr] : [usdcAddr, yAddr];
-            const SWAP_X_PARAM = abi.encode(["address", "address", "uint24"], [swapX0, swapX1, 500]);
-            const SWAP_Y_PARAM = abi.encode(["address", "address", "uint24"], [swapY0, swapY1, 500]);
+            const SWAP_X_PARAM = encodeUniV3PoolParam(swapX0, swapX1, 500);
+            const SWAP_Y_PARAM = encodeUniV3PoolParam(swapY0, swapY1, 500);
 
-            const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
-            const lpPool = await Pool.deploy(xAddr, yAddr, Q96, 10n ** 18n);
             const xPool = await Pool.deploy(swapX0, swapX1, Q96, 10n ** 18n);
             const yPool = await Pool.deploy(swapY0, swapY1, Q96, 10n ** 18n);
-            await (await uniFactory.setPoolFor(xAddr, yAddr, 500, await lpPool.getAddress())).wait();
             await (await uniFactory.setPoolFor(swapX0, swapX1, 500, await xPool.getAddress())).wait();
             await (await uniFactory.setPoolFor(swapY0, swapY1, 500, await yPool.getAddress())).wait();
 
-            for (const param of [LP_PARAM, SWAP_X_PARAM, SWAP_Y_PARAM]) {
+            for (const param of [SWAP_X_PARAM, SWAP_Y_PARAM]) {
                 await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, param, true)).wait();
             }
 
@@ -1599,24 +1605,9 @@ describe("SafeYieldManager", function () {
         });
 
         it("rejects a leg whose swap pool does not contain USDC", async function () {
-            const { manager, deployer, operatorEOA, safeAddr, usdcAddr, uniFactory, uniRouter } =
-                await loadFixture(deployYieldManagerHarness);
-
-            const ERC = await ethers.getContractFactory("MockERC20");
-            const a = await ERC.deploy("Wrapped BTC", "WBTC", 8);
-            const b = await ERC.deploy("Tether USD", "USDT", 6);
-            await a.waitForDeployment();
-            await b.waitForDeployment();
-            const [tokenX, tokenY] =
-                (await a.getAddress()).toLowerCase() < (await b.getAddress()).toLowerCase() ? [a, b] : [b, a];
-            const xAddr = await tokenX.getAddress();
-            const yAddr = await tokenY.getAddress();
-
-            const LP_PARAM = abi.encode(["address", "address", "uint24"], [xAddr, yAddr, 500]);
-            const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
-            const lpPool = await Pool.deploy(xAddr, yAddr, Q96, 10n ** 18n);
-            await (await uniFactory.setPoolFor(xAddr, yAddr, 500, await lpPool.getAddress())).wait();
-            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, LP_PARAM, true)).wait();
+            const harness = await loadFixture(deployYieldManagerHarness);
+            const { manager, operatorEOA, safeAddr, uniRouter } = harness;
+            const { xAddr, yAddr, LP_PARAM } = await deployNonUsdcPair(harness);
             await (await uniRouter.setOutputFor(xAddr, 1n)).wait();
             await (await uniRouter.setOutputFor(yAddr, 1n)).wait();
 

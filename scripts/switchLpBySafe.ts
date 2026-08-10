@@ -1,6 +1,4 @@
 import { ethers, network } from "hardhat";
-import fs from "fs";
-import path from "path";
 import dotenv from "dotenv";
 dotenv.config();
 import Safe from "@safe-global/protocol-kit";
@@ -13,7 +11,22 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
     YieldProtocol,
+    encodeAerodromePoolParam,
+    encodeUniV3PoolParam,
 } from "../contractAddresses";
+import {
+    AERO_FACTORY_ABI,
+    AERO_NPM_ABI,
+    AERO_POOL_ABI,
+    UNIV3_FACTORY_ABI,
+    UNIV3_NPM_ABI,
+    UNIV3_POOL_ABI,
+    alignTick,
+    amountsForLiquidity,
+    deployedManagerAddress,
+    resolveOwnerKey,
+    waitForReceipt,
+} from "./lpSafeShared";
 
 /**
  * Switches a SafeYieldManager LP position between Uniswap V3 and Aerodrome
@@ -51,55 +64,6 @@ const MANAGER_ADDRESS_OVERRIDE = "";
 const DRY_RUN = true;
 // ─────────────────────────────────────────────────────────────────────────
 
-const UNIV3_FACTORY_ABI = ["function getPool(address,address,uint24) view returns (address)"];
-const AERO_FACTORY_ABI = ["function getPool(address,address,int24) view returns (address)"];
-const UNIV3_POOL_ABI = [
-    "function slot0() view returns (uint160,int24,uint16,uint16,uint16,uint8,bool)",
-    "function tickSpacing() view returns (int24)",
-];
-const AERO_POOL_ABI = ["function slot0() view returns (uint160,int24,uint16,uint16,uint16,bool)"];
-const UNIV3_NPM_ABI = [
-    "function ownerOf(uint256) view returns (address)",
-    "function positions(uint256) view returns (uint96,address,address,address,uint24,int24,int24,uint128,uint256,uint256,uint128,uint128)",
-];
-const AERO_NPM_ABI = [
-    "function ownerOf(uint256) view returns (address)",
-    "function positions(uint256) view returns (uint96,address,address,address,int24,int24,int24,uint128,uint256,uint256,uint128,uint128)",
-];
-
-function deployedManagerAddress(): string {
-    const file = path.join(__dirname, "../ignition/deployments/chain-8453/deployed_addresses.json");
-    const deployed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return deployed["DeployYieldManager#SafeYieldManager"];
-}
-
-function alignTick(tick: number, spacing: number): number {
-    return Math.floor(tick / spacing) * spacing;
-}
-
-function sqrtRatioAtTick(tick: number): bigint {
-    return BigInt(Math.floor(Math.sqrt(1.0001 ** tick) * 2 ** 96));
-}
-
-function amountsForLiquidity(
-    sqrtPriceX96: bigint,
-    tickLower: number,
-    tickUpper: number,
-    liquidity: bigint,
-): { amount0: bigint; amount1: bigint } {
-    const sqrtA = sqrtRatioAtTick(tickLower);
-    const sqrtB = sqrtRatioAtTick(tickUpper);
-    if (sqrtPriceX96 <= sqrtA) {
-        return { amount0: (liquidity * (sqrtB - sqrtA) * (1n << 96n)) / (sqrtA * sqrtB), amount1: 0n };
-    }
-    if (sqrtPriceX96 >= sqrtB) {
-        return { amount0: 0n, amount1: (liquidity * (sqrtB - sqrtA)) / (1n << 96n) };
-    }
-    return {
-        amount0: (liquidity * (sqrtB - sqrtPriceX96) * (1n << 96n)) / (sqrtPriceX96 * sqrtB),
-        amount1: (liquidity * (sqrtPriceX96 - sqrtA)) / (1n << 96n),
-    };
-}
 
 type PoolInfo = {
     protocol: number;
@@ -110,14 +74,10 @@ type PoolInfo = {
     tickSpacing: number;
 };
 
-async function resolvePool(
-    provider: any,
-    abi: any,
-    protocolName: "aerodrome" | "univ3",
-    poolParamValue: number,
-): Promise<PoolInfo> {
+async function resolvePool(protocolName: "aerodrome" | "univ3", poolParamValue: number): Promise<PoolInfo> {
+    const provider = ethers.provider;
     if (protocolName === "aerodrome") {
-        const poolParam = abi.encode(["address", "address", "int24"], [WETH_ADDRESS, USDC_ADDRESS, poolParamValue]);
+        const poolParam = encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, poolParamValue);
         const factory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, AERO_FACTORY_ABI, provider);
         const poolAddress: string = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, poolParamValue);
         if (poolAddress === ethers.ZeroAddress) throw new Error(`No Aerodrome pool for tickSpacing ${poolParamValue}`);
@@ -133,7 +93,7 @@ async function resolvePool(
         };
     }
 
-    const poolParam = abi.encode(["address", "address", "uint24"], [WETH_ADDRESS, USDC_ADDRESS, poolParamValue]);
+    const poolParam = encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, poolParamValue);
     const factory = new ethers.Contract(UNISWAP_V3_FACTORY_ADDRESS, UNIV3_FACTORY_ABI, provider);
     const poolAddress: string = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, poolParamValue);
     if (poolAddress === ethers.ZeroAddress) throw new Error(`No Uniswap V3 pool for fee tier ${poolParamValue}`);
@@ -150,11 +110,7 @@ async function resolvePool(
 }
 
 async function main() {
-    const OWNER_KEY =
-        process.env.TESTING_SAFE_OWNER_KEY ||
-        process.env.SAFE_OWNER_PRIVATE_KEY ||
-        process.env.DEPLOYER_PRIVATE_KEY ||
-        "";
+    const OWNER_KEY = resolveOwnerKey();
     const MANAGER_ADDRESS = MANAGER_ADDRESS_OVERRIDE || deployedManagerAddress();
 
     if (!ethers.isAddress(SAFE_ADDRESS)) throw new Error(`Invalid SAFE_ADDRESS: ${SAFE_ADDRESS}`);
@@ -165,7 +121,6 @@ async function main() {
     }
 
     const provider = ethers.provider;
-    const abi = ethers.AbiCoder.defaultAbiCoder();
     const manager = await ethers.getContractAt("SafeYieldManager", MANAGER_ADDRESS);
 
     const sourceNpmAddress =
@@ -186,9 +141,9 @@ async function main() {
         throw new Error(`Token ${TOKEN_ID} is not a WETH/USDC position`);
     }
     const sourcePoolValue = Number(position[4]);
-    const source = await resolvePool(provider, abi, FROM_PROTOCOL_NAME, sourcePoolValue);
+    const source = await resolvePool(FROM_PROTOCOL_NAME, sourcePoolValue);
     const targetValue = TO_PROTOCOL_NAME === "aerodrome" ? TARGET_TICK_SPACING : TARGET_FEE_TIER;
-    const target = await resolvePool(provider, abi, TO_PROTOCOL_NAME, targetValue);
+    const target = await resolvePool(TO_PROTOCOL_NAME, targetValue);
 
     const sourceTickLower = Number(position[5]);
     const sourceTickUpper = Number(position[6]);
@@ -286,12 +241,7 @@ async function main() {
     const result = await safeWallet.executeTransaction(safeTransaction);
     console.log("Submitted:", result.hash);
 
-    let receipt = await provider.getTransactionReceipt(result.hash);
-    for (let i = 0; i < 60 && !receipt; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 3_000));
-        receipt = await provider.getTransactionReceipt(result.hash);
-    }
-    if (!receipt || receipt.status !== 1) throw new Error(`Transaction failed or timed out: ${result.hash}`);
+    const receipt = await waitForReceipt(provider, result.hash);
     console.log("Confirmed in block", receipt.blockNumber);
 
     for (const log of receipt.logs) {

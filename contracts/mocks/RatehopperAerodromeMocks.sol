@@ -2,6 +2,8 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {ISlipstreamNonfungiblePositionManager} from "../interfaces/aerodrome/ISlipstreamNonfungiblePositionManager.sol";
 import {INonfungiblePositionManager} from "../interfaces/uniswapV3/INonfungiblePositionManager.sol";
 
@@ -298,16 +300,11 @@ contract MockVoter {
     }
 }
 
-/// @dev Tiny local ERC721 surface so MockCLGauge can move the NFT without
-///      depending on the full MockCLNonfungiblePositionManager type.
-interface IMockERC721Transfer {
-    function transferFrom(address from, address to, uint256 tokenId) external;
-}
-
 /// @notice Minimal `ICLGauge` stub: `deposit` pulls the NFT from the caller
 ///         (the Safe, which must have approved this gauge), `withdraw` sends
-///         it back. Mirrors the real gauge's custody-by-transfer behavior
-///         closely enough to drive the handler's ownership checks.
+///         it back with the ERC721 receive hook, mirroring the real gauge's
+///         `safeTransferFrom` so the Safe-harness `onERC721Received` path is
+///         actually exercised.
 contract MockCLGauge {
     address public immutable NFT;
 
@@ -316,11 +313,18 @@ contract MockCLGauge {
     }
 
     function deposit(uint256 tokenId) external {
-        IMockERC721Transfer(NFT).transferFrom(msg.sender, address(this), tokenId);
+        IERC721(NFT).transferFrom(msg.sender, address(this), tokenId);
     }
 
     function withdraw(uint256 tokenId) external {
-        IMockERC721Transfer(NFT).transferFrom(address(this), msg.sender, tokenId);
+        IERC721(NFT).transferFrom(address(this), msg.sender, tokenId);
+        if (msg.sender.code.length > 0) {
+            require(
+                IERC721Receiver(msg.sender).onERC721Received(address(this), address(this), tokenId, "") ==
+                    IERC721Receiver.onERC721Received.selector,
+                "unsafe recipient"
+            );
+        }
     }
 
     event RewardClaimed(uint256 indexed tokenId, address indexed to);

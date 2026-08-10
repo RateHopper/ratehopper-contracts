@@ -1,5 +1,4 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
-import { AbiCoder } from "ethers";
 import TimelockControllerModule from "./TimelockControllerModule";
 import {
     AERODROME_CL_FACTORY_ADDRESS,
@@ -13,12 +12,12 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
     YieldProtocol,
+    encodeAerodromePoolParam,
+    encodeUniV3PoolParam,
 } from "../../contractAddresses";
 import { envBigInt, envNumber, envString, makeRequireAddress } from "./deployHelpers";
 
 const requireAddress = makeRequireAddress("DeployYieldManager");
-
-const abi = AbiCoder.defaultAbiCoder();
 
 const UNISWAP_V3 = YieldProtocol.UNISWAP_V3;
 const AERODROME = YieldProtocol.AERODROME;
@@ -29,11 +28,9 @@ const AERODROME = YieldProtocol.AERODROME;
 // pool, cheap slot0 manipulation); Aerodrome Slipstream tick spacings
 // {100, 200}. Additional pairs are allow-listed post-deploy via
 // setPoolParamAllowed.
-const UNIV3_POOL_PARAMS = [100, 500, 3000].map((feeTier) =>
-    abi.encode(["address", "address", "uint24"], [WETH_ADDRESS, USDC_ADDRESS, feeTier]),
-);
+const UNIV3_POOL_PARAMS = [100, 500, 3000].map((feeTier) => encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, feeTier));
 const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) =>
-    abi.encode(["address", "address", "int24"], [WETH_ADDRESS, USDC_ADDRESS, tickSpacing]),
+    encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, tickSpacing),
 );
 
 /**

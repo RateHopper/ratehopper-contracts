@@ -11,6 +11,8 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
 } from "../../contractAddresses";
+import { encodeAerodromePoolParam, encodeUniV3PoolParam } from "../../contractAddresses";
+import { ZERO_LEG, leg } from "../helpers/utils";
 
 const UNISWAP_V3 = 0;
 const AERODROME = 1;
@@ -20,11 +22,9 @@ const UNIV3_TICK_SPACING = 10;
 const UNIV3_TICK_SPACING_3000 = 60;
 const AERO_TICK_SPACING = 100;
 const FORK_BLOCK = Number(process.env.BASE_FORK_BLOCK_NUMBER ?? 49_470_000);
-const abi = ethers.AbiCoder.defaultAbiCoder();
-const UNIV3_POOL_PARAM = abi.encode(["address", "address", "uint24"], [WETH_ADDRESS, USDC_ADDRESS, FEE_TIER]);
-const UNIV3_POOL_PARAM_3000 = abi.encode(["address", "address", "uint24"], [WETH_ADDRESS, USDC_ADDRESS, FEE_TIER_3000]);
-const AERO_POOL_PARAM = abi.encode(["address", "address", "int24"], [WETH_ADDRESS, USDC_ADDRESS, AERO_TICK_SPACING]);
-const ZERO_LEG = { amountOutMin: 0, expectedOut: 0, poolParam: "0x" };
+const UNIV3_POOL_PARAM = encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, FEE_TIER);
+const UNIV3_POOL_PARAM_3000 = encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, FEE_TIER_3000);
+const AERO_POOL_PARAM = encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, AERO_TICK_SPACING);
 
 const ERC20_ABI = [
     "function balanceOf(address) view returns (uint256)",
@@ -156,11 +156,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 tickUpper: uniAlignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                swap0: {
-                    amountOutMin: (openExpectedOut * 9_900n) / 10_000n,
-                    expectedOut: openExpectedOut,
-                    poolParam: UNIV3_POOL_PARAM,
-                },
+                swap0: leg((openExpectedOut * 9_900n) / 10_000n, openExpectedOut, UNIV3_POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 100,
                 deadline,
@@ -187,11 +183,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
             manager.connect(operator).switchLp(UNISWAP_V3, AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId: oldTokenId,
-                closeSwap0: {
-                    amountOutMin: (closeExpectedOut * 9_700n) / 10_000n,
-                    expectedOut: closeExpectedOut,
-                    poolParam: UNIV3_POOL_PARAM,
-                },
+                closeSwap0: leg((closeExpectedOut * 9_700n) / 10_000n, closeExpectedOut, UNIV3_POOL_PARAM),
                 closeSwap1: ZERO_LEG,
                 closeSlippageBps: 300,
                 decreaseAmount0Min: 0,
@@ -201,11 +193,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 tickUpper: aeroAlignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                openSwap0: {
-                    amountOutMin: (switchOpenExpectedOut * 9_700n) / 10_000n,
-                    expectedOut: switchOpenExpectedOut,
-                    poolParam: AERO_POOL_PARAM,
-                },
+                openSwap0: leg((switchOpenExpectedOut * 9_700n) / 10_000n, switchOpenExpectedOut, AERO_POOL_PARAM),
                 openSwap1: ZERO_LEG,
                 openSlippageBps: 300,
                 lpPoolParam: AERO_POOL_PARAM,
@@ -255,11 +243,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 onBehalfOf: safeAddress,
                 tokenId: newTokenId,
                 exitBps: 10_000,
-                swap0: {
-                    amountOutMin: (closeFinalExpectedOut * 9_700n) / 10_000n,
-                    expectedOut: closeFinalExpectedOut,
-                    poolParam: AERO_POOL_PARAM,
-                },
+                swap0: leg((closeFinalExpectedOut * 9_700n) / 10_000n, closeFinalExpectedOut, AERO_POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 decreaseAmount0Min: 0,
@@ -283,11 +267,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 tickUpper: aeroAlignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                swap0: {
-                    amountOutMin: (reverseOpenExpectedOut * 9_900n) / 10_000n,
-                    expectedOut: reverseOpenExpectedOut,
-                    poolParam: AERO_POOL_PARAM,
-                },
+                swap0: leg((reverseOpenExpectedOut * 9_900n) / 10_000n, reverseOpenExpectedOut, AERO_POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 100,
                 deadline,
@@ -308,11 +288,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
             manager.connect(operator).switchLp(AERODROME, UNISWAP_V3, {
                 onBehalfOf: safeAddress,
                 tokenId: reverseOldTokenId,
-                closeSwap0: {
-                    amountOutMin: (reverseCloseExpectedOut * 9_700n) / 10_000n,
-                    expectedOut: reverseCloseExpectedOut,
-                    poolParam: AERO_POOL_PARAM,
-                },
+                closeSwap0: leg((reverseCloseExpectedOut * 9_700n) / 10_000n, reverseCloseExpectedOut, AERO_POOL_PARAM),
                 closeSwap1: ZERO_LEG,
                 closeSlippageBps: 300,
                 decreaseAmount0Min: 0,
@@ -322,11 +298,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 tickUpper: uniAlignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                openSwap0: {
-                    amountOutMin: (reverseSwitchOpenExpectedOut * 9_700n) / 10_000n,
-                    expectedOut: reverseSwitchOpenExpectedOut,
-                    poolParam: UNIV3_POOL_PARAM,
-                },
+                openSwap0: leg((reverseSwitchOpenExpectedOut * 9_700n) / 10_000n, reverseSwitchOpenExpectedOut, UNIV3_POOL_PARAM),
                 openSwap1: ZERO_LEG,
                 openSlippageBps: 300,
                 lpPoolParam: UNIV3_POOL_PARAM,
@@ -374,11 +346,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 tickUpper: fromAlignedTick + 1_020,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                swap0: {
-                    amountOutMin: (openExpectedOut * 9_700n) / 10_000n,
-                    expectedOut: openExpectedOut,
-                    poolParam: UNIV3_POOL_PARAM_3000,
-                },
+                swap0: leg((openExpectedOut * 9_700n) / 10_000n, openExpectedOut, UNIV3_POOL_PARAM_3000),
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 deadline,
@@ -403,11 +371,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
             manager.connect(operator).switchLp(UNISWAP_V3, UNISWAP_V3, {
                 onBehalfOf: safeAddress,
                 tokenId: oldTokenId,
-                closeSwap0: {
-                    amountOutMin: (closeExpectedOut * 9_700n) / 10_000n,
-                    expectedOut: closeExpectedOut,
-                    poolParam: UNIV3_POOL_PARAM_3000,
-                },
+                closeSwap0: leg((closeExpectedOut * 9_700n) / 10_000n, closeExpectedOut, UNIV3_POOL_PARAM_3000),
                 closeSwap1: ZERO_LEG,
                 closeSlippageBps: 300,
                 decreaseAmount0Min: 0,
@@ -417,11 +381,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 tickUpper: toAlignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                openSwap0: {
-                    amountOutMin: (switchOpenExpectedOut * 9_700n) / 10_000n,
-                    expectedOut: switchOpenExpectedOut,
-                    poolParam: UNIV3_POOL_PARAM,
-                },
+                openSwap0: leg((switchOpenExpectedOut * 9_700n) / 10_000n, switchOpenExpectedOut, UNIV3_POOL_PARAM),
                 openSwap1: ZERO_LEG,
                 openSlippageBps: 300,
                 lpPoolParam: UNIV3_POOL_PARAM,

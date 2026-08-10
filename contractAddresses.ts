@@ -1,3 +1,5 @@
+import { AbiCoder } from "ethers";
+
 // Token addresses
 export const WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
 export const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"; // Circle
@@ -80,6 +82,17 @@ export enum DebtProtocol {
 export enum YieldProtocol {
     UNISWAP_V3,
     AERODROME,
+}
+
+// SafeYieldManager pool params carry the pair: abi.encode(token0, token1, key).
+// These are THE encoding points — ignition, scripts, and tests must all agree
+// with the handlers' _decodePoolParam, so never hand-roll the encode elsewhere.
+export function encodeUniV3PoolParam(token0: string, token1: string, feeTier: number | bigint): string {
+    return AbiCoder.defaultAbiCoder().encode(["address", "address", "uint24"], [token0, token1, feeTier]);
+}
+
+export function encodeAerodromePoolParam(token0: string, token1: string, tickSpacing: number | bigint): string {
+    return AbiCoder.defaultAbiCoder().encode(["address", "address", "int24"], [token0, token1, tickSpacing]);
 }
 
 export const USDC_COMET_ADDRESS = "0xb125E6687d4313864e53df431d5425969c15Eb2F";

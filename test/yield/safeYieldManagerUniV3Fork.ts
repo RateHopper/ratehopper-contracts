@@ -7,17 +7,15 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
 } from "../../contractAddresses";
+import { encodeUniV3PoolParam } from "../../contractAddresses";
+import { ZERO_LEG, leg } from "../helpers/utils";
 
 const UNISWAP_V3 = 0;
 const FEE_TIER = 500;
 // Uniswap V3 tick spacing for the 0.05% fee tier.
 const TICK_SPACING = 10;
 const FORK_BLOCK = Number(process.env.BASE_FORK_BLOCK_NUMBER ?? 49_470_000);
-const POOL_PARAM = ethers.AbiCoder.defaultAbiCoder().encode(
-    ["address", "address", "uint24"],
-    [WETH_ADDRESS, USDC_ADDRESS, FEE_TIER],
-);
-const ZERO_LEG = { amountOutMin: 0, expectedOut: 0, poolParam: "0x" };
+const POOL_PARAM = encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, FEE_TIER);
 
 const ERC20_ABI = [
     "function balanceOf(address) view returns (uint256)",
@@ -121,11 +119,7 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             tickUpper: alignedTick + 1_000,
             mintAmount0Min: 0,
             mintAmount1Min: 0,
-            swap0: {
-                amountOutMin: (expectedSwapOut * 9_900n) / 10_000n,
-                expectedOut: expectedSwapOut,
-                poolParam: POOL_PARAM,
-            },
+            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
@@ -136,11 +130,7 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
         await expect(
             manager.connect(operator).openLp(UNISWAP_V3, {
                 ...openParams,
-                swap0: {
-                    amountOutMin: (expectedSwapOut * 2n * 9_900n) / 10_000n,
-                    expectedOut: expectedSwapOut * 2n,
-                    poolParam: POOL_PARAM,
-                },
+                swap0: leg((expectedSwapOut * 2n * 9_900n) / 10_000n, expectedSwapOut * 2n, POOL_PARAM),
             }),
         ).to.be.revertedWith("Too little received");
 

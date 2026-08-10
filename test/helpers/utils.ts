@@ -156,3 +156,13 @@ export const eip1193Provider: Eip1193Provider = {
         return ethers.provider.send(method, Array.isArray(params) ? params : []);
     },
 };
+
+/**
+ * SafeYieldManager SwapLeg builders — one shape for every yield test so a
+ * struct change is a single edit here, not one per test file.
+ */
+export function leg(amountOutMin: bigint | number, expectedOut: bigint | number, poolParam: string) {
+    return { amountOutMin, expectedOut, poolParam };
+}
+
+export const ZERO_LEG = { amountOutMin: 0, expectedOut: 0, poolParam: "0x" } as const;
