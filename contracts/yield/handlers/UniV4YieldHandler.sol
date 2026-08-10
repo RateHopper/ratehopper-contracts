@@ -426,7 +426,17 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
                 abi.encodeCall(IERC20.transfer, ($.treasury, fee)),
                 ISafe.Operation.Call
             );
-            if (ok && ret.length > 0 && !abi.decode(ret, (bool))) ok = false;
+            if (ok && ret.length > 0) {
+                if (ret.length < 32) {
+                    ok = false;
+                } else {
+                    uint256 word;
+                    assembly ("memory-safe") {
+                        word := mload(add(ret, 0x20))
+                    }
+                    ok = word == 1;
+                }
+            }
         }
         if (!ok) {
             emit CollectFeeTransferFailed(_onBehalfOf, tokenId, currency, fee);
@@ -654,7 +664,14 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             abi.encodeCall(IERC20.approve, (spender, amount)),
             step
         );
-        if (ret.length > 0 && !abi.decode(ret, (bool))) revert TokenApprovalFailed(token);
+        if (ret.length > 0) {
+            if (ret.length < 32) revert TokenApprovalFailed(token);
+            uint256 word;
+            assembly ("memory-safe") {
+                word := mload(add(ret, 0x20))
+            }
+            if (word != 1) revert TokenApprovalFailed(token);
+        }
     }
 
     /// @dev Module-mediated Safe call with inner-revert bubbling and native

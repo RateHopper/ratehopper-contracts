@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { YieldProtocol, encodeUniV3PoolParam, encodeUniV4PoolParam } from "../../contractAddresses";
@@ -25,6 +25,10 @@ const PERF_FEE_BPS = 1000n; // 10%
 const COLLECT_FEE_BPS = 250n; // 2.5%
 const MAX_FEE_BPS = 2000;
 const Q96 = 1n << 96n;
+
+function timelockCall(timelock: any, manager: any, functionName: string, args: any[]) {
+    return timelock.execute(manager.target, manager.interface.encodeFunctionData(functionName, args));
+}
 
 const UNISWAP_V3 = YieldProtocol.UNISWAP_V3;
 const UNISWAP_V4 = YieldProtocol.UNISWAP_V4;
@@ -116,14 +120,12 @@ async function deployUniV4Harness() {
     const usdcAddr = await usdc.getAddress();
 
     // A token that sorts ABOVE USDC, so a {USDC, tokenC} pool has USDC as
-    // currency0 (drives the currency0-is-USDC branches).
-    let tokenC = await ERC.deploy("Token C", "TKC", 18);
-    await tokenC.waitForDeployment();
-    for (let i = 0; i < 8 && (await tokenC.getAddress()).toLowerCase() < usdcAddr.toLowerCase(); i++) {
-        tokenC = await ERC.deploy("Token C", "TKC", 18);
-        await tokenC.waitForDeployment();
-    }
-    const tokenCAddr = await tokenC.getAddress();
+    // currency0 (drives the currency0-is-USDC branches). Deployed addresses
+    // are nonce-derived and can land anywhere, so place the code at
+    // usdc + 1 directly — deterministically the next address up.
+    const tokenCAddr = ethers.getAddress(ethers.toBeHex(BigInt(usdcAddr) + 1n, 20));
+    await network.provider.send("hardhat_setCode", [tokenCAddr, await ethers.provider.getCode(usdcAddr)]);
+    const tokenC = await ethers.getContractAt("MockERC20", tokenCAddr);
 
     FEE_TIER = encodeUniV3PoolParam(wethAddr, usdcAddr, 500);
     V4_KEY = encodeUniV4PoolParam(wethAddr, usdcAddr, 500, 10, ZERO);
@@ -196,6 +198,10 @@ async function deployUniV4Harness() {
     );
     await v4Handler.waitForDeployment();
 
+    const Timelock = await ethers.getContractFactory("MockTimelockController");
+    const timelock = await Timelock.deploy(1);
+    await timelock.waitForDeployment();
+
     const Manager = await ethers.getContractFactory("SafeYieldManager");
     const manager = await Manager.deploy(
         await reg.getAddress(),
@@ -210,7 +216,7 @@ async function deployUniV4Harness() {
         Number(COLLECT_FEE_BPS),
         MAX_FEE_BPS,
         deployer.address, // initialAdmin
-        deployer.address, // timelock
+        await timelock.getAddress(), // timelock
         pauser.address,
     );
     await manager.waitForDeployment();
@@ -233,6 +239,7 @@ async function deployUniV4Harness() {
         treasury,
         stranger,
         pauser,
+        timelock,
         weth,
         usdc,
         tokenC,
@@ -271,8 +278,8 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         });
 
         it("rejects registering the V4 handler under a foreign id", async function () {
-            const { manager, deployer, v4Handler } = await loadFixture(deployUniV4Harness);
-            await expect(manager.connect(deployer).setYieldHandler(1, await v4Handler.getAddress()))
+            const { manager, timelock, v4Handler } = await loadFixture(deployUniV4Harness);
+            await expect(timelockCall(timelock, manager, "setYieldHandler", [1, await v4Handler.getAddress()]))
                 .to.be.revertedWithCustomError(manager, "HandlerProtocolMismatch")
                 .withArgs(1, UNISWAP_V4);
         });
@@ -684,9 +691,9 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
         it("waives the native fee when the treasury cannot receive ETH", async function () {
             const ctx = await openedNativeFixture();
-            const { manager, operatorEOA, deployer, safeAddr, v4Pm, reg } = ctx;
+            const { manager, operatorEOA, timelock, safeAddr, v4Pm, reg } = ctx;
             // MockRegistry has no receive() — the ETH skim call fails.
-            await (await manager.connect(deployer).setTreasury(await reg.getAddress())).wait();
+            await (await timelockCall(timelock, manager, "setTreasury", [await reg.getAddress()])).wait();
             await (await v4Pm.setOwed(1, 40_000n, 0n)).wait();
 
             const tx = manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_NATIVE_KEY));

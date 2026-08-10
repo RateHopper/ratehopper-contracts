@@ -14,8 +14,8 @@ import "../../common/Types.sol";
 
 /// @title AerodromeYieldHandler
 /// @notice Aerodrome Slipstream adapter for SafeYieldManager. Pool params
-///         are `abi.encode(token0, token1, int24 tickSpacing)`. Stateless —
-///         executed via delegatecall from the manager.
+///         are `abi.encode(token0, token1, int24 tickSpacing)`. Executed via
+///         delegatecall from the manager and records each position's stakePool.
 contract AerodromeYieldHandler is BaseYieldHandler {
     ICLFactory public immutable CL_FACTORY;
     /// @notice Aerodrome Voter — the canonical pool -> stake pool registry used to
@@ -43,14 +43,14 @@ contract AerodromeYieldHandler is BaseYieldHandler {
         if (stakePool == address(0)) revert StakingNotSupported();
         _safeExec(_onBehalfOf, POSITION_MANAGER, abi.encodeCall(IERC721.approve, (stakePool, tokenId)), 28);
         _safeExec(_onBehalfOf, stakePool, abi.encodeCall(IStakePool.deposit, (tokenId)), 29);
+        _yieldStorage().stakePoolOf[PROTOCOL][tokenId] = stakePool;
     }
 
     /// @dev The pool stakePool currently holding `tokenId`, or address(0) when the
     ///      position is unstaked or its pool has no stakePool — the single
     ///      definition of "staked" shared by the hooks below.
     function _stakePoolOf(uint256 tokenId) internal view returns (address) {
-        (, , bytes memory lpPoolParam, ) = _position(tokenId);
-        address stakePool = VOTER.gauges(_getPool(lpPoolParam));
+        address stakePool = _yieldStorage().stakePoolOf[PROTOCOL][tokenId];
         if (stakePool == address(0) || IERC721(POSITION_MANAGER).ownerOf(tokenId) != stakePool) return address(0);
         return stakePool;
     }
@@ -62,6 +62,7 @@ contract AerodromeYieldHandler is BaseYieldHandler {
         address stakePool = _stakePoolOf(tokenId);
         if (stakePool != address(0)) {
             _safeExec(_onBehalfOf, stakePool, abi.encodeCall(IStakePool.withdraw, (tokenId)), 30);
+            delete _yieldStorage().stakePoolOf[PROTOCOL][tokenId];
         }
     }
 

@@ -531,7 +531,14 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     ///      live after an otherwise-successful operation.
     function _safeApprove(address _onBehalfOf, address token, address spender, uint256 amount, uint8 step) internal {
         bytes memory ret = _safeExec(_onBehalfOf, token, abi.encodeCall(IERC20.approve, (spender, amount)), step);
-        if (ret.length > 0 && !abi.decode(ret, (bool))) revert TokenApprovalFailed(token);
+        if (ret.length > 0) {
+            if (ret.length < 32) revert TokenApprovalFailed(token);
+            uint256 word;
+            assembly ("memory-safe") {
+                word := mload(add(ret, 0x20))
+            }
+            if (word != 1) revert TokenApprovalFailed(token);
+        }
     }
 
     /// @dev Module-mediated Safe call with inner-revert bubbling.

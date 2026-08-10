@@ -68,6 +68,10 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
         );
         await handler.waitForDeployment();
 
+        const Timelock = await ethers.getContractFactory("MockTimelockController");
+        const timelock = await Timelock.deploy(1);
+        await timelock.waitForDeployment();
+
         const Manager = await ethers.getContractFactory("SafeYieldManager");
         const manager = await Manager.deploy(
             await registry.getAddress(),
@@ -82,7 +86,7 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             250,
             2_000,
             admin.address,
-            admin.address,
+            await timelock.getAddress(),
             pauser.address,
         );
         await manager.waitForDeployment();

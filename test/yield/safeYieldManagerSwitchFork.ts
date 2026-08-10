@@ -71,6 +71,10 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
     );
     await aeroHandler.waitForDeployment();
 
+    const Timelock = await ethers.getContractFactory("MockTimelockController");
+    const timelock = await Timelock.deploy(1);
+    await timelock.waitForDeployment();
+
     const Manager = await ethers.getContractFactory("SafeYieldManager");
     const manager = await Manager.deploy(
         await registry.getAddress(),
@@ -85,7 +89,7 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
         250,
         2_000,
         admin.address,
-        admin.address,
+        await timelock.getAddress(),
         pauser.address,
     );
     await manager.waitForDeployment();
@@ -298,7 +302,11 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 tickUpper: uniAlignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                openSwap0: leg((reverseSwitchOpenExpectedOut * 9_700n) / 10_000n, reverseSwitchOpenExpectedOut, UNIV3_POOL_PARAM),
+                openSwap0: leg(
+                    (reverseSwitchOpenExpectedOut * 9_700n) / 10_000n,
+                    reverseSwitchOpenExpectedOut,
+                    UNIV3_POOL_PARAM,
+                ),
                 openSwap1: ZERO_LEG,
                 openSlippageBps: 300,
                 lpPoolParam: UNIV3_POOL_PARAM,

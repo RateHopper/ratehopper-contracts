@@ -41,6 +41,10 @@ abstract contract YieldStorage {
         ///      retroactively to positions opened under an older handler.
         ///      Deleted on full close together with the basis.
         mapping(uint8 protocolId => mapping(uint256 tokenId => address)) positionHandlerOf;
+        /// @dev Aerodrome stake pool pinned when a position is staked. The
+        ///      Voter mapping is governance-controlled and may rotate later;
+        ///      exits must use the pool that actually owns the NFT.
+        mapping(uint8 protocolId => mapping(uint256 tokenId => address)) stakePoolOf;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ratehopper.storage.yield")) - 1)) & ~bytes32(uint256(0xff))

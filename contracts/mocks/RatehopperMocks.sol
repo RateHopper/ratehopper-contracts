@@ -398,3 +398,30 @@ contract MockERC721 {
         ownerOf[tokenId] = to;
     }
 }
+
+/// @notice Test-only timelock-shaped forwarder. The production manager only
+/// accepts a contract exposing a non-zero getMinDelay; tests use this helper
+/// to exercise the caller-is-timelock boundary without waiting for wall-clock
+/// delay in every setter test.
+contract MockTimelockController {
+    uint256 public immutable minDelay;
+
+    constructor(uint256 delay_) {
+        require(delay_ > 0, "delay");
+        minDelay = delay_;
+    }
+
+    function getMinDelay() external view returns (uint256) {
+        return minDelay;
+    }
+
+    function execute(address target, bytes calldata data) external returns (bytes memory result) {
+        (bool ok, bytes memory ret) = target.call(data);
+        if (!ok) {
+            assembly ("memory-safe") {
+                revert(add(ret, 0x20), mload(ret))
+            }
+        }
+        return ret;
+    }
+}

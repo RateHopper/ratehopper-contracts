@@ -16,6 +16,10 @@ import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, SwapLeg} fr
 import {YieldStorage} from "./handlers/YieldStorage.sol";
 import "../common/Types.sol";
 
+interface ITimelockControllerLike {
+    function getMinDelay() external view returns (uint256);
+}
+
 /// @notice Parameters for atomically moving a full position to another pool
 ///         (different protocol, pair and/or pool param). The close leg's
 ///         realized USDC becomes the open leg's input, so no `usdcAmount` is
@@ -97,6 +101,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     error HandlerCallFailed();
     error InvalidHandler();
     error HandlerProtocolMismatch(uint8 expected, uint8 actual);
+    error InvalidTimelock();
 
     /// @notice Allows only the registry operator or the Safe itself.
     modifier onlyOperatorOrSafe(address _onBehalfOf) {
@@ -136,6 +141,12 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         if (address(_usdc) == address(0)) revert ZeroAddress();
         if (_initialAdmin == address(0)) revert ZeroAddress();
         if (_timelock == address(0)) revert ZeroAddress();
+        if (_timelock.code.length == 0) revert InvalidTimelock();
+        try ITimelockControllerLike(_timelock).getMinDelay() returns (uint256 minDelay) {
+            if (minDelay == 0) revert InvalidTimelock();
+        } catch {
+            revert InvalidTimelock();
+        }
         if (_pauser == address(0)) revert ZeroAddress();
         if (_treasury == address(0)) revert InvalidTreasury();
         if (_maxFeeBps > 10_000) revert FeeAboveMax();
