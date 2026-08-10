@@ -30,8 +30,9 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 ### Yield Handlers (`contracts/yield/handlers/`)
 
 - **UniV3YieldHandler.sol**, **AerodromeYieldHandler.sol** extend **BaseYieldHandler.sol** (shared LP flow, protocol diffs in 5 virtual hooks)
+- **UniV4YieldHandler.sol** implements `IYieldHandler` directly (V4 singleton/actions model doesn't fit the V3-shaped hooks): PoolKey pool params (`keccak256(poolParam)` == V4 PoolId), Permit2 two-step approvals, UniversalRouter swaps, native ETH pools supported; V4 interfaces/math vendored under `contracts/interfaces/uniswapV4/` and `contracts/libraries/uniswapV4/` (pinned to the deployed-era Uniswap sources — do not re-vendor from main)
 - Stateless delegatecall targets: MUST NOT declare storage variables; mutable state only via `YieldStorage._yieldStorage()`
-- Pool selection params are ABI-encoded bytes (`uint24` feeTier / `int24` tickSpacing) for forward compatibility (e.g. Uniswap V4 `PoolKey`)
+- Pool selection params are ABI-encoded bytes (`uint24` feeTier / `int24` tickSpacing / full V4 `PoolKey` tuple)
 
 ### Access Control
 

@@ -24,6 +24,7 @@ const GATED = [
     "contracts/yield/handlers/V3StyleYieldHandler.sol",
     "contracts/yield/handlers/UniV3YieldHandler.sol",
     "contracts/yield/handlers/AerodromeYieldHandler.sol",
+    "contracts/yield/handlers/UniV4YieldHandler.sol",
     "contracts/yield/handlers/YieldStorage.sol",
 ];
 

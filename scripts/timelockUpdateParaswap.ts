@@ -30,9 +30,7 @@ async function main() {
     const OPERATION_ID = process.env.OPERATION_ID || "paraswap-update-" + Date.now();
 
     if (!TIMELOCK_ADDRESS || !PROTOCOL_REGISTRY_ADDRESS || !NEW_PARASWAP_ADDRESS) {
-        throw new Error(
-            "Please set TIMELOCK_ADDRESS, PROTOCOL_REGISTRY_ADDRESS, and NEW_PARASWAP_ADDRESS"
-        );
+        throw new Error("Please set TIMELOCK_ADDRESS, PROTOCOL_REGISTRY_ADDRESS, and NEW_PARASWAP_ADDRESS");
     }
 
     console.log("Configuration:");
@@ -96,7 +94,6 @@ async function main() {
         console.log(`   NEW_PARASWAP_ADDRESS=${NEW_PARASWAP_ADDRESS} \\`);
         console.log(`   OPERATION_ID="${OPERATION_ID}" \\`);
         console.log("   npx hardhat run scripts/timelock-update-paraswap.ts --network base");
-
     } else {
         // STEP 2: Execute the operation
         console.log("\n=== EXECUTING OPERATION ===\n");
@@ -108,9 +105,7 @@ async function main() {
             if (isPending) {
                 const timestamp = await timelock.getTimestamp(operationId);
                 const readyAt = new Date(Number(timestamp) * 1000);
-                throw new Error(
-                    `Operation is not ready yet. Please wait until ${readyAt.toISOString()}`
-                );
+                throw new Error(`Operation is not ready yet. Please wait until ${readyAt.toISOString()}`);
             } else {
                 throw new Error("Operation not found. Please schedule it first (run without EXECUTE=true)");
             }

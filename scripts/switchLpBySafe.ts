@@ -8,11 +8,14 @@ import {
     AERODROME_SLIPSTREAM_NPM_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
     UNISWAP_V3_NPM_ADDRESS,
+    UNISWAP_V4_POSITION_MANAGER_ADDRESS,
+    UNISWAP_V4_STATE_VIEW_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
     YieldProtocol,
     encodeAerodromePoolParam,
     encodeUniV3PoolParam,
+    encodeUniV4PoolParam,
 } from "../contractAddresses";
 import {
     AERO_FACTORY_ABI,
@@ -21,10 +24,13 @@ import {
     UNIV3_FACTORY_ABI,
     UNIV3_NPM_ABI,
     UNIV3_POOL_ABI,
+    UNIV4_PM_ABI,
+    UNIV4_STATE_VIEW_ABI,
     alignTick,
     amountsForLiquidity,
     deployedManagerAddress,
     resolveOwnerKey,
+    unpackV4PositionTicks,
     waitForReceipt,
 } from "./lpSafeShared";
 
@@ -45,12 +51,17 @@ import {
 // ─── Configuration ───────────────────────────────────────────────────────
 const SAFE_ADDRESS = "0x7319ac30a862f2bf6b146793a42f411215c819ce";
 const TOKEN_ID = 5730754n;
-const FROM_PROTOCOL_NAME: "aerodrome" | "univ3" = "univ3";
-const TO_PROTOCOL_NAME: "aerodrome" | "univ3" = "aerodrome";
+const FROM_PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "univ3";
+const TO_PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "aerodrome";
 
 // Target Aerodrome tick spacing / UniV3 fee tier.
 const TARGET_TICK_SPACING = 100;
 const TARGET_FEE_TIER = 500;
+// Target Uniswap V4 PoolKey fields — used when TO_PROTOCOL_NAME is "univ4".
+const TARGET_V4_FEE_TIER = 500;
+const TARGET_V4_TICK_SPACING = 10;
+const TARGET_V4_USE_NATIVE_ETH = true;
+const TARGET_V4_HOOKS = "0x0000000000000000000000000000000000000000";
 // Half-width in raw ticks. Zero means 10 * target pool tick spacing.
 const TARGET_TICK_RANGE = 0;
 
@@ -64,7 +75,6 @@ const MANAGER_ADDRESS_OVERRIDE = "";
 const DRY_RUN = true;
 // ─────────────────────────────────────────────────────────────────────────
 
-
 type PoolInfo = {
     protocol: number;
     poolParam: string;
@@ -74,8 +84,34 @@ type PoolInfo = {
     tickSpacing: number;
 };
 
-async function resolvePool(protocolName: "aerodrome" | "univ3", poolParamValue: number): Promise<PoolInfo> {
+async function resolveV4Pool(poolParam: string, tickSpacing: number): Promise<PoolInfo> {
+    const poolId = ethers.keccak256(poolParam);
+    const stateView = new ethers.Contract(UNISWAP_V4_STATE_VIEW_ADDRESS, UNIV4_STATE_VIEW_ABI, ethers.provider);
+    const [sqrtPrice, tick] = await stateView.getSlot0(poolId);
+    if (BigInt(sqrtPrice) === 0n) throw new Error(`V4 pool not initialized: ${poolId}`);
+    return {
+        protocol: YieldProtocol.UNISWAP_V4,
+        poolParam,
+        poolAddress: `V4 PoolManager (poolId ${poolId})`,
+        sqrtPriceX96: BigInt(sqrtPrice),
+        tick: Number(tick),
+        tickSpacing,
+    };
+}
+
+async function resolvePool(protocolName: "aerodrome" | "univ3" | "univ4", poolParamValue: number): Promise<PoolInfo> {
     const provider = ethers.provider;
+    if (protocolName === "univ4") {
+        const currency0 = TARGET_V4_USE_NATIVE_ETH ? ethers.ZeroAddress : WETH_ADDRESS;
+        const poolParam = encodeUniV4PoolParam(
+            currency0,
+            USDC_ADDRESS,
+            TARGET_V4_FEE_TIER,
+            TARGET_V4_TICK_SPACING,
+            TARGET_V4_HOOKS,
+        );
+        return resolveV4Pool(poolParam, TARGET_V4_TICK_SPACING);
+    }
     if (protocolName === "aerodrome") {
         const poolParam = encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, poolParamValue);
         const factory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, AERO_FACTORY_ABI, provider);
@@ -123,32 +159,57 @@ async function main() {
     const provider = ethers.provider;
     const manager = await ethers.getContractAt("SafeYieldManager", MANAGER_ADDRESS);
 
-    const sourceNpmAddress =
-        FROM_PROTOCOL_NAME === "aerodrome" ? AERODROME_SLIPSTREAM_NPM_ADDRESS : UNISWAP_V3_NPM_ADDRESS;
-    const sourceNpm = new ethers.Contract(
-        sourceNpmAddress,
-        FROM_PROTOCOL_NAME === "aerodrome" ? AERO_NPM_ABI : UNIV3_NPM_ABI,
-        provider,
-    );
-    const owner: string = await sourceNpm.ownerOf(TOKEN_ID);
-    if (owner.toLowerCase() !== SAFE_ADDRESS.toLowerCase()) {
-        throw new Error(`Token ${TOKEN_ID} is owned by ${owner}, not SAFE_ADDRESS ${SAFE_ADDRESS}`);
+    let source: PoolInfo;
+    let sourceTickLower: number;
+    let sourceTickUpper: number;
+    let liquidity: bigint;
+
+    if (FROM_PROTOCOL_NAME === "univ4") {
+        const pm = new ethers.Contract(UNISWAP_V4_POSITION_MANAGER_ADDRESS, UNIV4_PM_ABI, provider);
+        const owner: string = await pm.ownerOf(TOKEN_ID);
+        if (owner.toLowerCase() !== SAFE_ADDRESS.toLowerCase()) {
+            throw new Error(`Token ${TOKEN_ID} is owned by ${owner}, not SAFE_ADDRESS ${SAFE_ADDRESS}`);
+        }
+        const [key, info] = await pm.getPoolAndPositionInfo(TOKEN_ID);
+        const currency0Ok =
+            key.currency0 === ethers.ZeroAddress || key.currency0.toLowerCase() === WETH_ADDRESS.toLowerCase();
+        if (!currency0Ok || key.currency1.toLowerCase() !== USDC_ADDRESS.toLowerCase()) {
+            throw new Error(`Token ${TOKEN_ID} is not an ETH/USDC or WETH/USDC V4 position`);
+        }
+        const poolParam = encodeUniV4PoolParam(key.currency0, key.currency1, key.fee, key.tickSpacing, key.hooks);
+        source = await resolveV4Pool(poolParam, Number(key.tickSpacing));
+        ({ tickLower: sourceTickLower, tickUpper: sourceTickUpper } = unpackV4PositionTicks(BigInt(info)));
+        liquidity = await pm.getPositionLiquidity(TOKEN_ID);
+    } else {
+        const sourceNpmAddress =
+            FROM_PROTOCOL_NAME === "aerodrome" ? AERODROME_SLIPSTREAM_NPM_ADDRESS : UNISWAP_V3_NPM_ADDRESS;
+        const sourceNpm = new ethers.Contract(
+            sourceNpmAddress,
+            FROM_PROTOCOL_NAME === "aerodrome" ? AERO_NPM_ABI : UNIV3_NPM_ABI,
+            provider,
+        );
+        const owner: string = await sourceNpm.ownerOf(TOKEN_ID);
+        if (owner.toLowerCase() !== SAFE_ADDRESS.toLowerCase()) {
+            throw new Error(`Token ${TOKEN_ID} is owned by ${owner}, not SAFE_ADDRESS ${SAFE_ADDRESS}`);
+        }
+        const position = await sourceNpm.positions(TOKEN_ID);
+        const token0: string = position[2];
+        const token1: string = position[3];
+        if (
+            token0.toLowerCase() !== WETH_ADDRESS.toLowerCase() ||
+            token1.toLowerCase() !== USDC_ADDRESS.toLowerCase()
+        ) {
+            throw new Error(`Token ${TOKEN_ID} is not a WETH/USDC position`);
+        }
+        source = await resolvePool(FROM_PROTOCOL_NAME, Number(position[4]));
+        sourceTickLower = Number(position[5]);
+        sourceTickUpper = Number(position[6]);
+        liquidity = BigInt(position[7]);
     }
-    const position = await sourceNpm.positions(TOKEN_ID);
-    const token0: string = position[2];
-    const token1: string = position[3];
-    if (token0.toLowerCase() !== WETH_ADDRESS.toLowerCase() || token1.toLowerCase() !== USDC_ADDRESS.toLowerCase()) {
-        throw new Error(`Token ${TOKEN_ID} is not a WETH/USDC position`);
-    }
-    const sourcePoolValue = Number(position[4]);
-    const source = await resolvePool(FROM_PROTOCOL_NAME, sourcePoolValue);
+    if (liquidity === 0n) throw new Error(`Token ${TOKEN_ID} has zero liquidity`);
+
     const targetValue = TO_PROTOCOL_NAME === "aerodrome" ? TARGET_TICK_SPACING : TARGET_FEE_TIER;
     const target = await resolvePool(TO_PROTOCOL_NAME, targetValue);
-
-    const sourceTickLower = Number(position[5]);
-    const sourceTickUpper = Number(position[6]);
-    const liquidity: bigint = BigInt(position[7]);
-    if (liquidity === 0n) throw new Error(`Token ${TOKEN_ID} has zero liquidity`);
 
     const withdrawn = amountsForLiquidity(source.sqrtPriceX96, sourceTickLower, sourceTickUpper, liquidity);
     let closeExpectedSwapOut = (withdrawn.amount0 * source.sqrtPriceX96 * source.sqrtPriceX96) >> 192n;
@@ -187,7 +248,11 @@ async function main() {
         onBehalfOf: SAFE_ADDRESS,
         tokenId: TOKEN_ID,
         // WETH is token0 on Base; the USDC side needs no swap leg.
-        closeSwap0: { amountOutMin: closeSwapAmountOutMin, expectedOut: closeExpectedSwapOut, poolParam: source.poolParam },
+        closeSwap0: {
+            amountOutMin: closeSwapAmountOutMin,
+            expectedOut: closeExpectedSwapOut,
+            poolParam: source.poolParam,
+        },
         closeSwap1: { amountOutMin: 0, expectedOut: 0, poolParam: "0x" },
         closeSlippageBps: CLOSE_SLIPPAGE_BPS,
         decreaseAmount0Min: 0n,
@@ -197,7 +262,11 @@ async function main() {
         tickUpper,
         mintAmount0Min: MINT_AMOUNT0_MIN,
         mintAmount1Min: MINT_AMOUNT1_MIN,
-        openSwap0: { amountOutMin: openSwapAmountOutMin, expectedOut: openExpectedSwapOut, poolParam: target.poolParam },
+        openSwap0: {
+            amountOutMin: openSwapAmountOutMin,
+            expectedOut: openExpectedSwapOut,
+            poolParam: target.poolParam,
+        },
         openSwap1: { amountOutMin: 0, expectedOut: 0, poolParam: "0x" },
         openSlippageBps: OPEN_SLIPPAGE_BPS,
         lpPoolParam: target.poolParam,

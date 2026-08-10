@@ -8,11 +8,14 @@ import {
     AERODROME_SLIPSTREAM_NPM_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
     UNISWAP_V3_NPM_ADDRESS,
+    UNISWAP_V4_POSITION_MANAGER_ADDRESS,
+    UNISWAP_V4_STATE_VIEW_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
     YieldProtocol,
     encodeAerodromePoolParam,
     encodeUniV3PoolParam,
+    encodeUniV4PoolParam,
 } from "../contractAddresses";
 import {
     AERO_FACTORY_ABI,
@@ -21,9 +24,12 @@ import {
     UNIV3_FACTORY_ABI,
     UNIV3_NPM_ABI,
     UNIV3_POOL_ABI,
+    UNIV4_PM_ABI,
+    UNIV4_STATE_VIEW_ABI,
     amountsForLiquidity,
     deployedManagerAddress,
     resolveOwnerKey,
+    unpackV4PositionTicks,
     waitForReceipt,
 } from "./lpSafeShared";
 
@@ -49,7 +55,7 @@ import {
 
 // ─── Configuration ───────────────────────────────────────────────────────
 const SAFE_ADDRESS: string = "0x7319ac30a862f2bf6b146793a42f411215c819ce";
-const PROTOCOL_NAME: "aerodrome" | "univ3" = "univ3";
+const PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "univ3";
 const TOKEN_ID = 5730754n;
 // 10_000 = full close (burns the NFT); 1..9_999 = partial close
 const EXIT_BPS = 10_000;
@@ -65,7 +71,6 @@ const MANAGER_ADDRESS_OVERRIDE = "";
 // true = print the resolved params and calldata without executing
 const DRY_RUN = true;
 // ─────────────────────────────────────────────────────────────────────────
-
 
 async function main() {
     const OWNER_KEY = resolveOwnerKey();
@@ -86,7 +91,24 @@ async function main() {
     let tickUpper: number;
     let liquidity: bigint;
 
-    if (PROTOCOL_NAME === "aerodrome") {
+    if (PROTOCOL_NAME === "univ4") {
+        protocol = YieldProtocol.UNISWAP_V4;
+        // The position's own PoolKey is the pool identity — no fee/spacing
+        // config needed; native ETH (currency0 == address(0)) works the same
+        // as WETH here (both 18-decimals currency0).
+        const pm = new ethers.Contract(UNISWAP_V4_POSITION_MANAGER_ADDRESS, UNIV4_PM_ABI, provider);
+        const [key, info] = await pm.getPoolAndPositionInfo(TOKEN_ID);
+        if (key.currency1.toLowerCase() !== USDC_ADDRESS.toLowerCase()) {
+            throw new Error(`Token ${TOKEN_ID} is not a */USDC V4 position`);
+        }
+        poolParam = encodeUniV4PoolParam(key.currency0, key.currency1, key.fee, key.tickSpacing, key.hooks);
+        const poolId = ethers.keccak256(poolParam);
+        const stateView = new ethers.Contract(UNISWAP_V4_STATE_VIEW_ADDRESS, UNIV4_STATE_VIEW_ABI, provider);
+        [sqrtPriceX96] = await stateView.getSlot0(poolId);
+        ({ tickLower, tickUpper } = unpackV4PositionTicks(BigInt(info)));
+        liquidity = await pm.getPositionLiquidity(TOKEN_ID);
+        poolAddress = `V4 PoolManager (poolId ${poolId})`;
+    } else if (PROTOCOL_NAME === "aerodrome") {
         protocol = YieldProtocol.AERODROME;
         poolParam = encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, TICK_SPACING);
         const factory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, AERO_FACTORY_ABI, provider);

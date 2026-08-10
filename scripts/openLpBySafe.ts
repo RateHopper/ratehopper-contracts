@@ -6,11 +6,13 @@ import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import {
     AERODROME_CL_FACTORY_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
+    UNISWAP_V4_STATE_VIEW_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
     YieldProtocol,
     encodeAerodromePoolParam,
     encodeUniV3PoolParam,
+    encodeUniV4PoolParam,
 } from "../contractAddresses";
 import {
     AERO_FACTORY_ABI,
@@ -18,6 +20,7 @@ import {
     ERC20_ABI,
     UNIV3_FACTORY_ABI,
     UNIV3_POOL_ABI,
+    UNIV4_STATE_VIEW_ABI,
     alignTick,
     deployedManagerAddress,
     resolveOwnerKey,
@@ -47,12 +50,19 @@ import {
 // ─── Configuration ───────────────────────────────────────────────────────
 const SAFE_ADDRESS: string = "0x7319ac30a862f2bf6b146793a42f411215c819ce";
 const USDC_AMOUNT = "0.1";
-const PROTOCOL_NAME: "aerodrome" | "univ3" = "univ3";
+const PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "univ3";
 const SLIPPAGE_BPS: bigint = 100n;
 // Aerodrome tick spacing (100 or 200) — used when PROTOCOL_NAME is "aerodrome"
 const TICK_SPACING = 100;
 // UniV3 fee tier (100 / 500 / 3000) — used when PROTOCOL_NAME is "univ3"
 const FEE_TIER = 500;
+// Uniswap V4 PoolKey fields — used when PROTOCOL_NAME is "univ4". Native
+// ETH/USDC (currency0 = address(0)) is the deepest V4 pool on Base; set
+// V4_USE_NATIVE_ETH = false for the (shallower) WETH/USDC V4 pool.
+const V4_FEE_TIER = 500;
+const V4_TICK_SPACING = 10;
+const V4_USE_NATIVE_ETH = true;
+const V4_HOOKS = "0x0000000000000000000000000000000000000000";
 // Half-width of the range in raw ticks; 0 = default (10 * pool tick spacing)
 const TICK_RANGE = 0;
 const MINT_AMOUNT0_MIN = 0n;
@@ -93,6 +103,20 @@ async function main() {
         const [sqrtP, tick] = await pool.slot0();
         sqrtPriceX96 = sqrtP;
         currentTick = Number(tick);
+    } else if (PROTOCOL_NAME === "univ4") {
+        protocol = YieldProtocol.UNISWAP_V4;
+        tickSpacing = V4_TICK_SPACING;
+        // Both native ETH and WETH are 18-decimals currency0, so the spot
+        // math below is identical to the V3/Aerodrome WETH path.
+        const currency0 = V4_USE_NATIVE_ETH ? ethers.ZeroAddress : WETH_ADDRESS;
+        poolParam = encodeUniV4PoolParam(currency0, USDC_ADDRESS, V4_FEE_TIER, V4_TICK_SPACING, V4_HOOKS);
+        const poolId = ethers.keccak256(poolParam);
+        const stateView = new ethers.Contract(UNISWAP_V4_STATE_VIEW_ADDRESS, UNIV4_STATE_VIEW_ABI, provider);
+        const [sqrtP, tick] = await stateView.getSlot0(poolId);
+        sqrtPriceX96 = BigInt(sqrtP);
+        if (sqrtPriceX96 === 0n) throw new Error(`V4 pool not initialized: ${poolId}`);
+        currentTick = Number(tick);
+        poolAddress = `V4 PoolManager (poolId ${poolId})`;
     } else {
         protocol = YieldProtocol.UNISWAP_V3;
         poolParam = encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, FEE_TIER);

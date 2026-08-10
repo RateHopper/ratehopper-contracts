@@ -24,6 +24,25 @@ export const AERO_NPM_ABI = [
     "function ownerOf(uint256) view returns (address)",
     "function positions(uint256) view returns (uint96,address,address,address,int24,int24,int24,uint128,uint256,uint256,uint128,uint128)",
 ];
+export const UNIV4_STATE_VIEW_ABI = [
+    "function getSlot0(bytes32) view returns (uint160,int24,uint24,uint24)",
+    "function getLiquidity(bytes32) view returns (uint128)",
+];
+export const UNIV4_PM_ABI = [
+    "function ownerOf(uint256) view returns (address)",
+    "function getPoolAndPositionInfo(uint256) view returns ((address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) poolKey,uint256 info)",
+    "function getPositionLiquidity(uint256) view returns (uint128)",
+];
+
+// V4 PositionInfo packing (PositionInfoLibrary): bytes25 poolId | int24
+// tickUpper (offset 32) | int24 tickLower (offset 8) | uint8 hasSubscriber.
+export function unpackV4PositionTicks(info: bigint): { tickLower: number; tickUpper: number } {
+    const signed24 = (v: bigint) => {
+        const masked = v & 0xffffffn;
+        return Number(masked >= 0x800000n ? masked - 0x1000000n : masked);
+    };
+    return { tickLower: signed24(info >> 8n), tickUpper: signed24(info >> 32n) };
+}
 
 export const Q96 = 1n << 96n;
 
@@ -74,7 +93,15 @@ export function amountsForLiquidity(
 
 // HardhatEthersProvider does not implement waitForTransaction — poll instead.
 export async function waitForReceipt(
-    provider: { getTransactionReceipt(hash: string): Promise<{ status: number | null; blockNumber: number; logs: ReadonlyArray<{ address: string; topics: ReadonlyArray<string>; data: string }> } | null> },
+    provider: {
+        getTransactionReceipt(
+            hash: string,
+        ): Promise<{
+            status: number | null;
+            blockNumber: number;
+            logs: ReadonlyArray<{ address: string; topics: ReadonlyArray<string>; data: string }>;
+        } | null>;
+    },
     hash: string,
 ) {
     let receipt = await provider.getTransactionReceipt(hash);
