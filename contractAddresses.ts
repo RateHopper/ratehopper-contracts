@@ -35,10 +35,23 @@ export const UNISWAP_V3_SWAP_ROUTER_ADDRESS = "0x2626664c2603336E57B271c5C0b26F4
 export const AERODROME_CL_FACTORY_ADDRESS = "0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A";
 export const AERODROME_SLIPSTREAM_NPM_ADDRESS = "0x827922686190790b37229fd06084350E74485b72";
 export const AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS = "0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5";
-// Aerodrome Voter — canonical pool -> CL gauge registry. AerodromeYieldHandler
-// resolves the gauge to stake into (open) / withdraw from (close) via
+// Aerodrome Voter — canonical pool -> stake pool registry. AerodromeYieldHandler
+// resolves the stakePool to stake into (open) / withdraw from (close) via
 // `VOTER.gauges(pool)` (verified: gauges(WETH/USDC spacing-100 pool) is live).
 export const AERODROME_VOTER_ADDRESS = "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5";
+
+// Uniswap V4 — singleton architecture: pools live inside the PoolManager and
+// are identified by PoolId = keccak256(abi.encode(PoolKey)), not by a pool
+// address. Reads go through StateView; LP through the V4 PositionManager
+// (ERC-721, pulls ERC20s via Permit2); swaps through the UniversalRouter.
+// Native ETH pools use currency0 == address(0). Addresses verified against
+// the official Uniswap deployments page and live on-chain reads.
+export const UNISWAP_V4_POOL_MANAGER_ADDRESS = "0x498581fF718922c3f8e6A244956aF099B2652b2b";
+export const UNISWAP_V4_POSITION_MANAGER_ADDRESS = "0x7C5f5A4bBd8fD63184577525326123B519429bDc";
+export const UNISWAP_V4_STATE_VIEW_ADDRESS = "0xA3c0c9b65baD0b08107Aa264b0f3dB444b867A71";
+export const UNISWAP_V4_QUOTER_ADDRESS = "0x0d5e0F971ED27FBfF6c2837bf31316121532048D";
+export const UNIVERSAL_ROUTER_ADDRESS = "0x6fF5693b99212Da76ad316178A184AB56D299b43";
+export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B72F4d96f8";
 
 // Paraswap
 export const PARASWAP_V6_CONTRACT_ADDRESS = "0x6a000f20005980200259b80c5102003040001068";
@@ -82,6 +95,7 @@ export enum DebtProtocol {
 export enum YieldProtocol {
     UNISWAP_V3,
     AERODROME,
+    UNISWAP_V4,
 }
 
 // SafeYieldManager pool params carry the pair: abi.encode(token0, token1, key).
@@ -93,6 +107,22 @@ export function encodeUniV3PoolParam(token0: string, token1: string, feeTier: nu
 
 export function encodeAerodromePoolParam(token0: string, token1: string, tickSpacing: number | bigint): string {
     return AbiCoder.defaultAbiCoder().encode(["address", "address", "int24"], [token0, token1, tickSpacing]);
+}
+
+// Uniswap V4 pool param is the full PoolKey tuple, so keccak256 of it IS the
+// V4 PoolId. Native ETH pools use currency0 = ZeroAddress; hookless pools use
+// hooks = ZeroAddress (hooked pools are gated by the admin allow-list only).
+export function encodeUniV4PoolParam(
+    currency0: string,
+    currency1: string,
+    fee: number | bigint,
+    tickSpacing: number | bigint,
+    hooks: string,
+): string {
+    return AbiCoder.defaultAbiCoder().encode(
+        ["address", "address", "uint24", "int24", "address"],
+        [currency0, currency1, fee, tickSpacing, hooks],
+    );
 }
 
 export const USDC_COMET_ADDRESS = "0xb125E6687d4313864e53df431d5425969c15Eb2F";

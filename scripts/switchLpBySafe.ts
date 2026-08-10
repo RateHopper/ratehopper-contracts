@@ -252,7 +252,7 @@ async function main() {
                 console.log("PositionSwitched — old token:", parsed.args.oldTokenId.toString());
                 console.log("- New token:", parsed.args.newTokenId.toString());
                 console.log("- Carried basis (USD):", ethers.formatUnits(parsed.args.carriedBasisUsd6, 6));
-                console.log("- Performance fee (USD):", ethers.formatUnits(parsed.args.feeUsd6, 6));
+                // A switch charges no performance fee (basis carries over; realized cash stays in the Safe).
                 return;
             }
         } catch {

@@ -61,9 +61,9 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
     error OnlyDelegatecall();
     error TokenApprovalFailed(address token);
-    /// @notice Thrown when `OpenLpParams.stakeInGauge` is set for a protocol
-    ///         whose handler has no gauge (e.g. Uniswap V3).
-    error GaugeStakingNotSupported();
+    /// @notice Thrown when `OpenLpParams.stake` is set for a protocol
+    ///         whose handler has no stakePool (e.g. Uniswap V3).
+    error StakingNotSupported();
 
     modifier onlyDelegatecall() {
         if (address(this) == __self) revert OnlyDelegatecall();
@@ -123,29 +123,28 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         uint256 tokenId
     ) internal view virtual returns (address token0, address token1, bytes memory lpPoolParam, uint128 liquidity);
 
-    /// @dev Stake the just-minted NFT into the protocol's gauge. Default: the
-    ///      protocol has no gauge, so opting in reverts. Aerodrome overrides it.
-    function _stakeInGauge(
-        address /* _onBehalfOf */,
-        uint256 /* tokenId */,
-        bytes memory /* lpPoolParam */
-    ) internal virtual {
-        revert GaugeStakingNotSupported();
+    /// @dev Stake the just-minted NFT into the protocol's stakePool. Default: the
+    ///      protocol has no stakePool, so opting in reverts. Aerodrome overrides it.
+    function _stake(address /* _onBehalfOf */, uint256 /* tokenId */, bytes memory /* lpPoolParam */) internal virtual {
+        revert StakingNotSupported();
     }
 
-    /// @dev Unstake `tokenId` from the protocol's gauge when it is staked, so
-    ///      the close flow's `ownerOf == Safe` guard holds. Default: no gauge →
+    /// @dev Unstake `tokenId` from the protocol's stakePool when it is staked, so
+    ///      the close flow's `ownerOf == Safe` guard holds. Default: no stakePool →
     ///      no-op. Aerodrome overrides it; idempotent for unstaked positions.
     function _unstakeIfStaked(address /* _onBehalfOf */, uint256 /* tokenId */) internal virtual {}
 
-    /// @dev Harvest gauge rewards for a STAKED `tokenId` to the Safe and report
-    ///      whether the NFT must be temporarily unstaked for the normal LP-fee
-    ///      collect. Default: no gauge → false. Aerodrome overrides it.
+    /// @dev Harvest stakePool rewards for a STAKED `tokenId` to the Safe and report
+    ///      whether the position was staked. With `captureReward`, also report the
+    ///      reward token and the Safe's pre-claim balance of it so the caller can
+    ///      swap exactly the claimed amount. Default: no stakePool → false.
+    ///      Aerodrome overrides it.
     function _collectStakedRewardIfStaked(
         address /* _onBehalfOf */,
-        uint256 /* tokenId */
-    ) internal virtual returns (bool) {
-        return false;
+        uint256 /* tokenId */,
+        bool /* captureReward */
+    ) internal virtual returns (bool wasStaked, address rewardToken, uint256 rewardBalanceBefore) {
+        return (false, address(0), 0);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -182,11 +181,11 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         basisUsd6 = (_legValueUsdc(token0, used0, half0, desired0) + _legValueUsdc(token1, used1, half1, desired1))
             .toUint128();
 
-        // Opt-in gauge stake. Runs AFTER the ownerOf==Safe check and basis so
+        // Opt-in stakePool stake. Runs AFTER the ownerOf==Safe check and basis so
         // the mint accounting is unaffected; staking then moves the NFT to the
-        // gauge (closeLp unstakes it first).
-        if (p.stakeInGauge) {
-            _stakeInGauge(p.onBehalfOf, tokenId, p.lpPoolParam);
+        // stakePool (closeLp unstakes it first).
+        if (p.stake) {
+            _stake(p.onBehalfOf, tokenId, p.lpPoolParam);
         }
     }
 
@@ -198,9 +197,9 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         (address token0, address token1, , uint128 liquidity) = _position(p.tokenId);
         _validateSwapLeg(token0, p.swap0, p.slippageBps);
         _validateSwapLeg(token1, p.swap1, p.slippageBps);
-        // A staked position is owned by the gauge; unstake it back to the Safe
+        // A staked position is owned by the stakePool; unstake it back to the Safe
         // first so the ownership guard and the existing decrease/collect/burn/swap
-        // flow run unchanged. No-op for non-gauge protocols or an unstaked NFT.
+        // flow run unchanged. No-op for non-stakePool protocols or an unstaked NFT.
         _unstakeIfStaked(p.onBehalfOf, p.tokenId);
         _requireOwnedBy(p.onBehalfOf, p.tokenId);
 
@@ -263,14 +262,26 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
     /// @inheritdoc IYieldHandler
     function collectLp(CollectLpParams calldata p) external onlyDelegatecall {
-        (address token0, address token1, bytes memory lpPoolParam, ) = _position(p.tokenId);
+        // A staked position earns stakePool emissions INSTEAD of trading fees —
+        // the pool redirects its fees away from staked liquidity — so claiming
+        // the emissions IS the complete harvest and the NFT never leaves the
+        // stakePool. Fees from unstaked periods are still collected on close.
+        // Opt-in: swap the claimed reward (e.g. AERO) to USDC through its leg.
+        (bool wasStaked, address rewardToken, uint256 rewardBefore) = _collectStakedRewardIfStaked(
+            p.onBehalfOf,
+            p.tokenId,
+            p.swapRewardToUsdc
+        );
+        if (wasStaked) {
+            if (p.swapRewardToUsdc) {
+                if (block.timestamp > p.deadline) revert DeadlineExpired();
+                _validateSwapLeg(rewardToken, p.rewardSwap, p.slippageBps);
+                _swapDeltaToUsdc(p.onBehalfOf, rewardToken, rewardBefore, p.rewardSwap, p.deadline, 38, 39, 40);
+            }
+            return;
+        }
 
-        // A staked position is owned by the gauge, so claim its incentives,
-        // temporarily return the NFT to the Safe, harvest the position's LP
-        // trading fees, then restore the stake. Returning after getReward would
-        // silently leave all trading fees uncollected until the final close.
-        bool wasStaked = _collectStakedRewardIfStaked(p.onBehalfOf, p.tokenId);
-        if (wasStaked) _unstakeIfStaked(p.onBehalfOf, p.tokenId);
+        (address token0, address token1, , ) = _position(p.tokenId);
         _requireOwnedBy(p.onBehalfOf, p.tokenId);
 
         // Swap params are validated only on the swap path; the no-swap
@@ -290,8 +301,6 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, 26, 10, 27);
             _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, 34, 35, 36);
         }
-
-        if (wasStaked) _stakeInGauge(p.onBehalfOf, p.tokenId, lpPoolParam);
     }
 
     // ─────────────────────────────────────────────────────────────────────

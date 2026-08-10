@@ -75,8 +75,7 @@ abstract contract YieldStorage {
         uint128 oldBasisUsd6,
         uint128 realizedUsd6,
         uint128 deployedUsd6,
-        uint128 carriedBasisUsd6,
-        uint128 feeUsd6
+        uint128 carriedBasisUsd6
     );
     event PositionClosed(
         address indexed onBehalfOf,

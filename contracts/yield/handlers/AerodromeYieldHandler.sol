@@ -6,7 +6,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ISlipstreamNonfungiblePositionManager} from "../../interfaces/aerodrome/ISlipstreamNonfungiblePositionManager.sol";
 import {ICLFactory} from "../../interfaces/aerodrome/ICLFactory.sol";
 import {ICLPool} from "../../interfaces/aerodrome/ICLPool.sol";
-import {ICLGauge} from "../../interfaces/aerodrome/ICLGauge.sol";
+import {IStakePool} from "../../interfaces/aerodrome/IStakePool.sol";
 import {IVoter} from "../../interfaces/aerodrome/IVoter.sol";
 import {ISlipstreamSwapRouter} from "../../interfaces/aerodrome/ISlipstreamSwapRouter.sol";
 import {BaseYieldHandler} from "./BaseYieldHandler.sol";
@@ -18,7 +18,7 @@ import "../../common/Types.sol";
 ///         executed via delegatecall from the manager.
 contract AerodromeYieldHandler is BaseYieldHandler {
     ICLFactory public immutable CL_FACTORY;
-    /// @notice Aerodrome Voter — the canonical pool -> CL gauge registry used to
+    /// @notice Aerodrome Voter — the canonical pool -> stake pool registry used to
     ///         resolve where a position is staked/unstaked.
     IVoter public immutable VOTER;
 
@@ -35,44 +35,54 @@ contract AerodromeYieldHandler is BaseYieldHandler {
         VOTER = _voter;
     }
 
-    /// @dev Stake the minted Slipstream NFT into its pool's CL gauge (resolved
-    ///      via the Voter) for AERO emissions: the Safe approves the gauge for
-    ///      the NFT, then deposits. Reverts if the pool has no gauge.
-    function _stakeInGauge(address _onBehalfOf, uint256 tokenId, bytes memory lpPoolParam) internal override {
-        address gauge = VOTER.gauges(_getPool(lpPoolParam));
-        if (gauge == address(0)) revert GaugeStakingNotSupported();
-        _safeExec(_onBehalfOf, POSITION_MANAGER, abi.encodeCall(IERC721.approve, (gauge, tokenId)), 28);
-        _safeExec(_onBehalfOf, gauge, abi.encodeCall(ICLGauge.deposit, (tokenId)), 29);
+    /// @dev Stake the minted Slipstream NFT into its pool's stake pool (resolved
+    ///      via the Voter) for AERO emissions: the Safe approves the stakePool for
+    ///      the NFT, then deposits. Reverts if the pool has no stakePool.
+    function _stake(address _onBehalfOf, uint256 tokenId, bytes memory lpPoolParam) internal override {
+        address stakePool = VOTER.gauges(_getPool(lpPoolParam));
+        if (stakePool == address(0)) revert StakingNotSupported();
+        _safeExec(_onBehalfOf, POSITION_MANAGER, abi.encodeCall(IERC721.approve, (stakePool, tokenId)), 28);
+        _safeExec(_onBehalfOf, stakePool, abi.encodeCall(IStakePool.deposit, (tokenId)), 29);
     }
 
-    /// @dev The pool gauge currently holding `tokenId`, or address(0) when the
-    ///      position is unstaked or its pool has no gauge — the single
+    /// @dev The pool stakePool currently holding `tokenId`, or address(0) when the
+    ///      position is unstaked or its pool has no stakePool — the single
     ///      definition of "staked" shared by the hooks below.
-    function _stakedGaugeOf(uint256 tokenId) internal view returns (address) {
+    function _stakePoolOf(uint256 tokenId) internal view returns (address) {
         (, , bytes memory lpPoolParam, ) = _position(tokenId);
-        address gauge = VOTER.gauges(_getPool(lpPoolParam));
-        if (gauge == address(0) || IERC721(POSITION_MANAGER).ownerOf(tokenId) != gauge) return address(0);
-        return gauge;
+        address stakePool = VOTER.gauges(_getPool(lpPoolParam));
+        if (stakePool == address(0) || IERC721(POSITION_MANAGER).ownerOf(tokenId) != stakePool) return address(0);
+        return stakePool;
     }
 
-    /// @dev Withdraw `tokenId` from its pool's gauge back to the Safe when it is
-    ///      staked (gauge owns the NFT); a no-op otherwise so unstaked and
-    ///      no-gauge positions close normally.
+    /// @dev Withdraw `tokenId` from its pool's stakePool back to the Safe when it is
+    ///      staked (stakePool owns the NFT); a no-op otherwise so unstaked and
+    ///      no-stakePool positions close normally.
     function _unstakeIfStaked(address _onBehalfOf, uint256 tokenId) internal override {
-        address gauge = _stakedGaugeOf(tokenId);
-        if (gauge != address(0)) {
-            _safeExec(_onBehalfOf, gauge, abi.encodeCall(ICLGauge.withdraw, (tokenId)), 30);
+        address stakePool = _stakePoolOf(tokenId);
+        if (stakePool != address(0)) {
+            _safeExec(_onBehalfOf, stakePool, abi.encodeCall(IStakePool.withdraw, (tokenId)), 30);
         }
     }
 
-    /// @dev When `tokenId` is staked in its pool's gauge, claim its accrued AERO
-    ///      emissions to the Safe and report that the base must temporarily
-    ///      unstake it to collect the position's LP trading fees.
-    function _collectStakedRewardIfStaked(address _onBehalfOf, uint256 tokenId) internal override returns (bool) {
-        address gauge = _stakedGaugeOf(tokenId);
-        if (gauge == address(0)) return false;
-        _safeExec(_onBehalfOf, gauge, abi.encodeCall(ICLGauge.getReward, (tokenId)), 37);
-        return true;
+    /// @dev When `tokenId` is staked in its pool's stakePool, claim its accrued AERO
+    ///      emissions to the Safe. Staked liquidity earns emissions instead of
+    ///      trading fees, so this claim is the position's complete harvest. With
+    ///      `captureReward`, snapshot the Safe's AERO balance before the claim so
+    ///      the base can swap exactly the claimed amount to USDC.
+    function _collectStakedRewardIfStaked(
+        address _onBehalfOf,
+        uint256 tokenId,
+        bool captureReward
+    ) internal override returns (bool wasStaked, address rewardToken, uint256 rewardBalanceBefore) {
+        address stakePool = _stakePoolOf(tokenId);
+        if (stakePool == address(0)) return (false, address(0), 0);
+        if (captureReward) {
+            rewardToken = IStakePool(stakePool).rewardToken();
+            rewardBalanceBefore = IERC20(rewardToken).balanceOf(_onBehalfOf);
+        }
+        _safeExec(_onBehalfOf, stakePool, abi.encodeCall(IStakePool.getReward, (tokenId)), 37);
+        return (true, rewardToken, rewardBalanceBefore);
     }
 
     function _decodePoolParam(

@@ -21,9 +21,9 @@ struct SwapLeg {
 ///           - Aerodrome:   abi.encode(address token0, address token1, int24 tickSpacing)
 ///         Funding is always USDC: `usdcAmount` is split in half per side and
 ///         each non-USDC side is swapped through its leg's pool.
-/// @dev    `stakeInGauge` is an opt-in: when true the freshly-minted NFT is
-///         staked into the protocol's gauge (Aerodrome only — handlers without
-///         a gauge revert `GaugeStakingNotSupported`). closeLp auto-unstakes.
+/// @dev    `stake` is an opt-in: when true the freshly-minted NFT is
+///         staked into the protocol's stakePool (Aerodrome only — handlers without
+///         a stakePool revert `StakingNotSupported`). closeLp auto-unstakes.
 struct OpenLpParams {
     address onBehalfOf;
     uint256 usdcAmount;
@@ -38,7 +38,7 @@ struct OpenLpParams {
     uint16 slippageBps;
     uint256 deadline;
     bytes lpPoolParam;
-    bool stakeInGauge;
+    bool stake;
 }
 
 /// @notice Parameters for closing (partially or fully) an LP position.
@@ -66,6 +66,10 @@ struct CollectLpParams {
     bool swapFeesToUsdc;
     SwapLeg swap0;
     SwapLeg swap1;
+    /// @dev Swap the stakePool reward claimed for a STAKED position (e.g. AERO)
+    ///      to USDC through `rewardSwap`. Ignored when the position is unstaked.
+    bool swapRewardToUsdc;
+    SwapLeg rewardSwap;
     uint16 slippageBps;
     uint256 deadline;
 }

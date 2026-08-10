@@ -113,7 +113,7 @@ contract MockSafeHarness {
     receive() external payable {}
 
     /// @dev Real deployed Safes accept ERC721 transfers via the default
-    ///      fallback handler's `onERC721Received`. Needed so a gauge's
+    ///      fallback handler's `onERC721Received`. Needed so a stakePool's
     ///      `safeTransferFrom` back to the Safe on unstake succeeds here too.
     function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
         return this.onERC721Received.selector;

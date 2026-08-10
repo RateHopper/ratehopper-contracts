@@ -21,6 +21,7 @@ enum DebtProtocol {
 // contractAddresses.ts for off-chain consumers.
 uint8 constant YIELD_PROTOCOL_UNISWAP_V3 = 0;
 uint8 constant YIELD_PROTOCOL_AERODROME = 1;
+uint8 constant YIELD_PROTOCOL_UNISWAP_V4 = 2;
 
 struct CollateralAsset {
     address asset;

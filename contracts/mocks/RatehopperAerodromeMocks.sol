@@ -107,7 +107,7 @@ contract MockCLFactory {
 ///         ownerOf / collect / decreaseLiquidity / burn so the full LP
 ///         lifecycle can be driven on a plain network. Also carries just
 ///         enough ERC721 surface (approve / getApproved / transferFrom) for
-///         MockCLGauge to move the NFT in the gauge-staking tests.
+///         MockStakePool to move the NFT in the stakePool-staking tests.
 contract MockCLNonfungiblePositionManager {
     struct Position {
         address owner;
@@ -286,26 +286,26 @@ contract MockCLNonfungiblePositionManager {
     }
 }
 
-/// @notice Settable pool -> gauge registry stub for `IVoter`, driving
-///         AerodromeYieldHandler's `_stakeInGauge` / `_unstakeIfStaked` hooks.
+/// @notice Settable pool -> stakePool registry stub for `IVoter`, driving
+///         AerodromeYieldHandler's `_stake` / `_unstakeIfStaked` hooks.
 contract MockVoter {
-    mapping(address => address) private _gauges;
+    mapping(address => address) private _stakePools;
 
-    function setGauge(address pool, address gauge) external {
-        _gauges[pool] = gauge;
+    function setStakePool(address pool, address stakePool) external {
+        _stakePools[pool] = stakePool;
     }
 
     function gauges(address pool) external view returns (address) {
-        return _gauges[pool];
+        return _stakePools[pool];
     }
 }
 
-/// @notice Minimal `ICLGauge` stub: `deposit` pulls the NFT from the caller
-///         (the Safe, which must have approved this gauge), `withdraw` sends
-///         it back with the ERC721 receive hook, mirroring the real gauge's
+/// @notice Minimal `IStakePool` stub: `deposit` pulls the NFT from the caller
+///         (the Safe, which must have approved this stakePool), `withdraw` sends
+///         it back with the ERC721 receive hook, mirroring the real stakePool's
 ///         `safeTransferFrom` so the Safe-harness `onERC721Received` path is
 ///         actually exercised.
-contract MockCLGauge {
+contract MockStakePool {
     address public immutable NFT;
 
     constructor(address _nft) {
@@ -329,9 +329,23 @@ contract MockCLGauge {
 
     event RewardClaimed(uint256 indexed tokenId, address indexed to);
 
+    address public rewardToken;
+    uint256 public rewardAmount;
+
+    /// @dev Arm the mock with an emission payout so tests can exercise the
+    ///      claimed-reward → USDC swap path.
+    function setReward(address token, uint256 amount) external {
+        rewardToken = token;
+        rewardAmount = amount;
+    }
+
     /// @dev Mock reward claim — records the call so tests can assert collectLp
-    ///      routed a staked position to the gauge instead of reverting.
+    ///      routed a staked position to the stakePool, and pays the configured
+    ///      emission (if armed) like the real stakePool pays AERO.
     function getReward(uint256 tokenId) external {
         emit RewardClaimed(tokenId, msg.sender);
+        if (rewardToken != address(0) && rewardAmount > 0) {
+            IERC20(rewardToken).transfer(msg.sender, rewardAmount);
+        }
     }
 }

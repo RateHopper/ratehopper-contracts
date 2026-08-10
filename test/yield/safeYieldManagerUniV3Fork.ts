@@ -124,7 +124,7 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             slippageBps: 100,
             deadline,
             lpPoolParam: POOL_PARAM,
-            stakeInGauge: false,
+            stake: false,
         };
 
         await expect(
@@ -150,6 +150,8 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
                 swapFeesToUsdc: false,
                 swap0: ZERO_LEG,
                 swap1: ZERO_LEG,
+                swapRewardToUsdc: false,
+                rewardSwap: ZERO_LEG,
                 slippageBps: 0,
                 deadline,
             }),

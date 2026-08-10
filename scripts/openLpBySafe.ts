@@ -150,7 +150,7 @@ async function main() {
         slippageBps: SLIPPAGE_BPS,
         deadline,
         lpPoolParam: poolParam,
-        stakeInGauge: false,
+        stake: false,
     };
 
     console.log("Configuration:");

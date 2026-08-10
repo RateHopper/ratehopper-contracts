@@ -701,13 +701,13 @@
             {
                 "indexed": false,
                 "internalType": "uint128",
-                "name": "wethToLp",
+                "name": "amount0ToLp",
                 "type": "uint128"
             },
             {
                 "indexed": false,
                 "internalType": "uint128",
-                "name": "usdcToLp",
+                "name": "amount1ToLp",
                 "type": "uint128"
             },
             {
@@ -775,12 +775,6 @@
                 "indexed": false,
                 "internalType": "uint128",
                 "name": "carriedBasisUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "feeUsd6",
                 "type": "uint128"
             }
         ],
@@ -1059,14 +1053,48 @@
                         "type": "uint16"
                     },
                     {
-                        "internalType": "uint256",
-                        "name": "swapAmountOutMin",
-                        "type": "uint256"
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "swap0",
+                        "type": "tuple"
                     },
                     {
-                        "internalType": "uint256",
-                        "name": "expectedSwapOut",
-                        "type": "uint256"
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "swap1",
+                        "type": "tuple"
                     },
                     {
                         "internalType": "uint16",
@@ -1092,11 +1120,6 @@
                         "internalType": "uint256",
                         "name": "minUsdcOut",
                         "type": "uint256"
-                    },
-                    {
-                        "internalType": "bytes",
-                        "name": "swapPoolParam",
-                        "type": "bytes"
                     }
                 ],
                 "internalType": "struct CloseLpParams",
@@ -1130,18 +1153,79 @@
                     },
                     {
                         "internalType": "bool",
-                        "name": "swapWethToUsdc",
+                        "name": "swapFeesToUsdc",
                         "type": "bool"
                     },
                     {
-                        "internalType": "uint256",
-                        "name": "swapAmountOutMin",
-                        "type": "uint256"
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "swap0",
+                        "type": "tuple"
                     },
                     {
-                        "internalType": "uint256",
-                        "name": "expectedSwapOut",
-                        "type": "uint256"
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "swap1",
+                        "type": "tuple"
+                    },
+                    {
+                        "internalType": "bool",
+                        "name": "swapRewardToUsdc",
+                        "type": "bool"
+                    },
+                    {
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "rewardSwap",
+                        "type": "tuple"
                     },
                     {
                         "internalType": "uint16",
@@ -1152,11 +1236,6 @@
                         "internalType": "uint256",
                         "name": "deadline",
                         "type": "uint256"
-                    },
-                    {
-                        "internalType": "bytes",
-                        "name": "swapPoolParam",
-                        "type": "bytes"
                     }
                 ],
                 "internalType": "struct CollectLpParams",
@@ -1358,14 +1437,48 @@
                         "type": "uint256"
                     },
                     {
-                        "internalType": "uint256",
-                        "name": "swapAmountOutMin",
-                        "type": "uint256"
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "swap0",
+                        "type": "tuple"
                     },
                     {
-                        "internalType": "uint256",
-                        "name": "expectedSwapOut",
-                        "type": "uint256"
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "swap1",
+                        "type": "tuple"
                     },
                     {
                         "internalType": "uint16",
@@ -1383,9 +1496,9 @@
                         "type": "bytes"
                     },
                     {
-                        "internalType": "bytes",
-                        "name": "swapPoolParam",
-                        "type": "bytes"
+                        "internalType": "bool",
+                        "name": "stake",
+                        "type": "bool"
                     }
                 ],
                 "internalType": "struct OpenLpParams",
@@ -1840,14 +1953,48 @@
                         "type": "uint256"
                     },
                     {
-                        "internalType": "uint256",
-                        "name": "closeSwapAmountOutMin",
-                        "type": "uint256"
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "closeSwap0",
+                        "type": "tuple"
                     },
                     {
-                        "internalType": "uint256",
-                        "name": "closeExpectedSwapOut",
-                        "type": "uint256"
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "closeSwap1",
+                        "type": "tuple"
                     },
                     {
                         "internalType": "uint16",
@@ -1870,11 +2017,6 @@
                         "type": "uint256"
                     },
                     {
-                        "internalType": "bytes",
-                        "name": "closeSwapPoolParam",
-                        "type": "bytes"
-                    },
-                    {
                         "internalType": "int24",
                         "name": "tickLower",
                         "type": "int24"
@@ -1895,14 +2037,48 @@
                         "type": "uint256"
                     },
                     {
-                        "internalType": "uint256",
-                        "name": "openSwapAmountOutMin",
-                        "type": "uint256"
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "openSwap0",
+                        "type": "tuple"
                     },
                     {
-                        "internalType": "uint256",
-                        "name": "openExpectedSwapOut",
-                        "type": "uint256"
+                        "components": [
+                            {
+                                "internalType": "uint256",
+                                "name": "amountOutMin",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "expectedOut",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "poolParam",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct SwapLeg",
+                        "name": "openSwap1",
+                        "type": "tuple"
                     },
                     {
                         "internalType": "uint16",
@@ -1912,11 +2088,6 @@
                     {
                         "internalType": "bytes",
                         "name": "lpPoolParam",
-                        "type": "bytes"
-                    },
-                    {
-                        "internalType": "bytes",
-                        "name": "openSwapPoolParam",
                         "type": "bytes"
                     },
                     {

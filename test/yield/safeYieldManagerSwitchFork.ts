@@ -161,7 +161,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 slippageBps: 100,
                 deadline,
                 lpPoolParam: UNIV3_POOL_PARAM,
-                stakeInGauge: false,
+                stake: false,
             })
         ).wait();
 
@@ -272,7 +272,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 slippageBps: 100,
                 deadline,
                 lpPoolParam: AERO_POOL_PARAM,
-                stakeInGauge: false,
+                stake: false,
             })
         ).wait();
 
@@ -351,7 +351,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 slippageBps: 300,
                 deadline,
                 lpPoolParam: UNIV3_POOL_PARAM_3000,
-                stakeInGauge: false,
+                stake: false,
             })
         ).wait();
 

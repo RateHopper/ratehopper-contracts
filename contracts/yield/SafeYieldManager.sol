@@ -287,12 +287,11 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         target protocol's current handler.
     /// @dev    The original basis is carried onto the replacement position
     ///         after deducting value left outside the new LP (return of basis
-    ///         first). A performance fee is charged during the switch only if
-    ///         that undeployed value exceeds the old basis; profit that stays
-    ///         invested remains deferred until the real exit. A switch opens
-    ///         new exposure, hence `whenNotPaused` (unlike exits) plus BOTH
-    ///         per-protocol switches: `protocolEnabledForClose[from]` and
-    ///         `protocolEnabledForOpen[to]`.
+    ///         first, floored at zero). A switch takes NO performance fee —
+    ///         realized profit is charged only at the real exit via closeLp.
+    ///         A switch opens new exposure, hence `whenNotPaused` (unlike
+    ///         exits) plus BOTH per-protocol switches:
+    ///         `protocolEnabledForClose[from]` and `protocolEnabledForOpen[to]`.
     function switchLp(
         uint8 fromProtocol,
         uint8 toProtocol,
@@ -317,17 +316,12 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         // Every supported handler computes deployed value from amounts used
         // out of this exact input, so a bad future handler reporting more
         // than `realizedUsd6` fails here by checked arithmetic.
+        // A switch takes NO performance fee: the redeployed leg carries its
+        // basis over, and any USDC not redeployed (undeployed remainder) simply
+        // stays in the Safe as cash. The realized-profit fee is charged only on
+        // an actual close (`closeLp`), never on a switch.
         uint128 undeployedUsd6 = realizedUsd6 - deployedUsd6;
         uint128 carriedBasisUsd6 = residualBasis > undeployedUsd6 ? residualBasis - undeployedUsd6 : 0;
-        uint128 feeUsd6;
-        if (undeployedUsd6 > residualBasis) {
-            uint256 realizedProfit = uint256(undeployedUsd6) - uint256(residualBasis);
-            feeUsd6 = ((realizedProfit * $.performanceFeeBps) / 10_000).toUint128();
-            if (feeUsd6 > 0 && !_trySafeTransfer(params.onBehalfOf, address(USDC), $.treasury, uint256(feeUsd6))) {
-                emit FeeTransferFailed(params.onBehalfOf, params.tokenId, feeUsd6);
-                feeUsd6 = 0;
-            }
-        }
 
         $.residualBasisUsd6Of[toProtocol][newTokenId] = carriedBasisUsd6;
         $.positionHandlerOf[toProtocol][newTokenId] = openHandler;
@@ -341,8 +335,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             residualBasis,
             realizedUsd6,
             deployedUsd6,
-            carriedBasisUsd6,
-            feeUsd6
+            carriedBasisUsd6
         );
     }
 
@@ -401,10 +394,10 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
                         slippageBps: p.openSlippageBps,
                         deadline: p.deadline,
                         lpPoolParam: p.lpPoolParam,
-                        // Switch re-opens the leg unstaked; gauge staking is only
+                        // Switch re-opens the leg unstaked; stakePool staking is only
                         // offered on the direct openLp path (SwitchLpParams has no
                         // stake flag).
-                        stakeInGauge: false
+                        stake: false
                     })
                 )
             )
