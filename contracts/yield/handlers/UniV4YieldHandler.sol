@@ -16,6 +16,7 @@ import {IAllowanceTransfer} from "../../interfaces/uniswapV4/IAllowanceTransfer.
 import {V4Actions, V4Commands} from "../../interfaces/uniswapV4/V4Constants.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
+import {TokenReturnLib} from "../libraries/TokenReturnLib.sol";
 import {YieldStorage} from "./YieldStorage.sol";
 import "../../common/Types.sol";
 
@@ -426,17 +427,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
                 abi.encodeCall(IERC20.transfer, ($.treasury, fee)),
                 ISafe.Operation.Call
             );
-            if (ok && ret.length > 0) {
-                if (ret.length < 32) {
-                    ok = false;
-                } else {
-                    uint256 word;
-                    assembly ("memory-safe") {
-                        word := mload(add(ret, 0x20))
-                    }
-                    ok = word == 1;
-                }
-            }
+            if (ok) ok = TokenReturnLib.returnedTrue(ret);
         }
         if (!ok) {
             emit CollectFeeTransferFailed(_onBehalfOf, tokenId, currency, fee);
@@ -664,14 +655,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             abi.encodeCall(IERC20.approve, (spender, amount)),
             step
         );
-        if (ret.length > 0) {
-            if (ret.length < 32) revert TokenApprovalFailed(token);
-            uint256 word;
-            assembly ("memory-safe") {
-                word := mload(add(ret, 0x20))
-            }
-            if (word != 1) revert TokenApprovalFailed(token);
-        }
+        if (!TokenReturnLib.returnedTrue(ret)) revert TokenApprovalFailed(token);
     }
 
     /// @dev Module-mediated Safe call with inner-revert bubbling and native

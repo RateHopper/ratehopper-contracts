@@ -13,6 +13,7 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../interfaces/safe/ISafe.sol";
 import {IProtocolRegistry} from "../interfaces/IProtocolRegistry.sol";
 import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, SwapLeg} from "../interfaces/IYieldHandler.sol";
+import {TokenReturnLib} from "./libraries/TokenReturnLib.sol";
 import {YieldStorage} from "./handlers/YieldStorage.sol";
 import "../common/Types.sol";
 
@@ -636,13 +637,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             ISafe.Operation.Call
         );
         if (!ok) return false;
-        if (ret.length == 0) return true;
-        if (ret.length < 32) return false;
-        uint256 word;
-        assembly ("memory-safe") {
-            word := mload(add(ret, 0x20))
-        }
-        return word == 1;
+        return TokenReturnLib.returnedTrue(ret);
     }
 
     /// @dev Basis and open-time handler of a position this contract manages.
