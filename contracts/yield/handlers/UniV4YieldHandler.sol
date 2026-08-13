@@ -14,8 +14,8 @@ import {IStateView} from "../../interfaces/uniswapV4/IStateView.sol";
 import {IUniversalRouter} from "../../interfaces/uniswapV4/IUniversalRouter.sol";
 import {IAllowanceTransfer} from "../../interfaces/uniswapV4/IAllowanceTransfer.sol";
 import {V4Actions, V4Commands} from "../../interfaces/uniswapV4/V4Constants.sol";
-import {TickMath} from "../../libraries/uniswapV4/TickMath.sol";
-import {LiquidityAmounts} from "../../libraries/uniswapV4/LiquidityAmounts.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {YieldStorage} from "./YieldStorage.sol";
 import "../../common/Types.sol";
 

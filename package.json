@@ -45,6 +45,8 @@
         "@safe-global/protocol-kit": "^5.2.0",
         "@safe-global/types-kit": "^1.0.1",
         "@uniswap/v3-periphery": "^1.4.4",
+        "@uniswap/v4-core": "1.0.2",
+        "@uniswap/v4-periphery": "1.0.3",
         "axios": "^1.13.2",
         "dotenv": "^16.4.5",
         "hardhat": "^2.27.2",
