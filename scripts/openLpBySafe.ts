@@ -48,9 +48,9 @@ import {
  */
 
 // ─── Configuration ───────────────────────────────────────────────────────
-const SAFE_ADDRESS: string = "0x7319ac30a862f2bf6b146793a42f411215c819ce";
+const SAFE_ADDRESS: string = process.env.TESTING_SAFE_WALLET_ADDRESS || "";
 const USDC_AMOUNT = "0.1";
-const PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "univ3";
+const PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "aerodrome";
 const SLIPPAGE_BPS: bigint = 100n;
 // Aerodrome tick spacing (100 or 200) — used when PROTOCOL_NAME is "aerodrome"
 const TICK_SPACING = 100;

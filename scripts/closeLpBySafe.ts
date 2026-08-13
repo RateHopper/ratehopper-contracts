@@ -54,9 +54,9 @@ import {
  */
 
 // ─── Configuration ───────────────────────────────────────────────────────
-const SAFE_ADDRESS: string = "0x7319ac30a862f2bf6b146793a42f411215c819ce";
-const PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "univ3";
-const TOKEN_ID = 5730754n;
+const SAFE_ADDRESS: string = process.env.TESTING_SAFE_WALLET_ADDRESS || "";
+const PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "aerodrome";
+const TOKEN_ID = 74554383n;
 // 10_000 = full close (burns the NFT); 1..9_999 = partial close
 const EXIT_BPS = 10_000;
 const SLIPPAGE_BPS: bigint = 100n;

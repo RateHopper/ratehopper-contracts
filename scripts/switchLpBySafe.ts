@@ -49,10 +49,10 @@ import {
  */
 
 // ─── Configuration ───────────────────────────────────────────────────────
-const SAFE_ADDRESS = "0x7319ac30a862f2bf6b146793a42f411215c819ce";
-const TOKEN_ID = 5730754n;
-const FROM_PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "univ3";
-const TO_PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "aerodrome";
+const SAFE_ADDRESS = process.env.TESTING_SAFE_WALLET_ADDRESS || "";
+const TOKEN_ID = 74554172n;
+const FROM_PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "aerodrome";
+const TO_PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "univ3";
 
 // Target Aerodrome tick spacing / UniV3 fee tier.
 const TARGET_TICK_SPACING = 100;

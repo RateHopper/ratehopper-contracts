@@ -47,7 +47,8 @@ export function unpackV4PositionTicks(info: bigint): { tickLower: number; tickUp
 export const Q96 = 1n << 96n;
 
 export function deployedManagerAddress(): string {
-    const file = path.join(__dirname, "../ignition/deployments/chain-8453/deployed_addresses.json");
+    const deploymentId = process.env.IGNITION_DEPLOYMENT_ID || "chain-8453";
+    const file = path.join(__dirname, `../ignition/deployments/${deploymentId}/deployed_addresses.json`);
     const deployed = JSON.parse(fs.readFileSync(file, "utf8"));
     return deployed["DeployYieldManager#SafeYieldManager"];
 }
