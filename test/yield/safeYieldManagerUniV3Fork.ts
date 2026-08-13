@@ -9,6 +9,7 @@ import {
 } from "../../contractAddresses";
 import { encodeUniV3PoolParam } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
+import { deployRealSafe, enableModuleOnSafe } from "../helpers/deployRealSafe";
 
 const UNISWAP_V3 = 0;
 const FEE_TIER = 500;
@@ -54,10 +55,7 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
         await registry.waitForDeployment();
         await (await registry.setOperator(operator.address)).wait();
 
-        const Safe = await ethers.getContractFactory("MockSafeHarness");
-        const safe = await Safe.deploy();
-        await safe.waitForDeployment();
-        const safeAddress = await safe.getAddress();
+        const safeAddress = await deployRealSafe(admin);
 
         const Handler = await ethers.getContractFactory("UniV3YieldHandler");
         const handler = await Handler.deploy(
@@ -90,6 +88,8 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             pauser.address,
         );
         await manager.waitForDeployment();
+
+        await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
         const factory = new ethers.Contract(UNISWAP_V3_FACTORY_ADDRESS, FACTORY_ABI, ethers.provider);
         const poolAddress: string = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, FEE_TIER);

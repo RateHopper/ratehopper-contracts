@@ -10,6 +10,7 @@ import {
 } from "../../contractAddresses";
 import { encodeAerodromePoolParam } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
+import { deployRealSafe, enableModuleOnSafe } from "../helpers/deployRealSafe";
 
 const AERODROME = 1;
 const TICK_SPACING = 100;
@@ -38,10 +39,7 @@ async function deployAeroStack() {
     await registry.waitForDeployment();
     await (await registry.setOperator(operator.address)).wait();
 
-    const Safe = await ethers.getContractFactory("MockSafeHarness");
-    const safe = await Safe.deploy();
-    await safe.waitForDeployment();
-    const safeAddress = await safe.getAddress();
+    const safeAddress = await deployRealSafe(admin);
 
     const Handler = await ethers.getContractFactory("AerodromeYieldHandler");
     const handler = await Handler.deploy(
@@ -75,6 +73,8 @@ async function deployAeroStack() {
         pauser.address,
     );
     await manager.waitForDeployment();
+
+    await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
     return { operator, treasury, safeAddress, handler, manager };
 }

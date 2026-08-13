@@ -11,6 +11,7 @@ import {
     encodeUniV4PoolParam,
 } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
+import { deployRealSafe, enableModuleOnSafe } from "../helpers/deployRealSafe";
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Base-fork integration for UniV4YieldHandler against the REAL Uniswap V4
@@ -70,10 +71,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         await registry.waitForDeployment();
         await (await registry.setOperator(operator.address)).wait();
 
-        const Safe = await ethers.getContractFactory("MockSafeHarness");
-        const safe = await Safe.deploy();
-        await safe.waitForDeployment();
-        const safeAddress = await safe.getAddress();
+        const safeAddress = await deployRealSafe(admin);
 
         const Handler = await ethers.getContractFactory("UniV4YieldHandler");
         const handler = await Handler.deploy(
@@ -107,6 +105,8 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             pauser.address,
         );
         await manager.waitForDeployment();
+
+        await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
         const stateView = new ethers.Contract(UNISWAP_V4_STATE_VIEW_ADDRESS, STATE_VIEW_ABI, ethers.provider);
         const [sqrtPriceRaw, tickRaw] = await stateView.getSlot0(POOL_ID);

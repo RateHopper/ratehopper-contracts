@@ -5,26 +5,42 @@ import {
     AERODROME_SLIPSTREAM_NPM_ADDRESS,
     AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
     AERODROME_VOTER_ADDRESS,
+    PERMIT2_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
     UNISWAP_V3_NPM_ADDRESS,
     UNISWAP_V3_SWAP_ROUTER_ADDRESS,
+    UNISWAP_V4_POSITION_MANAGER_ADDRESS,
+    UNISWAP_V4_STATE_VIEW_ADDRESS,
+    UNIVERSAL_ROUTER_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
 } from "../../contractAddresses";
-import { encodeAerodromePoolParam, encodeUniV3PoolParam } from "../../contractAddresses";
+import { encodeAerodromePoolParam, encodeUniV3PoolParam, encodeUniV4PoolParam } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
+import { deployRealSafe, enableModuleOnSafe } from "../helpers/deployRealSafe";
 
 const UNISWAP_V3 = 0;
 const AERODROME = 1;
+const UNISWAP_V4 = 2;
 const FEE_TIER = 500;
 const FEE_TIER_3000 = 3_000;
 const UNIV3_TICK_SPACING = 10;
 const UNIV3_TICK_SPACING_3000 = 60;
 const AERO_TICK_SPACING = 100;
+const UNIV4_TICK_SPACING = 10;
 const FORK_BLOCK = Number(process.env.BASE_FORK_BLOCK_NUMBER ?? 49_470_000);
 const UNIV3_POOL_PARAM = encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, FEE_TIER);
 const UNIV3_POOL_PARAM_3000 = encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, FEE_TIER_3000);
 const AERO_POOL_PARAM = encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, AERO_TICK_SPACING);
+// Native ETH/USDC — the deepest V4 pool on Base; currency0 == address(0).
+const UNIV4_POOL_PARAM = encodeUniV4PoolParam(
+    ethers.ZeroAddress,
+    USDC_ADDRESS,
+    FEE_TIER,
+    UNIV4_TICK_SPACING,
+    ethers.ZeroAddress,
+);
+const UNIV4_POOL_ID = ethers.keccak256(UNIV4_POOL_PARAM);
 
 const ERC20_ABI = [
     "function balanceOf(address) view returns (uint256)",
@@ -35,9 +51,24 @@ const AERO_FACTORY_ABI = ["function getPool(address,address,int24) view returns 
 const UNIV3_POOL_ABI = ["function slot0() view returns (uint160,int24,uint16,uint16,uint16,uint8,bool)"];
 const AERO_POOL_ABI = ["function slot0() view returns (uint160,int24,uint16,uint16,uint16,bool)"];
 const NPM_ABI = ["function ownerOf(uint256) view returns (address)"];
+const STATE_VIEW_ABI = ["function getSlot0(bytes32) view returns (uint160,int24,uint24,uint24)"];
+const V4_PM_ABI = [
+    "function ownerOf(uint256) view returns (address)",
+    "function getPositionLiquidity(uint256) view returns (uint128)",
+];
 
 const spotUsdcToWeth = (amount: bigint, sqrtP: bigint) => (amount << 192n) / (sqrtP * sqrtP);
 const spotWethToUsdc = (amount: bigint, sqrtP: bigint) => (amount * sqrtP * sqrtP) >> 192n;
+const sqrtRatio = (tick: number) => BigInt(Math.floor(Math.sqrt(1.0001 ** tick) * 2 ** 96));
+// Token amounts sitting in an in-range position of the given liquidity.
+const inRangeAmounts = (liquidity: bigint, sqrtP: bigint, tickLower: number, tickUpper: number) => {
+    const sqrtA = sqrtRatio(tickLower);
+    const sqrtB = sqrtRatio(tickUpper);
+    return {
+        amount0: (liquidity * (sqrtB - sqrtP) * (1n << 96n)) / (sqrtP * sqrtB),
+        amount1: (liquidity * (sqrtP - sqrtA)) >> 96n,
+    };
+};
 
 async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
     const [admin, operator, treasury, pauser] = await ethers.getSigners();
@@ -47,10 +78,7 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
     await registry.waitForDeployment();
     await (await registry.setOperator(operator.address)).wait();
 
-    const Safe = await ethers.getContractFactory("MockSafeHarness");
-    const safe = await Safe.deploy();
-    await safe.waitForDeployment();
-    const safeAddress = await safe.getAddress();
+    const safeAddress = await deployRealSafe(admin);
 
     const UniHandler = await ethers.getContractFactory("UniV3YieldHandler");
     const uniHandler = await UniHandler.deploy(
@@ -71,6 +99,16 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
     );
     await aeroHandler.waitForDeployment();
 
+    const V4Handler = await ethers.getContractFactory("UniV4YieldHandler");
+    const v4Handler = await V4Handler.deploy(
+        UNISWAP_V4_POSITION_MANAGER_ADDRESS,
+        UNIVERSAL_ROUTER_ADDRESS,
+        PERMIT2_ADDRESS,
+        UNISWAP_V4_STATE_VIEW_ADDRESS,
+        USDC_ADDRESS,
+    );
+    await v4Handler.waitForDeployment();
+
     const Timelock = await ethers.getContractFactory("MockTimelockController");
     const timelock = await Timelock.deploy(1);
     await timelock.waitForDeployment();
@@ -79,11 +117,11 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
     const manager = await Manager.deploy(
         await registry.getAddress(),
         USDC_ADDRESS,
-        [UNISWAP_V3, AERODROME],
-        [await uniHandler.getAddress(), await aeroHandler.getAddress()],
-        [uniPoolParams, aeroPoolParams],
-        [0, 0],
-        [0, 0],
+        [UNISWAP_V3, AERODROME, UNISWAP_V4],
+        [await uniHandler.getAddress(), await aeroHandler.getAddress(), await v4Handler.getAddress()],
+        [uniPoolParams, aeroPoolParams, [UNIV4_POOL_PARAM]],
+        [0, 0, 0],
+        [0, 0, 0],
         treasury.address,
         1_000,
         250,
@@ -94,7 +132,9 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
     );
     await manager.waitForDeployment();
 
-    return { admin, operator, treasury, pauser, safeAddress, uniHandler, aeroHandler, manager };
+    await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
+
+    return { admin, operator, treasury, pauser, safeAddress, uniHandler, aeroHandler, v4Handler, manager };
 }
 
 async function readUniPool(feeTier: number) {
@@ -103,6 +143,25 @@ async function readUniPool(feeTier: number) {
     const pool = new ethers.Contract(poolAddress, UNIV3_POOL_ABI, ethers.provider);
     const [sqrtP, tick] = await pool.slot0();
     return { poolAddress, sqrtP: sqrtP as bigint, tick: Number(tick) };
+}
+
+async function readAeroPool() {
+    const factory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, AERO_FACTORY_ABI, ethers.provider);
+    const poolAddress: string = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, AERO_TICK_SPACING);
+    const pool = new ethers.Contract(poolAddress, AERO_POOL_ABI, ethers.provider);
+    const [sqrtP, tick] = await pool.slot0();
+    return { poolAddress, sqrtP: sqrtP as bigint, tick: Number(tick) };
+}
+
+async function readV4Pool() {
+    const stateView = new ethers.Contract(UNISWAP_V4_STATE_VIEW_ADDRESS, STATE_VIEW_ABI, ethers.provider);
+    const [sqrtP, tick] = await stateView.getSlot0(UNIV4_POOL_ID);
+    if (BigInt(sqrtP) === 0n) {
+        throw new Error(
+            `Uniswap V4 pool ${UNIV4_POOL_ID} is not initialized at fork block ${FORK_BLOCK}; refusing to skip the integration test`,
+        );
+    }
+    return { sqrtP: sqrtP as bigint, tick: Number(tick) };
 }
 
 async function fundSafeUsdcFromPool(poolAddress: string, safeAddress: string, amount: bigint) {
@@ -238,7 +297,6 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         );
         const position = await aeroNpmPositions.positions(newTokenId);
         const newLiquidity: bigint = position[7];
-        const sqrtRatio = (tick: number) => BigInt(Math.floor(Math.sqrt(1.0001 ** tick) * 2 ** 96));
         const sqrtB = sqrtRatio(aeroAlignedTick + 1_000);
         const wethInPosition = (newLiquidity * (sqrtB - aeroSqrtP) * (1n << 96n)) / (aeroSqrtP * sqrtB);
         const closeFinalExpectedOut = spotWethToUsdc(wethInPosition, aeroSqrtP);
@@ -426,6 +484,283 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId)).to.equal(0);
         expect(await manager.residualBasisUsd6Of(UNISWAP_V3, newTokenId)).to.equal(carriedBasis);
         expect(await manager.positionHandlerOf(UNISWAP_V3, newTokenId)).to.equal(await uniHandler.getAddress());
+        expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+    });
+
+    it("moves real positions between Uniswap V3 and Uniswap V4 in both directions carrying the basis", async function () {
+        const { operator, treasury, safeAddress, uniHandler, v4Handler, manager } = await deployStack(
+            [UNIV3_POOL_PARAM],
+            [AERO_POOL_PARAM],
+        );
+
+        const { poolAddress: uniPoolAddress, sqrtP: uniSqrtP, tick: uniTick } = await readUniPool(FEE_TIER);
+        const uniAlignedTick = Math.floor(uniTick / UNIV3_TICK_SPACING) * UNIV3_TICK_SPACING;
+        const { sqrtP: v4SqrtP, tick: v4Tick } = await readV4Pool();
+        const v4AlignedTick = Math.floor(v4Tick / UNIV4_TICK_SPACING) * UNIV4_TICK_SPACING;
+
+        const input = ethers.parseUnits("10", 6);
+        const usdc = await fundSafeUsdcFromPool(uniPoolAddress, safeAddress, input);
+
+        const block = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(block!.timestamp + 3_600);
+        const openExpectedOut = spotUsdcToWeth(input / 2n, uniSqrtP);
+        await (
+            await manager.connect(operator).openLp(UNISWAP_V3, {
+                onBehalfOf: safeAddress,
+                usdcAmount: input,
+                tickLower: uniAlignedTick - 1_000,
+                tickUpper: uniAlignedTick + 1_000,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                swap0: leg((openExpectedOut * 9_900n) / 10_000n, openExpectedOut, UNIV3_POOL_PARAM),
+                swap1: ZERO_LEG,
+                slippageBps: 100,
+                deadline,
+                lpPoolParam: UNIV3_POOL_PARAM,
+                stake: false,
+            })
+        ).wait();
+
+        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
+        const opened = openedEvents[openedEvents.length - 1];
+        const oldTokenId = opened.args.tokenId;
+        const initialBasis = await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId);
+        expect(initialBasis).to.be.greaterThan(0);
+
+        // The close leg swaps WETH back through the V3 pool; the open leg
+        // redeploys the realized USDC into the native ETH/USDC V4 pool.
+        const closeExpectedOut = spotWethToUsdc(opened.args.amount0ToLp, uniSqrtP);
+        const realizedEstimate = opened.args.amount1ToLp + closeExpectedOut;
+        const switchOpenExpectedOut = spotUsdcToWeth(realizedEstimate / 2n, v4SqrtP);
+
+        await expect(
+            manager.connect(operator).switchLp(UNISWAP_V3, UNISWAP_V4, {
+                onBehalfOf: safeAddress,
+                tokenId: oldTokenId,
+                closeSwap0: leg((closeExpectedOut * 9_700n) / 10_000n, closeExpectedOut, UNIV3_POOL_PARAM),
+                closeSwap1: ZERO_LEG,
+                closeSlippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                minUsdcOut: (realizedEstimate * 9_500n) / 10_000n,
+                tickLower: v4AlignedTick - 1_000,
+                tickUpper: v4AlignedTick + 1_000,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                openSwap0: leg((switchOpenExpectedOut * 9_700n) / 10_000n, switchOpenExpectedOut, UNIV4_POOL_PARAM),
+                openSwap1: ZERO_LEG,
+                openSlippageBps: 300,
+                lpPoolParam: UNIV4_POOL_PARAM,
+                deadline,
+            }),
+        ).to.emit(manager, "PositionSwitched");
+
+        const switchedEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
+        const switched = switchedEvents[switchedEvents.length - 1];
+        const v4TokenId = switched.args.newTokenId;
+        expect(switched.args.oldBasisUsd6).to.equal(initialBasis);
+        const undeployed: bigint = switched.args.realizedUsd6 - switched.args.deployedUsd6;
+        const carriedBasis: bigint = switched.args.carriedBasisUsd6;
+        expect(carriedBasis).to.equal(initialBasis - undeployed);
+        expect(carriedBasis).to.be.greaterThan(0);
+
+        const uniNpm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, ethers.provider);
+        const v4Pm = new ethers.Contract(UNISWAP_V4_POSITION_MANAGER_ADDRESS, V4_PM_ABI, ethers.provider);
+        await expect(uniNpm.ownerOf(oldTokenId)).to.be.reverted;
+        expect(await v4Pm.ownerOf(v4TokenId)).to.equal(safeAddress);
+        expect(await v4Pm.getPositionLiquidity(v4TokenId)).to.be.greaterThan(0);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId)).to.equal(0);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(carriedBasis);
+        expect(await manager.positionHandlerOf(UNISWAP_V4, v4TokenId)).to.equal(await v4Handler.getAddress());
+        expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+
+        // Back leg: estimate the V4 position's composition from its actual
+        // liquidity, then close it through the V4 pool and reopen on V3.
+        const v4Liquidity: bigint = await v4Pm.getPositionLiquidity(v4TokenId);
+        const { amount0: ethInPosition, amount1: usdcInPosition } = inRangeAmounts(
+            v4Liquidity,
+            v4SqrtP,
+            v4AlignedTick - 1_000,
+            v4AlignedTick + 1_000,
+        );
+        const backCloseExpectedOut = spotWethToUsdc(ethInPosition, v4SqrtP);
+        const backRealizedEstimate = usdcInPosition + backCloseExpectedOut;
+        const backOpenExpectedOut = spotUsdcToWeth(backRealizedEstimate / 2n, uniSqrtP);
+
+        await expect(
+            manager.connect(operator).switchLp(UNISWAP_V4, UNISWAP_V3, {
+                onBehalfOf: safeAddress,
+                tokenId: v4TokenId,
+                closeSwap0: leg((backCloseExpectedOut * 9_700n) / 10_000n, backCloseExpectedOut, UNIV4_POOL_PARAM),
+                closeSwap1: ZERO_LEG,
+                closeSlippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                minUsdcOut: (backRealizedEstimate * 9_500n) / 10_000n,
+                tickLower: uniAlignedTick - 1_000,
+                tickUpper: uniAlignedTick + 1_000,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                openSwap0: leg((backOpenExpectedOut * 9_700n) / 10_000n, backOpenExpectedOut, UNIV3_POOL_PARAM),
+                openSwap1: ZERO_LEG,
+                openSlippageBps: 300,
+                lpPoolParam: UNIV3_POOL_PARAM,
+                deadline,
+            }),
+        ).to.emit(manager, "PositionSwitched");
+
+        const backEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
+        const back = backEvents[backEvents.length - 1];
+        const backTokenId = back.args.newTokenId;
+        expect(back.args.fromProtocol).to.equal(UNISWAP_V4);
+        expect(back.args.toProtocol).to.equal(UNISWAP_V3);
+        expect(back.args.oldBasisUsd6).to.equal(carriedBasis);
+        const backUndeployed: bigint = back.args.realizedUsd6 - back.args.deployedUsd6;
+        expect(back.args.carriedBasisUsd6).to.equal(carriedBasis - backUndeployed);
+        await expect(v4Pm.ownerOf(v4TokenId)).to.be.reverted;
+        expect(await uniNpm.ownerOf(backTokenId)).to.equal(safeAddress);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(0);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, backTokenId)).to.equal(back.args.carriedBasisUsd6);
+        expect(await manager.positionHandlerOf(UNISWAP_V3, backTokenId)).to.equal(await uniHandler.getAddress());
+        expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+    });
+
+    it("moves real positions between Aerodrome and Uniswap V4 in both directions carrying the basis", async function () {
+        const { operator, treasury, safeAddress, aeroHandler, v4Handler, manager } = await deployStack(
+            [UNIV3_POOL_PARAM],
+            [AERO_POOL_PARAM],
+        );
+
+        const { poolAddress: uniPoolAddress } = await readUniPool(FEE_TIER);
+        const { sqrtP: aeroSqrtP, tick: aeroTick } = await readAeroPool();
+        const aeroAlignedTick = Math.floor(aeroTick / AERO_TICK_SPACING) * AERO_TICK_SPACING;
+        const { sqrtP: v4SqrtP, tick: v4Tick } = await readV4Pool();
+        const v4AlignedTick = Math.floor(v4Tick / UNIV4_TICK_SPACING) * UNIV4_TICK_SPACING;
+
+        const input = ethers.parseUnits("10", 6);
+        const usdc = await fundSafeUsdcFromPool(uniPoolAddress, safeAddress, input);
+
+        const block = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(block!.timestamp + 3_600);
+        const openExpectedOut = spotUsdcToWeth(input / 2n, aeroSqrtP);
+        await (
+            await manager.connect(operator).openLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                usdcAmount: input,
+                tickLower: aeroAlignedTick - 1_000,
+                tickUpper: aeroAlignedTick + 1_000,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                swap0: leg((openExpectedOut * 9_900n) / 10_000n, openExpectedOut, AERO_POOL_PARAM),
+                swap1: ZERO_LEG,
+                slippageBps: 100,
+                deadline,
+                lpPoolParam: AERO_POOL_PARAM,
+                stake: false,
+            })
+        ).wait();
+
+        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
+        const opened = openedEvents[openedEvents.length - 1];
+        const oldTokenId = opened.args.tokenId;
+        const initialBasis = await manager.residualBasisUsd6Of(AERODROME, oldTokenId);
+        expect(initialBasis).to.be.greaterThan(0);
+
+        // The close leg swaps WETH back through the Aerodrome pool; the open
+        // leg redeploys the realized USDC into the native ETH/USDC V4 pool.
+        const closeExpectedOut = spotWethToUsdc(opened.args.amount0ToLp, aeroSqrtP);
+        const realizedEstimate = opened.args.amount1ToLp + closeExpectedOut;
+        const switchOpenExpectedOut = spotUsdcToWeth(realizedEstimate / 2n, v4SqrtP);
+
+        await expect(
+            manager.connect(operator).switchLp(AERODROME, UNISWAP_V4, {
+                onBehalfOf: safeAddress,
+                tokenId: oldTokenId,
+                closeSwap0: leg((closeExpectedOut * 9_700n) / 10_000n, closeExpectedOut, AERO_POOL_PARAM),
+                closeSwap1: ZERO_LEG,
+                closeSlippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                minUsdcOut: (realizedEstimate * 9_500n) / 10_000n,
+                tickLower: v4AlignedTick - 1_000,
+                tickUpper: v4AlignedTick + 1_000,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                openSwap0: leg((switchOpenExpectedOut * 9_700n) / 10_000n, switchOpenExpectedOut, UNIV4_POOL_PARAM),
+                openSwap1: ZERO_LEG,
+                openSlippageBps: 300,
+                lpPoolParam: UNIV4_POOL_PARAM,
+                deadline,
+            }),
+        ).to.emit(manager, "PositionSwitched");
+
+        const switchedEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
+        const switched = switchedEvents[switchedEvents.length - 1];
+        const v4TokenId = switched.args.newTokenId;
+        expect(switched.args.oldBasisUsd6).to.equal(initialBasis);
+        const undeployed: bigint = switched.args.realizedUsd6 - switched.args.deployedUsd6;
+        const carriedBasis: bigint = switched.args.carriedBasisUsd6;
+        expect(carriedBasis).to.equal(initialBasis - undeployed);
+        expect(carriedBasis).to.be.greaterThan(0);
+
+        const aeroNpm = new ethers.Contract(AERODROME_SLIPSTREAM_NPM_ADDRESS, NPM_ABI, ethers.provider);
+        const v4Pm = new ethers.Contract(UNISWAP_V4_POSITION_MANAGER_ADDRESS, V4_PM_ABI, ethers.provider);
+        await expect(aeroNpm.ownerOf(oldTokenId)).to.be.reverted;
+        expect(await v4Pm.ownerOf(v4TokenId)).to.equal(safeAddress);
+        expect(await v4Pm.getPositionLiquidity(v4TokenId)).to.be.greaterThan(0);
+        expect(await manager.residualBasisUsd6Of(AERODROME, oldTokenId)).to.equal(0);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(carriedBasis);
+        expect(await manager.positionHandlerOf(UNISWAP_V4, v4TokenId)).to.equal(await v4Handler.getAddress());
+        expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+
+        // Back leg: estimate the V4 position's composition from its actual
+        // liquidity, then close it through the V4 pool and reopen on Aerodrome.
+        const v4Liquidity: bigint = await v4Pm.getPositionLiquidity(v4TokenId);
+        const { amount0: ethInPosition, amount1: usdcInPosition } = inRangeAmounts(
+            v4Liquidity,
+            v4SqrtP,
+            v4AlignedTick - 1_000,
+            v4AlignedTick + 1_000,
+        );
+        const backCloseExpectedOut = spotWethToUsdc(ethInPosition, v4SqrtP);
+        const backRealizedEstimate = usdcInPosition + backCloseExpectedOut;
+        const backOpenExpectedOut = spotUsdcToWeth(backRealizedEstimate / 2n, aeroSqrtP);
+
+        await expect(
+            manager.connect(operator).switchLp(UNISWAP_V4, AERODROME, {
+                onBehalfOf: safeAddress,
+                tokenId: v4TokenId,
+                closeSwap0: leg((backCloseExpectedOut * 9_700n) / 10_000n, backCloseExpectedOut, UNIV4_POOL_PARAM),
+                closeSwap1: ZERO_LEG,
+                closeSlippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                minUsdcOut: (backRealizedEstimate * 9_500n) / 10_000n,
+                tickLower: aeroAlignedTick - 1_000,
+                tickUpper: aeroAlignedTick + 1_000,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                openSwap0: leg((backOpenExpectedOut * 9_700n) / 10_000n, backOpenExpectedOut, AERO_POOL_PARAM),
+                openSwap1: ZERO_LEG,
+                openSlippageBps: 300,
+                lpPoolParam: AERO_POOL_PARAM,
+                deadline,
+            }),
+        ).to.emit(manager, "PositionSwitched");
+
+        const backEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
+        const back = backEvents[backEvents.length - 1];
+        const backTokenId = back.args.newTokenId;
+        expect(back.args.fromProtocol).to.equal(UNISWAP_V4);
+        expect(back.args.toProtocol).to.equal(AERODROME);
+        expect(back.args.oldBasisUsd6).to.equal(carriedBasis);
+        const backUndeployed: bigint = back.args.realizedUsd6 - back.args.deployedUsd6;
+        expect(back.args.carriedBasisUsd6).to.equal(carriedBasis - backUndeployed);
+        await expect(v4Pm.ownerOf(v4TokenId)).to.be.reverted;
+        expect(await aeroNpm.ownerOf(backTokenId)).to.equal(safeAddress);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(0);
+        expect(await manager.residualBasisUsd6Of(AERODROME, backTokenId)).to.equal(back.args.carriedBasisUsd6);
+        expect(await manager.positionHandlerOf(AERODROME, backTokenId)).to.equal(await aeroHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
     });
 });
