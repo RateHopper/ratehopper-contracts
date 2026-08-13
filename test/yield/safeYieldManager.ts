@@ -173,6 +173,8 @@ async function deployYieldManagerHarness() {
     const reg = await Reg.deploy();
     await reg.waitForDeployment();
     await (await reg.setOperator(operatorEOA.address)).wait();
+    await (await reg.setWhitelisted(wethAddr, true)).wait();
+    await (await reg.setWhitelisted(usdcAddr, true)).wait();
 
     const UniHandler = await ethers.getContractFactory("UniV3YieldHandler");
     const uniHandler = await UniHandler.deploy(
@@ -382,6 +384,28 @@ describe("SafeYieldManager", function () {
             await expect(
                 manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER, { deadline: 1 })),
             ).to.be.revertedWithCustomError(manager, "DeadlineExpired");
+        });
+
+        it("reverts TokenNotWhitelisted when a pool token leaves the registry whitelist", async function () {
+            const { manager, operatorEOA, safeAddr, reg, wethAddr, usdcAddr } =
+                await loadFixture(deployYieldManagerHarness);
+
+            await (await reg.setWhitelisted(wethAddr, false)).wait();
+            await expect(manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER)))
+                .to.be.revertedWithCustomError(manager, "TokenNotWhitelisted")
+                .withArgs(wethAddr);
+
+            await (await reg.setWhitelisted(wethAddr, true)).wait();
+            await (await reg.setWhitelisted(usdcAddr, false)).wait();
+            await expect(manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER)))
+                .to.be.revertedWithCustomError(manager, "TokenNotWhitelisted")
+                .withArgs(usdcAddr);
+
+            await (await reg.setWhitelisted(usdcAddr, true)).wait();
+            await expect(manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).to.emit(
+                manager,
+                "PositionOpened",
+            );
         });
 
         it("enforces the pool param allow-list and admin toggling", async function () {
@@ -1640,7 +1664,7 @@ describe("SafeYieldManager", function () {
     });
 
     describe("arbitrary pairs (two-leg swaps)", function () {
-        async function deployNonUsdcPair(harness: { manager: any; deployer: any; uniFactory: any }) {
+        async function deployNonUsdcPair(harness: { manager: any; deployer: any; uniFactory: any; reg: any }) {
             const ERC = await ethers.getContractFactory("MockERC20");
             const a = await ERC.deploy("Wrapped BTC", "WBTC", 8);
             const b = await ERC.deploy("Tether USD", "USDT", 6);
@@ -1655,6 +1679,8 @@ describe("SafeYieldManager", function () {
             const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
             const lpPool = await Pool.deploy(xAddr, yAddr, Q96, 10n ** 18n);
             await (await harness.uniFactory.setPoolFor(xAddr, yAddr, 500, await lpPool.getAddress())).wait();
+            await (await harness.reg.setWhitelisted(xAddr, true)).wait();
+            await (await harness.reg.setWhitelisted(yAddr, true)).wait();
             await (
                 await harness.manager.connect(harness.deployer).setPoolParamAllowed(UNISWAP_V3, LP_PARAM, true)
             ).wait();
@@ -1742,7 +1768,7 @@ describe("SafeYieldManager", function () {
         });
 
         it("handles a pair where USDC itself is token0 (skips leg0, swaps only leg1)", async function () {
-            const { manager, deployer, operatorEOA, safeAddr, usdc, usdcAddr, uniFactory, uniNpm, uniRouter } =
+            const { manager, deployer, operatorEOA, safeAddr, usdc, usdcAddr, uniFactory, uniNpm, uniRouter, reg } =
                 await loadFixture(deployYieldManagerHarness);
 
             // Mock deploy addresses are nonce-derived and can land anywhere, so
@@ -1756,6 +1782,7 @@ describe("SafeYieldManager", function () {
             const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
             const lpPool = await Pool.deploy(usdcAddr, highAddr, Q96, 10n ** 18n);
             await (await uniFactory.setPoolFor(usdcAddr, highAddr, 500, await lpPool.getAddress())).wait();
+            await (await reg.setWhitelisted(highAddr, true)).wait();
             await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, LP_PARAM, true)).wait();
 
             const HIGH_OUT = 400_000n;
@@ -1880,6 +1907,22 @@ describe("SafeYieldManager", function () {
             expect(await uniNpm.ownerOf(1)).to.equal(ZERO);
             expect(await clNpm.ownerOf(1)).to.equal(safeAddr);
             expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+        });
+
+        it("reverts TokenNotWhitelisted when the switch destination pool token is de-listed", async function () {
+            const { manager, operatorEOA, safeAddr, reg, wethAddr, uniRouter } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniRouter.setOutput(600_000n)).wait();
+
+            await (await reg.setWhitelisted(wethAddr, false)).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, FEE_TIER, TICK_SPACING)),
+            )
+                .to.be.revertedWithCustomError(manager, "TokenNotWhitelisted")
+                .withArgs(wethAddr);
         });
 
         it("settles the performance fee against the original basis at the real exit", async function () {

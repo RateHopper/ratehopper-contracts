@@ -38,6 +38,8 @@ async function deployAeroStack() {
     const registry = await Registry.deploy();
     await registry.waitForDeployment();
     await (await registry.setOperator(operator.address)).wait();
+    await (await registry.setWhitelisted(WETH_ADDRESS, true)).wait();
+    await (await registry.setWhitelisted(USDC_ADDRESS, true)).wait();
 
     const safeAddress = await deployRealSafe(admin);
 

@@ -92,6 +92,11 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev Decode the (token0, token1) pair declared by a pool param.
     function _poolTokens(bytes memory poolParam) internal pure virtual returns (address token0, address token1);
 
+    /// @inheritdoc IYieldHandler
+    function poolTokens(bytes calldata lpPoolParam) external pure returns (address token0, address token1) {
+        return _poolTokens(lpPoolParam);
+    }
+
     /// @dev Read `sqrtPriceX96` from a pool (slot0 arity differs per protocol).
     function _poolSqrtPriceX96(address pool) internal view virtual returns (uint160);
 

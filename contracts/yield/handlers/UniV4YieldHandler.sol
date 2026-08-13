@@ -108,6 +108,12 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     // ─────────────────────────────────────────────────────────────────────
 
     /// @inheritdoc IYieldHandler
+    function poolTokens(bytes calldata lpPoolParam) external pure returns (address token0, address token1) {
+        PoolKey memory key = _decodePoolParam(lpPoolParam);
+        return (key.currency0, key.currency1);
+    }
+
+    /// @inheritdoc IYieldHandler
     function openLp(
         OpenLpParams calldata p
     ) external onlyDelegatecall returns (uint256 tokenId, uint128 basisUsd6, uint128 used0, uint128 used1) {

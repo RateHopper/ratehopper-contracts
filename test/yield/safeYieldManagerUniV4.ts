@@ -204,6 +204,9 @@ async function deployUniV4Harness() {
     const reg = await Reg.deploy();
     await reg.waitForDeployment();
     await (await reg.setOperator(operatorEOA.address)).wait();
+    await (await reg.setWhitelisted(wethAddr, true)).wait();
+    await (await reg.setWhitelisted(usdcAddr, true)).wait();
+    await (await reg.setWhitelisted(tokenCAddr, true)).wait();
 
     const UniHandler = await ethers.getContractFactory("UniV3YieldHandler");
     const uniHandler = await UniHandler.deploy(

@@ -89,12 +89,18 @@ contract MockERC20 is IERC20 {
     }
 }
 
-/// @notice Stand-in for `IProtocolRegistry` exposing only `safeOperator`.
+/// @notice Stand-in for `IProtocolRegistry` exposing `safeOperator` and the
+///         token whitelist.
 contract MockRegistry {
     address public safeOperator;
+    mapping(address => bool) public whitelistedTokens;
 
     function setOperator(address operator) external {
         safeOperator = operator;
+    }
+
+    function setWhitelisted(address token, bool whitelisted) external {
+        whitelistedTokens[token] = whitelisted;
     }
 }
 

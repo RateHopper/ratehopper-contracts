@@ -103,6 +103,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     error InvalidHandler();
     error HandlerProtocolMismatch(uint8 expected, uint8 actual);
     error InvalidTimelock();
+    error TokenNotWhitelisted(address token);
 
     /// @notice Allows only the registry operator or the Safe itself.
     modifier onlyOperatorOrSafe(address _onBehalfOf) {
@@ -222,6 +223,8 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         if (handler == address(0)) revert HandlerNotSet();
         if (!protocolEnabledForOpen[protocol]) revert ProtocolDisabled();
 
+        _requireWhitelistedPoolTokens(handler, params.lpPoolParam);
+
         bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.openLp, (params)));
         uint128 basisUsd6;
         uint128 used0;
@@ -314,6 +317,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         address openHandler = yieldHandlers[toProtocol];
         if (openHandler == address(0)) revert HandlerNotSet();
         if (!protocolEnabledForOpen[toProtocol]) revert ProtocolDisabled();
+        _requireWhitelistedPoolTokens(openHandler, params.lpPoolParam);
 
         YieldLayout storage $ = _yieldStorage();
         (uint128 residualBasis, address closeHandler) = _pinnedPosition($, fromProtocol, params.tokenId);
@@ -415,6 +419,27 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             )
         );
         (tokenId, deployedUsd6, , ) = abi.decode(ret, (uint256, uint128, uint128, uint128));
+    }
+
+    /// @dev Registry token whitelist gate on an open-leg pool pair, resolved
+    ///      through the handler's pure `poolTokens` decode (staticcall — the
+    ///      handler never runs in its own storage context). token0 ==
+    ///      address(0) is Uniswap V4's native-ETH currency sentinel, not a
+    ///      token — skip it (token1 can never be zero: currencies sort
+    ///      ascending). Applies to openLp and the switchLp open leg only;
+    ///      exits must never brick on a later de-listing.
+    function _requireWhitelistedPoolTokens(address handler, bytes calldata lpPoolParam) internal view {
+        // Same revert convention as _delegateToHandler: bubble reasoned
+        // reverts (e.g. a malformed pool param failing the handler's decode),
+        // wrap empty ones in HandlerCallFailed.
+        (bool ok, bytes memory ret) = handler.staticcall(abi.encodeCall(IYieldHandler.poolTokens, (lpPoolParam)));
+        if (!ok) {
+            if (ret.length > 0) Address.verifyCallResult(ok, ret);
+            revert HandlerCallFailed();
+        }
+        (address token0, address token1) = abi.decode(ret, (address, address));
+        if (token0 != address(0) && !REGISTRY.whitelistedTokens(token0)) revert TokenNotWhitelisted(token0);
+        if (!REGISTRY.whitelistedTokens(token1)) revert TokenNotWhitelisted(token1);
     }
 
     /// @notice Harvest accrued LP fees of a position opened through this

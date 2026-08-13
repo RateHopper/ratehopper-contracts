@@ -89,6 +89,12 @@ interface IYieldHandler {
     ///         handler registration.
     function PROTOCOL() external view returns (uint8);
 
+    /// @notice Decode the pair carried by an LP pool param. Used by
+    ///         SafeYieldManager (via staticcall, not delegatecall) to gate
+    ///         openLp on the registry token whitelist. For Uniswap V4
+    ///         `token0` may be address(0) — the native-ETH currency sentinel.
+    function poolTokens(bytes calldata lpPoolParam) external pure returns (address token0, address token1);
+
     /// @return tokenId   Newly minted LP NFT id (owned by the Safe).
     /// @return basisUsd6 USDC-equivalent value of the freshly minted LP.
     /// @return used0     token0 consumed by the mint.
