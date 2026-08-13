@@ -24,12 +24,12 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 
 ### Protocol Handlers (`contracts/debt/handlers/`)
 
-- **AaveV3DebtHandler.sol**, **CompoundDebtHandler.sol**, **MoonwellDebtHandler.sol**, **FluidSafeDebtHandler.sol**
+- **AaveV3DebtHandler.sol**, **CompoundDebtHandler.sol**, **MorphoDebtHandler.sol**, **MoonwellDebtHandler.sol**, **FluidSafeDebtHandler.sol** extend **BaseDebtHandler.sol**
 - Each implements: `getDebtAmount`, `switchIn`, `switchFrom`, `switchTo`, `repay`
 
 ### Yield Handlers (`contracts/yield/handlers/`)
 
-- **UniV3YieldHandler.sol**, **AerodromeYieldHandler.sol** extend **BaseYieldHandler.sol** (shared LP flow, protocol diffs in 5 virtual hooks)
+- **BaseYieldHandler.sol** owns the shared LP flow, protocol diffs in virtual hooks; **V3StyleYieldHandler.sol** implements the hooks against canonical Uniswap V3 interfaces (protocol id as constructor arg); **UniV3YieldHandler.sol** extends V3StyleYieldHandler, **AerodromeYieldHandler.sol** extends BaseYieldHandler directly
 - **UniV4YieldHandler.sol** implements `IYieldHandler` directly (V4 singleton/actions model doesn't fit the V3-shaped hooks): PoolKey pool params (`keccak256(poolParam)` == V4 PoolId), Permit2 two-step approvals, UniversalRouter swaps, native ETH pools supported; V4 math imported from exact-pinned npm packages (`@uniswap/v4-core@1.0.2`, `@uniswap/v4-periphery@1.0.3` — keep exact versions, no `^`); V4 interfaces remain hand-written minimal versions vendored under `contracts/interfaces/uniswapV4/` (do not replace with official interfaces — their `Currency`/`PositionInfo` types would leak into handler code)
 - Stateless delegatecall targets: MUST NOT declare storage variables; mutable state only via `YieldStorage._yieldStorage()`
 - Pool selection params are ABI-encoded bytes (`uint24` feeTier / `int24` tickSpacing / full V4 `PoolKey` tuple)

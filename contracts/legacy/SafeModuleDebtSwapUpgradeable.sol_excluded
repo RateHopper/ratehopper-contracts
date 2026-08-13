@@ -6,9 +6,9 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
-import "./Types.sol";
-import "./interfaces/safe/ISafe.sol";
-import {IDebtHandler} from "./interfaces/IDebtHandler.sol";
+import "../common/Types.sol";
+import "../interfaces/safe/ISafe.sol";
+import {IDebtHandler} from "../interfaces/IDebtHandler.sol";
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";

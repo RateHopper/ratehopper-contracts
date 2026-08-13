@@ -25,7 +25,7 @@ RateHopper Contracts is a smart contract system that enables users to automatica
 
 - **Uniswap V3 LP Lifecycle**: `RatehopperUniV3Positions` is a Gnosis Safe module that opens, harvests fees from, and closes WETH/USDC LP positions atomically. Charges a configurable performance fee on profit at close, plus a separate fee on accrued LP fees. Critical setters are timelock-gated.
 
-- **Unified Yield Module (SafeYieldManager)**: `SafeYieldManager` is the single Safe module for all yield (LP) protocols — the yield-side counterpart of `SafeDebtManager`. Users enable this ONE contract as a module; per-protocol mechanics live in stateless handlers (`UniV3YieldHandler`, `AerodromeYieldHandler`) invoked via delegatecall. Protocols are identified by plain `uint8` ids (the `YIELD_PROTOCOL_*` constants in `Types.sol` document the canonical assignment), so adding a protocol (e.g. Uniswap V4) is a handler deployment + timelocked `setYieldHandler` on the already-deployed manager — no redeploy, and not a new module every user must enable. The standalone `RatehopperUniV3Positions` module above is **legacy**: it keeps serving positions opened through it (coexistence, no state migration), while new positions — Uniswap V3 and Aerodrome Slipstream (CL) WETH/USDC, run **unstaked** — open through `SafeYieldManager`.
+- **Unified Yield Module (SafeYieldManager)**: `SafeYieldManager` is the single Safe module for all yield (LP) protocols — the yield-side counterpart of `SafeDebtManager`. Users enable this ONE contract as a module; per-protocol mechanics live in stateless handlers (`UniV3YieldHandler`, `AerodromeYieldHandler`, `UniV4YieldHandler`) invoked via delegatecall. Protocols are identified by plain `uint8` ids (the `YIELD_PROTOCOL_*` constants in `Types.sol` document the canonical assignment), so adding a protocol is a handler deployment + timelocked `setYieldHandler` on the already-deployed manager — no redeploy, and not a new module every user must enable. The standalone `RatehopperUniV3Positions` module above is **legacy**: it keeps serving positions opened through it (coexistence, no state migration), while new positions open through `SafeYieldManager` — Uniswap V3, Aerodrome Slipstream (CL, with optional staking for AERO emissions), and Uniswap V4 (including native ETH pools), over any allow-listed pair.
 
 ## Architecture
 
@@ -62,9 +62,11 @@ The system consists of several key components:
 7. **SafeYieldManager.sol + Yield Handlers** (`contracts/yield/`): Adapter-pattern successor to (6). `SafeYieldManager` is the single Safe module users enable; it owns basis bookkeeping (`residualBasisUsd6Of`, keyed by `(uint8 protocolId, tokenId)`), the performance fee, pause / per-protocol disable switches, and the timelocked setter surface. Protocol ids are plain `uint8` (not a Solidity enum) end-to-end, so a NEW protocol registers on the deployed manager via `setYieldHandler(id, handler)` — followed by the pauser enabling open/close and the admin allow-listing pool params — with no redeploy; the `YIELD_PROTOCOL_*` constants in `Types.sol` just document the canonical id assignment (append-only). Protocol mechanics live in stateless handlers executed via delegatecall:
     - `switchLp()` atomically closes a full position and opens its replacement in another allowed pool/protocol, carrying only the cost basis attributable to value actually deployed into the new LP.
     - `BaseYieldHandler.sol` — the shared `openLp`/`closeLp`/`collectLp` flow for V3-style CL protocols over ANY token pair; protocol diffs are isolated in virtual hooks (pool resolution, pair decoding, `slot0` read, swap calldata, mint calldata, `positions` decoding). USDC stays the sole funding/accounting currency: each non-USDC side of the pair is acquired/realized through its own USDC `SwapLeg` (a side that IS USDC needs no swap), so a WETH/USDC position swaps one leg and a WBTC/USDT-style position swaps both.
-    - `UniV3YieldHandler.sol` / `AerodromeYieldHandler.sol` — concrete adapters holding protocol immutables.
+    - `V3StyleYieldHandler.sol` — the `BaseYieldHandler` hooks implemented once against the canonical Uniswap V3 interfaces (factory `getPool` by `uint24 feeTier`, 7-field `slot0`, SwapRouter02), with the protocol id as a constructor argument so V3-shaped protocols and tests reuse the hook bodies.
+    - `UniV3YieldHandler.sol` (extends `V3StyleYieldHandler`) / `AerodromeYieldHandler.sol` (extends `BaseYieldHandler`) — concrete adapters holding protocol immutables.
+    - `UniV4YieldHandler.sol` — implements `IYieldHandler` directly (the V4 singleton/actions model doesn't fit the V3-shaped hooks): pool params are the full V4 `PoolKey` tuple (`keccak256(poolParam)` IS the V4 PoolId), ERC20 sides route through two-step Permit2 approvals and UniversalRouter swaps, and native ETH pools (`currency0 == address(0)`) are supported.
     - Shared mutable state lives in an ERC-7201 namespace (`YieldStorage`, `ratehopper.storage.yield`), so handler delegatecode can never collide with the manager's inherited storage. Handlers MUST NOT declare storage variables.
-    - Pool selection params are ABI-encoded bytes carrying the PAIR plus the protocol key (`abi.encode(token0, token1, uint24 feeTier)` for Uniswap V3, `abi.encode(token0, token1, int24 tickSpacing)` for Aerodrome), allow-listed by `keccak256(poolParam)` — richer identifiers (e.g. a Uniswap V4 `PoolKey`) fit without interface changes. A protocol whose mechanics don't fit `BaseYieldHandler` implements `IYieldHandler` directly.
+    - Pool selection params are ABI-encoded bytes carrying the PAIR plus the protocol key (`abi.encode(token0, token1, uint24 feeTier)` for Uniswap V3, `abi.encode(token0, token1, int24 tickSpacing)` for Aerodrome), allow-listed by `keccak256(poolParam)` — richer identifiers fit without interface changes (Uniswap V4 uses the full `PoolKey` tuple). A protocol whose mechanics don't fit `BaseYieldHandler` implements `IYieldHandler` directly.
 
 8. **Morpho Libraries**: Supporting libraries for the Morpho protocol:
     - `MathLib.sol`: Provides fixed-point arithmetic operations for the Morpho protocol
@@ -188,7 +190,8 @@ BASE_FORK_BLOCK_NUMBER=49470000 # Optional deterministic fork block for CI
 TREASURY=0x...                # Fee treasury for all yield modules. REQUIRED.
 REGISTRY=0x...                # Optional. Falls back to PROTOCOL_REGISTRY_ADDRESS in contractAddresses.ts
 INITIAL_ADMIN=0x...           # Optional. DEFAULT_ADMIN_ROLE holder. Falls back to ADMIN_ADDRESS
-RHP_TIMELOCK=0x...            # Optional. Reuse an existing TimelockController (shared by all three modules)
+RHP_TIMELOCK=0x...            # Optional. Reuse an existing TimelockController for the yield module only
+                              # (module override: SYM_TIMELOCK). The registry deploy uses REGISTRY_TIMELOCK.
 PERFORMANCE_FEE_BPS=1000      # Optional. Performance fee on profit at closeLp (bps). Default 1000 (10%)
 FEE_COLLECT_BPS=250           # Optional. Fee on accrued LP fees (bps). Default 250 (2.5%)
 MAX_FEE_BPS=2000              # Optional. Hard upper bound on BOTH fees (bps). Default 2000 (20%)
@@ -207,6 +210,15 @@ SYM_UNIV3_MIN_POSITION_LIQUIDITY=10000       # Per-protocol floors; fall back to
 SYM_AERODROME_MIN_POSITION_LIQUIDITY=10000   # MIN_POOL_LIQUIDITY, then the defaults
 SYM_UNIV3_MIN_POOL_LIQUIDITY=0     # Set independently after measuring the target Uni V3 pool
 SYM_AERODROME_MIN_POOL_LIQUIDITY=0 # Set independently after measuring the target Slipstream pool
+SYM_UNIV4_MIN_POSITION_LIQUIDITY=10000
+SYM_UNIV4_MIN_POOL_LIQUIDITY=0     # Set independently after measuring the target V4 pool
+
+# Optional Uniswap V4 address overrides — default to the canonical Base
+# addresses in contractAddresses.ts; only set when targeting another network.
+# SYM_UNIV4_POSITION_MANAGER=0x...  # V4 PositionManager
+# SYM_UNIVERSAL_ROUTER=0x...        # UniversalRouter
+# SYM_PERMIT2=0x...                 # Permit2 (Base uses 0x...B43aC78BA3)
+# SYM_UNIV4_STATE_VIEW=0x...        # StateView lens
 ```
 
 ## Setup and Development
@@ -240,13 +252,17 @@ The project uses:
 
 ## Testing
 
-Comprehensive tests are available in the `/test` directory covering:
+Comprehensive tests are available in the `/test` directory, organized by area (`test/debt/`, `test/yield/`, `test/registry/`, `test/legacy/`, plus shared fixtures in `test/helpers/`), covering:
 
-- Individual protocol handlers
+- Individual debt protocol handlers
 - Cross-protocol debt switching flows
 - Multiple collateral asset scenarios
 - Safe module integration
 - Leveraged position creation
+- Yield stack: `SafeYieldManager` unit suites (mock-driven) and per-protocol fork suites (Uniswap V3, Aerodrome, Uniswap V4, cross-protocol `switchLp`)
+- Legacy standalone yield module (`test/legacy/`)
+
+The `*Fork.ts` suites run against a Base mainnet fork and need `BASE_RPC_URL` (see Environment Variables).
 
 Run tests with:
 
@@ -272,7 +288,7 @@ The core contracts are defined in a single module at `ignition/modules/1_DeployC
 
 ### Export ABIs
 
-ABI files for the six core integration contracts are exported to `abis/` from Hardhat artifacts:
+ABI files for the five core integration contracts are exported to `abis/` from Hardhat artifacts:
 
 ```bash
 yarn abis
@@ -318,7 +334,7 @@ This deploys all contracts sequentially in a single transaction chain:
 
 ### Deploy SafeYieldManager (Unified Yield Stack)
 
-Deploys the adapter-pattern yield stack: `UniV3YieldHandler` + `AerodromeYieldHandler` + `SafeYieldManager`.
+Deploys the adapter-pattern yield stack: `UniV3YieldHandler` + `AerodromeYieldHandler` + `UniV4YieldHandler` + `SafeYieldManager`.
 
 ```bash
 yarn deploy:2_yield_manager
@@ -329,8 +345,8 @@ This deploys `ignition/modules/2_DeployYieldManager.ts` to Base with verificatio
 The module by default deploys:
 
 1. **TimelockController** (shared `TimelockControllerModule`; skipped when `SYM_TIMELOCK` / `RHP_TIMELOCK` is set)
-2. **UniV3YieldHandler** and **AerodromeYieldHandler** (stateless delegatecall targets pinned to the canonical Base NPM / factory / router / WETH / USDC addresses)
-3. **SafeYieldManager** with both handlers registered, protocols enabled, and default pool-param allow-lists seeded (Uniswap V3 fee tiers `{100, 500, 3000}`, Aerodrome tick spacings `{100, 200}`)
+2. **UniV3YieldHandler**, **AerodromeYieldHandler** and **UniV4YieldHandler** (stateless delegatecall targets pinned to the canonical Base position-manager / factory / router / Permit2 / USDC addresses)
+3. **SafeYieldManager** with all three handlers registered, protocols enabled, and default pool-param allow-lists seeded (WETH/USDC on Uniswap V3 fee tiers `{100, 500, 3000}` and Aerodrome tick spacings `{100, 200}`; the hookless native ETH/USDC 0.05% pool on Uniswap V4). Additional pools are allow-listed post-deploy via `setPoolParamAllowed` — hooked V4 pools only after the hook is audited.
 
 Coexistence note: the standalone `RatehopperUniV3Positions` deployment keeps serving positions opened through it. `SafeYieldManager` rejects those tokenIds (`UnknownPosition`) and vice versa — there is no basis migration; legacy positions drain naturally via the legacy module.
 
@@ -451,6 +467,18 @@ yarn hardhat run scripts/timelockUpdateOperator.ts --network base
 EXECUTE=true OPERATION_ID="..." TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS=0x... NEW_OPERATOR_ADDRESS=0x... \
 yarn hardhat run scripts/timelockUpdateOperator.ts --network base
 ```
+
+### Yield / LP Operations Scripts
+
+Operational scripts for driving a deployed `SafeYieldManager` from a user's own Safe (the `msg.sender == Safe` path of `onlyOperatorOrSafe`) live in `scripts/`:
+
+- `openLpBySafe.ts` — opens an LP position (Uniswap V3 / Aerodrome / Uniswap V4 pool params supported)
+- `closeLpBySafe.ts` — partial or full close
+- `collectLpBySafe.ts` — mid-position fee harvest
+- `switchLpBySafe.ts` — atomic move of a position to another allowed pool/protocol
+- `lpSafeShared.ts` — shared ABIs/helpers (no entry point)
+
+Each script documents its configuration constants in its header comment; set `SAFE_OWNER_PRIVATE_KEY` (or `DEPLOYER_PRIVATE_KEY`) in `.env` and run with `npx hardhat run scripts/<name>.ts --network base`.
 
 ## Security Features
 
