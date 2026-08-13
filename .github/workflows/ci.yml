@@ -43,9 +43,16 @@ jobs:
       # BASE_RPC_URL is recommended: an archive RPC secret gives reliable
       # forking. Without it the config falls back to the public
       # https://mainnet.base.org endpoint.
+      #
+      # BASE_FORK_BLOCK_NUMBER pins the default-network fork so the run is
+      # deterministic: without it the fork tracks the latest Base block and
+      # the well-known Hardhat deployer accounts inherit whatever on-chain
+      # nonce they have there, shifting every mock deploy address (and the
+      # branch coverage that depends on address ordering) from run to run.
       - name: Run coverage (gated contracts)
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          BASE_FORK_BLOCK_NUMBER: "49470000"
         run: yarn coverage:gated
 
       - name: Enforce branch-coverage gate

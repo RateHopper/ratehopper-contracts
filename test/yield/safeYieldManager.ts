@@ -1745,20 +1745,12 @@ describe("SafeYieldManager", function () {
             const { manager, deployer, operatorEOA, safeAddr, usdc, usdcAddr, uniFactory, uniNpm, uniRouter } =
                 await loadFixture(deployYieldManagerHarness);
 
-            // Mock deploy addresses are effectively random, so redeploy until the
-            // paired token sorts ABOVE USDC — that makes USDC token0 of the pair.
-            const ERC = await ethers.getContractFactory("MockERC20");
-            let high;
-            for (let i = 0; i < 40; i++) {
-                const candidate = await ERC.deploy("High Token", "HI", 18);
-                await candidate.waitForDeployment();
-                if ((await candidate.getAddress()).toLowerCase() > usdcAddr.toLowerCase()) {
-                    high = candidate;
-                    break;
-                }
-            }
-            if (!high) this.skip();
-            const highAddr = await high.getAddress();
+            // Mock deploy addresses are nonce-derived and can land anywhere, so
+            // place MockERC20 code at usdc + 1 directly — deterministically the
+            // next address up, making USDC token0 of the pair.
+            const highAddr = ethers.getAddress(ethers.toBeHex(BigInt(usdcAddr) + 1n, 20));
+            await ethers.provider.send("hardhat_setCode", [highAddr, await ethers.provider.getCode(usdcAddr)]);
+            const high = await ethers.getContractAt("MockERC20", highAddr);
 
             const LP_PARAM = encodeUniV3PoolParam(usdcAddr, highAddr, 500);
             const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
