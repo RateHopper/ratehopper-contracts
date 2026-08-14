@@ -99,6 +99,103 @@ async function readAeroPool() {
     return { poolAddress, pool, sqrtPriceX96, alignedTick };
 }
 
+const ROUTER_ABI = [
+    "function exactInputSingle((address,address,int24,address,uint256,uint256,uint256,uint160)) payable returns (uint256)",
+];
+const WETH_DEPOSIT_ABI = [
+    "function deposit() payable",
+    "function approve(address,uint256) returns (bool)",
+    "function balanceOf(address) view returns (uint256)",
+];
+
+// Ping-pong real swaps through the WETH/USDC pool so in-range positions
+// accrue genuine trading fees on the fork.
+async function accrueSwapFees(rounds: number, wethPerSwap: bigint) {
+    const trader = (await ethers.getSigners())[4];
+    const weth = new ethers.Contract(WETH_ADDRESS, WETH_DEPOSIT_ABI, trader);
+    const usdc = new ethers.Contract(
+        USDC_ADDRESS,
+        [...ERC20_ABI, "function approve(address,uint256) returns (bool)"],
+        trader,
+    );
+    const router = new ethers.Contract(AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS, ROUTER_ABI, trader);
+    await (await weth.deposit({ value: wethPerSwap * 2n })).wait();
+    await (await weth.approve(AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS, ethers.MaxUint256)).wait();
+    await (await usdc.approve(AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS, ethers.MaxUint256)).wait();
+    for (let i = 0; i < rounds; i++) {
+        const block = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(block!.timestamp + 600);
+        await (
+            await router.exactInputSingle([
+                WETH_ADDRESS,
+                USDC_ADDRESS,
+                TICK_SPACING,
+                trader.address,
+                deadline,
+                wethPerSwap,
+                0n,
+                0n,
+            ])
+        ).wait();
+        const usdcBal: bigint = await usdc.balanceOf(trader.address);
+        await (
+            await router.exactInputSingle([
+                USDC_ADDRESS,
+                WETH_ADDRESS,
+                TICK_SPACING,
+                trader.address,
+                deadline,
+                usdcBal,
+                0n,
+                0n,
+            ])
+        ).wait();
+    }
+}
+
+// Same ping-pong, but through the USDC/AERO ts-200 pool, with the trader's
+// USDC capital pulled from the (separate) WETH/USDC pool.
+async function accrueAeroSwapFees(wethUsdcPool: string, rounds: number, usdcCapital: bigint) {
+    const trader = (await ethers.getSigners())[4];
+    await fundSafeUsdc(wethUsdcPool, trader.address, usdcCapital);
+    const approveAbi = ["function approve(address,uint256) returns (bool)"];
+    const usdc = new ethers.Contract(USDC_ADDRESS, [...ERC20_ABI, ...approveAbi], trader);
+    const aero = new ethers.Contract(AERO_ADDRESS, [...ERC20_ABI, ...approveAbi], trader);
+    const router = new ethers.Contract(AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS, ROUTER_ABI, trader);
+    await (await usdc.approve(AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS, ethers.MaxUint256)).wait();
+    await (await aero.approve(AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS, ethers.MaxUint256)).wait();
+    for (let i = 0; i < rounds; i++) {
+        const block = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(block!.timestamp + 600);
+        const usdcBal: bigint = await usdc.balanceOf(trader.address);
+        await (
+            await router.exactInputSingle([
+                USDC_ADDRESS,
+                AERO_ADDRESS,
+                AERO_LP_TICK_SPACING,
+                trader.address,
+                deadline,
+                usdcBal,
+                0n,
+                0n,
+            ])
+        ).wait();
+        const aeroBal: bigint = await aero.balanceOf(trader.address);
+        await (
+            await router.exactInputSingle([
+                AERO_ADDRESS,
+                USDC_ADDRESS,
+                AERO_LP_TICK_SPACING,
+                trader.address,
+                deadline,
+                aeroBal,
+                0n,
+                0n,
+            ])
+        ).wait();
+    }
+}
+
 // The live pool is a convenient deterministic USDC holder on the fork.
 // Impersonation only mutates the disposable fork state.
 async function fundSafeUsdc(poolAddress: string, safeAddress: string, amount: bigint) {
@@ -533,5 +630,181 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         // open-mint AERO dust is left untouched; realized USDC lands on the Safe.
         expect(await aero.balanceOf(safeAddress)).to.equal(aeroDustAfterOpen);
         expect(await usdc.balanceOf(safeAddress)).to.be.greaterThan(0);
+    });
+
+    it("skims feeCollectBps of real accrued fees to the treasury and swaps the rest to USDC", async function () {
+        const { operator, treasury, safeAddress, manager } = await deployAeroStack();
+        const { poolAddress, sqrtPriceX96, alignedTick } = await readAeroPool();
+        const spotUsdcToWeth = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);
+
+        const input = ethers.parseUnits("10000", 6);
+        const usdc = await fundSafeUsdc(poolAddress, safeAddress, input);
+        const weth = new ethers.Contract(WETH_ADDRESS, ERC20_ABI, ethers.provider);
+
+        const block = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(block!.timestamp + 3_600);
+        const expectedSwapOut = spotUsdcToWeth(input / 2n);
+        // A narrow in-range position so the Safe's liquidity earns a
+        // meaningful share of the wash-trade fees below.
+        await expect(
+            manager.connect(operator).openLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                usdcAmount: input,
+                tickLower: alignedTick - TICK_SPACING,
+                tickUpper: alignedTick + 2 * TICK_SPACING,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                swap0: leg((expectedSwapOut * 9_700n) / 10_000n, expectedSwapOut, POOL_PARAM),
+                swap1: ZERO_LEG,
+                slippageBps: 300,
+                deadline,
+                lpPoolParam: POOL_PARAM,
+                stake: false,
+            }),
+        ).to.emit(manager, "PositionOpened");
+        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
+        const tokenId = openedEvents[openedEvents.length - 1].args.tokenId;
+
+        await accrueSwapFees(10, ethers.parseEther("5"));
+
+        const safeWethBefore: bigint = await weth.balanceOf(safeAddress);
+        const safeUsdcBefore: bigint = await usdc.balanceOf(safeAddress);
+        const treasuryWethBefore: bigint = await weth.balanceOf(treasury.address);
+        const treasuryUsdcBefore: bigint = await usdc.balanceOf(treasury.address);
+
+        const collectBlock = await ethers.provider.getBlock("latest");
+        // The collected fee amounts are unknowable up front, so the legs carry
+        // nominal floors; the assertions below pin the exact skim instead.
+        await expect(
+            manager.connect(operator).collectLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                tokenId,
+                swapFeesToUsdc: true,
+                swap0: leg(1n, 1n, POOL_PARAM),
+                swap1: leg(1n, 1n, POOL_PARAM),
+                swapRewardToUsdc: false,
+                rewardSwap: ZERO_LEG,
+                slippageBps: 300,
+                deadline: BigInt(collectBlock!.timestamp + 3_600),
+            }),
+        ).to.emit(manager, "FeesCollected");
+
+        const feeEvents = await manager.queryFilter(manager.filters.FeesCollected(safeAddress), -5);
+        const collected = feeEvents[feeEvents.length - 1].args;
+        expect(collected.collected0).to.be.greaterThan(0n);
+        expect(collected.collected1).to.be.greaterThan(0n);
+        expect(collected.fee0).to.equal((collected.collected0 * 250n) / 10_000n);
+        expect(collected.fee1).to.equal((collected.collected1 * 250n) / 10_000n);
+
+        // feeCollectBps is skimmed in kind before the swap-to-USDC leg runs.
+        expect((await weth.balanceOf(treasury.address)) - treasuryWethBefore).to.equal(collected.fee0);
+        expect((await usdc.balanceOf(treasury.address)) - treasuryUsdcBefore).to.equal(collected.fee1);
+        // The Safe's WETH share was swapped away entirely; USDC grew by its
+        // own fee share plus the swap output.
+        expect(await weth.balanceOf(safeAddress)).to.equal(safeWethBefore);
+        expect((await usdc.balanceOf(safeAddress)) - safeUsdcBefore).to.be.greaterThan(
+            collected.collected1 - collected.fee1,
+        );
+    });
+
+    // Runs against the USDC/AERO ts-200 pool: its 0.3% fee and moderate depth
+    // let a narrow $10k position earn fees that clearly outrun the open/close
+    // swap costs — the deep WETH/USDC pool dilutes the Safe's fee share so far
+    // that no realistic wash volume produces a profit there.
+    it("charges the performance fee on a profitable close", async function () {
+        const { operator, treasury, safeAddress, manager, registry } = await deployAeroStack();
+        await (await registry.setWhitelisted(AERO_ADDRESS, true)).wait();
+        await (await manager.setPoolParamAllowed(AERODROME, AERO_POOL_PARAM, true)).wait();
+
+        const factory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, FACTORY_ABI, ethers.provider);
+        const aeroPoolAddress: string = await factory.getPool(USDC_ADDRESS, AERO_ADDRESS, AERO_LP_TICK_SPACING);
+        const aeroPool = new ethers.Contract(aeroPoolAddress, POOL_ABI, ethers.provider);
+        const [sqrtPriceRaw, tick] = await aeroPool.slot0();
+        const sqrtPriceX96 = BigInt(sqrtPriceRaw);
+        const alignedTick = Math.floor(Number(tick) / AERO_LP_TICK_SPACING) * AERO_LP_TICK_SPACING;
+        const spotUsdcToAero = (amount: bigint) => (amount * sqrtPriceX96 * sqrtPriceX96) >> 192n;
+
+        const { poolAddress: wethUsdcPool } = await readAeroPool();
+        const input = ethers.parseUnits("10000", 6);
+        const usdc = await fundSafeUsdc(wethUsdcPool, safeAddress, input);
+        const aero = new ethers.Contract(AERO_ADDRESS, ERC20_ABI, ethers.provider);
+
+        const block = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(block!.timestamp + 3_600);
+        const expectedSwapOut = spotUsdcToAero(input / 2n);
+        await expect(
+            manager.connect(operator).openLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                usdcAmount: input,
+                tickLower: alignedTick - 2 * AERO_LP_TICK_SPACING,
+                tickUpper: alignedTick + 3 * AERO_LP_TICK_SPACING,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                swap0: ZERO_LEG,
+                swap1: leg((expectedSwapOut * 9_700n) / 10_000n, expectedSwapOut, AERO_POOL_PARAM),
+                slippageBps: 300,
+                deadline,
+                lpPoolParam: AERO_POOL_PARAM,
+                stake: false,
+            }),
+        ).to.emit(manager, "PositionOpened");
+        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
+        const opened = openedEvents[openedEvents.length - 1];
+        const tokenId = opened.args.tokenId;
+        const npm = new ethers.Contract(AERODROME_SLIPSTREAM_NPM_ADDRESS, NPM_ABI, ethers.provider);
+
+        // Enough wash-trade volume that the position's fee income outruns the
+        // open/close swap costs and realizes an actual profit over basis.
+        await accrueAeroSwapFees(wethUsdcPool, 25, ethers.parseUnits("30000", 6));
+
+        const safeUsdcBefore: bigint = await usdc.balanceOf(safeAddress);
+        const treasuryAeroBefore: bigint = await aero.balanceOf(treasury.address);
+        const treasuryUsdcBefore: bigint = await usdc.balanceOf(treasury.address);
+
+        // Re-read the price after the wash trades for the close estimates.
+        const [postSqrtRaw] = await aeroPool.slot0();
+        const postSqrt = BigInt(postSqrtRaw);
+        const spotAeroToUsdcPost = (amount: bigint) => (amount << 192n) / (postSqrt * postSqrt);
+        const usdcToLp: bigint = opened.args.amount0ToLp;
+        const aeroToLp: bigint = opened.args.amount1ToLp;
+        const expectedOut = spotAeroToUsdcPost(aeroToLp);
+        const closeBlock = await ethers.provider.getBlock("latest");
+        await expect(
+            manager.connect(operator).closeLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                tokenId,
+                exitBps: 10_000,
+                swap0: ZERO_LEG,
+                swap1: leg((expectedOut * 9_700n) / 10_000n, expectedOut, AERO_POOL_PARAM),
+                slippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                deadline: BigInt(closeBlock!.timestamp + 3_600),
+                minUsdcOut: ((usdcToLp + expectedOut) * 9_500n) / 10_000n,
+            }),
+        ).to.emit(manager, "PositionClosed");
+
+        const closedEvents = await manager.queryFilter(manager.filters.PositionClosed(safeAddress), -5);
+        const closed = closedEvents[closedEvents.length - 1].args;
+        expect(closed.currentValueUsd6).to.be.greaterThan(closed.basisUsd6);
+        expect(closed.feeUsd6).to.be.greaterThan(0n);
+        expect(closed.feeUsd6).to.equal(((closed.currentValueUsd6 - closed.basisUsd6) * 1_000n) / 10_000n);
+
+        // The close harvests pending fees first (in-kind feeCollectBps skim —
+        // token0 is USDC here, token1 is AERO), then pulls the USDC
+        // performance fee: the treasury receives both.
+        const feeEvents = await manager.queryFilter(manager.filters.FeesCollected(safeAddress), -5);
+        const collected = feeEvents[feeEvents.length - 1].args;
+        expect((await aero.balanceOf(treasury.address)) - treasuryAeroBefore).to.equal(collected.fee1);
+        expect((await usdc.balanceOf(treasury.address)) - treasuryUsdcBefore).to.equal(
+            collected.fee0 + closed.feeUsd6,
+        );
+
+        // The Safe keeps the realized value net of the performance fee.
+        expect((await usdc.balanceOf(safeAddress)) - safeUsdcBefore).to.equal(
+            closed.currentValueUsd6 - closed.feeUsd6,
+        );
+        expect(await manager.residualBasisUsd6Of(AERODROME, tokenId)).to.equal(0);
+        await expect(npm.ownerOf(tokenId)).to.be.reverted;
     });
 });
