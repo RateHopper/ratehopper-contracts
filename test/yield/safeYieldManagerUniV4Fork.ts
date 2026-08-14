@@ -30,6 +30,20 @@ const NATIVE = ethers.ZeroAddress;
 const POOL_PARAM = encodeUniV4PoolParam(NATIVE, USDC_ADDRESS, FEE_TIER, TICK_SPACING, ethers.ZeroAddress);
 const POOL_ID = ethers.keccak256(POOL_PARAM);
 
+// ERC20-currency0 pool (WETH < USDC so currency0 == WETH): exercises the
+// Permit2 two-step approval + reset path the native pool skips. fee 0.3% /
+// tickSpacing 60 is the deeper of the two real WETH/USDC V4 pools on Base.
+const WETH_FEE_TIER = 3000;
+const WETH_TICK_SPACING = 60;
+const WETH_POOL_PARAM = encodeUniV4PoolParam(
+    WETH_ADDRESS,
+    USDC_ADDRESS,
+    WETH_FEE_TIER,
+    WETH_TICK_SPACING,
+    ethers.ZeroAddress,
+);
+const WETH_POOL_ID = ethers.keccak256(WETH_POOL_PARAM);
+
 const ERC20_ABI = [
     "function balanceOf(address) view returns (uint256)",
     "function transfer(address,uint256) returns (bool)",
@@ -235,6 +249,189 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         // The closes swept their own ETH back to USDC — only the pre-existing
         // open-mint dust remains on the Safe.
         expect(await ethers.provider.getBalance(safeAddress)).to.equal(ethDustAfterOpen);
+        expect(await usdc.balanceOf(safeAddress)).to.be.greaterThan(0);
+    });
+
+    it("opens, collects, partially closes, and fully closes a real WETH/USDC V4 position (ERC20 currency0)", async function () {
+        const [admin, operator, treasury, pauser] = await ethers.getSigners();
+
+        const Registry = await ethers.getContractFactory("MockRegistry");
+        const registry = await Registry.deploy();
+        await registry.waitForDeployment();
+        await (await registry.setOperator(operator.address)).wait();
+        await (await registry.setWhitelisted(WETH_ADDRESS, true)).wait();
+        await (await registry.setWhitelisted(USDC_ADDRESS, true)).wait();
+
+        const safeAddress = await deployRealSafe(admin);
+
+        const Handler = await ethers.getContractFactory("UniV4YieldHandler");
+        const handler = await Handler.deploy(
+            UNISWAP_V4_POSITION_MANAGER_ADDRESS,
+            UNIVERSAL_ROUTER_ADDRESS,
+            PERMIT2_ADDRESS,
+            UNISWAP_V4_STATE_VIEW_ADDRESS,
+            USDC_ADDRESS,
+        );
+        await handler.waitForDeployment();
+
+        const Timelock = await ethers.getContractFactory("MockTimelockController");
+        const timelock = await Timelock.deploy(1);
+        await timelock.waitForDeployment();
+
+        const Manager = await ethers.getContractFactory("SafeYieldManager");
+        const manager = await Manager.deploy(
+            await registry.getAddress(),
+            USDC_ADDRESS,
+            [UNISWAP_V4],
+            [await handler.getAddress()],
+            [[WETH_POOL_PARAM]],
+            [0],
+            [0],
+            treasury.address,
+            1_000,
+            250,
+            2_000,
+            admin.address,
+            await timelock.getAddress(),
+            pauser.address,
+        );
+        await manager.waitForDeployment();
+
+        await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
+
+        const stateView = new ethers.Contract(UNISWAP_V4_STATE_VIEW_ADDRESS, STATE_VIEW_ABI, ethers.provider);
+        const [sqrtPriceRaw, tickRaw] = await stateView.getSlot0(WETH_POOL_ID);
+        const sqrtPriceX96 = BigInt(sqrtPriceRaw);
+        if (sqrtPriceX96 === 0n) {
+            throw new Error(
+                `Uniswap V4 pool ${WETH_POOL_ID} is not initialized at fork block ${FORK_BLOCK}; refusing to skip the integration test`,
+            );
+        }
+        const alignedTick = Math.floor(Number(tickRaw) / WETH_TICK_SPACING) * WETH_TICK_SPACING;
+        // currency0 == WETH, currency1 == USDC (both share the native pool's
+        // 18dp/6dp layout, so the same spot formulas hold).
+        const spotUsdcToWeth = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);
+        const spotWethToUsdc = (amount: bigint) => (amount * sqrtPriceX96 * sqrtPriceX96) >> 192n;
+
+        // The live V3 pool is a convenient deterministic USDC holder on the fork.
+        const factory = new ethers.Contract(UNISWAP_V3_FACTORY_ADDRESS, FACTORY_ABI, ethers.provider);
+        const v3Pool: string = await factory.getPool(WETH_ADDRESS, USDC_ADDRESS, FEE_TIER);
+        await network.provider.send("hardhat_setBalance", [v3Pool, "0x8AC7230489E80000"]);
+        const poolSigner = await ethers.getImpersonatedSigner(v3Pool);
+        const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, ethers.provider);
+        const weth = new ethers.Contract(WETH_ADDRESS, ERC20_ABI, ethers.provider);
+        const input = ethers.parseUnits("10", 6);
+        await (await (usdc.connect(poolSigner) as any).transfer(safeAddress, input)).wait();
+        await network.provider.send("hardhat_stopImpersonatingAccount", [v3Pool]);
+
+        const block = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(block!.timestamp + 3_600);
+        const expectedSwapOut = spotUsdcToWeth(input / 2n);
+        const openParams = {
+            onBehalfOf: safeAddress,
+            usdcAmount: input,
+            tickLower: alignedTick - 20 * WETH_TICK_SPACING,
+            tickUpper: alignedTick + 20 * WETH_TICK_SPACING,
+            mintAmount0Min: 0,
+            mintAmount1Min: 0,
+            // USDC -> WETH (currency0) leg; the USDC side (currency1) needs none.
+            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, WETH_POOL_PARAM),
+            swap1: ZERO_LEG,
+            slippageBps: 100,
+            deadline,
+            lpPoolParam: WETH_POOL_PARAM,
+            stake: false,
+        };
+
+        await expect(manager.connect(operator).openLp(UNISWAP_V4, openParams)).to.emit(manager, "PositionOpened");
+        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
+        const opened = openedEvents[openedEvents.length - 1];
+        const tokenId = opened.args.tokenId;
+
+        const pm = new ethers.Contract(UNISWAP_V4_POSITION_MANAGER_ADDRESS, PM_ABI, ethers.provider);
+        expect(await pm.ownerOf(tokenId)).to.equal(safeAddress);
+        expect(await pm.getPositionLiquidity(tokenId)).to.be.greaterThan(0);
+        const initialBasis = await manager.residualBasisUsd6Of(UNISWAP_V4, tokenId);
+        expect(initialBasis).to.be.greaterThan(0);
+        // WETH the liquidity could not consume stays on the Safe (ERC20 has no
+        // SWEEP; Permit2 only pulls what the mint settles).
+        const wethDustAfterOpen = await weth.balanceOf(safeAddress);
+
+        // Both Permit2 hops must be back at zero after the mint — for the ERC20
+        // currency0 (WETH) as well as the USDC swap input. This is the path the
+        // native pool skips entirely.
+        const permit2 = new ethers.Contract(PERMIT2_ADDRESS, PERMIT2_ABI, ethers.provider);
+        const [wethPmAllowance] = await permit2.allowance(
+            safeAddress,
+            WETH_ADDRESS,
+            UNISWAP_V4_POSITION_MANAGER_ADDRESS,
+        );
+        const [usdcPmAllowance] = await permit2.allowance(
+            safeAddress,
+            USDC_ADDRESS,
+            UNISWAP_V4_POSITION_MANAGER_ADDRESS,
+        );
+        const [usdcUrAllowance] = await permit2.allowance(safeAddress, USDC_ADDRESS, UNIVERSAL_ROUTER_ADDRESS);
+        expect(wethPmAllowance).to.equal(0);
+        expect(usdcPmAllowance).to.equal(0);
+        expect(usdcUrAllowance).to.equal(0);
+        expect(await weth.allowance(safeAddress, PERMIT2_ADDRESS)).to.equal(0);
+        expect(await usdc.allowance(safeAddress, PERMIT2_ADDRESS)).to.equal(0);
+
+        await expect(
+            manager.connect(operator).collectLp(UNISWAP_V4, {
+                onBehalfOf: safeAddress,
+                tokenId,
+                swapFeesToUsdc: false,
+                swap0: ZERO_LEG,
+                swap1: ZERO_LEG,
+                swapRewardToUsdc: false,
+                rewardSwap: ZERO_LEG,
+                slippageBps: 0,
+                deadline,
+            }),
+        ).to.emit(manager, "FeesCollected");
+
+        const wethToLp: bigint = opened.args.amount0ToLp;
+        const usdcToLp: bigint = opened.args.amount1ToLp;
+        const closeParams = (exitBps: number, shareOfOriginalBps: bigint) => {
+            const wethShare = (wethToLp * shareOfOriginalBps) / 10_000n;
+            const usdcShare = (usdcToLp * shareOfOriginalBps) / 10_000n;
+            const expectedOut = spotWethToUsdc(wethShare);
+            return {
+                onBehalfOf: safeAddress,
+                tokenId,
+                exitBps,
+                swap0: {
+                    amountOutMin: (expectedOut * 9_700n) / 10_000n,
+                    expectedOut,
+                    poolParam: WETH_POOL_PARAM,
+                },
+                swap1: ZERO_LEG,
+                slippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                deadline,
+                minUsdcOut: ((usdcShare + expectedOut) * 9_500n) / 10_000n,
+            };
+        };
+
+        await expect(manager.connect(operator).closeLp(UNISWAP_V4, closeParams(5_000, 5_000n))).to.emit(
+            manager,
+            "PositionClosed",
+        );
+        expect(await pm.ownerOf(tokenId)).to.equal(safeAddress);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, tokenId)).to.be.lessThan(initialBasis);
+
+        await expect(manager.connect(operator).closeLp(UNISWAP_V4, closeParams(10_000, 5_000n))).to.emit(
+            manager,
+            "PositionClosed",
+        );
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, tokenId)).to.equal(0);
+        await expect(pm.ownerOf(tokenId)).to.be.reverted;
+        // Closes swap only the WETH they withdraw (delta-measured), so the
+        // open-mint WETH dust is left untouched; realized USDC lands on the Safe.
+        expect(await weth.balanceOf(safeAddress)).to.equal(wethDustAfterOpen);
         expect(await usdc.balanceOf(safeAddress)).to.be.greaterThan(0);
     });
 });
