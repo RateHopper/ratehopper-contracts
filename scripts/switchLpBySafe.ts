@@ -6,6 +6,7 @@ import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import {
     AERODROME_CL_FACTORY_ADDRESS,
     AERODROME_SLIPSTREAM_NPM_ADDRESS,
+    AERODROME_VOTER_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
     UNISWAP_V3_NPM_ADDRESS,
     UNISWAP_V4_POSITION_MANAGER_ADDRESS,
@@ -50,9 +51,9 @@ import {
 
 // ─── Configuration ───────────────────────────────────────────────────────
 const SAFE_ADDRESS = process.env.TESTING_SAFE_WALLET_ADDRESS || "";
-const TOKEN_ID = 74554172n;
+const TOKEN_ID = 74555704n;
 const FROM_PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "aerodrome";
-const TO_PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "univ3";
+const TO_PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "univ4";
 
 // Target Aerodrome tick spacing / UniV3 fee tier.
 const TARGET_TICK_SPACING = 100;
@@ -189,12 +190,28 @@ async function main() {
             provider,
         );
         const owner: string = await sourceNpm.ownerOf(TOKEN_ID);
-        if (owner.toLowerCase() !== SAFE_ADDRESS.toLowerCase()) {
-            throw new Error(`Token ${TOKEN_ID} is owned by ${owner}, not SAFE_ADDRESS ${SAFE_ADDRESS}`);
-        }
         const position = await sourceNpm.positions(TOKEN_ID);
         const token0: string = position[2];
         const token1: string = position[3];
+        // A staked Aerodrome position is owned by its gauge, not the Safe;
+        // switchLp's close leg unstakes it on-chain. Accept the Safe OR the
+        // pool's gauge as owner.
+        let ownerOk = owner.toLowerCase() === SAFE_ADDRESS.toLowerCase();
+        if (!ownerOk && FROM_PROTOCOL_NAME === "aerodrome") {
+            const clFactory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, AERO_FACTORY_ABI, provider);
+            const srcPool = await clFactory.getPool(token0, token1, Number(position[4]));
+            const voter = new ethers.Contract(
+                AERODROME_VOTER_ADDRESS,
+                ["function gauges(address) view returns (address)"],
+                provider,
+            );
+            const gauge: string = await voter.gauges(srcPool);
+            ownerOk = gauge !== ethers.ZeroAddress && owner.toLowerCase() === gauge.toLowerCase();
+            if (ownerOk) console.log(`- Source position is STAKED in gauge ${gauge} (switch will unstake it)`);
+        }
+        if (!ownerOk) {
+            throw new Error(`Token ${TOKEN_ID} is owned by ${owner}, not the Safe or its gauge`);
+        }
         if (
             token0.toLowerCase() !== WETH_ADDRESS.toLowerCase() ||
             token1.toLowerCase() !== USDC_ADDRESS.toLowerCase()

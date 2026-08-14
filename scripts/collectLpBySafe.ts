@@ -4,7 +4,10 @@ dotenv.config();
 import Safe from "@safe-global/protocol-kit";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
 import {
+    AERO_ADDRESS,
+    AERODROME_CL_FACTORY_ADDRESS,
     AERODROME_SLIPSTREAM_NPM_ADDRESS,
+    AERODROME_VOTER_ADDRESS,
     UNISWAP_V3_NPM_ADDRESS,
     UNISWAP_V4_POSITION_MANAGER_ADDRESS,
     USDC_ADDRESS,
@@ -43,8 +46,13 @@ import {
 // ─── Configuration ───────────────────────────────────────────────────────
 const SAFE_ADDRESS: string = process.env.TESTING_SAFE_WALLET_ADDRESS || "";
 const PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "aerodrome";
-const TOKEN_ID = 74554172n;
+const TOKEN_ID = 74555704n;
 const SWAP_FEES_TO_USDC = false;
+// Swap the AERO staking reward claimed from the gauge to USDC through the
+// rewardSwap leg (staked Aerodrome positions only; ignored otherwise). The
+// AERO/USDC pool at REWARD_TICK_SPACING must be allow-listed on the manager.
+const SWAP_REWARD_TO_USDC = false;
+const REWARD_TICK_SPACING = 100;
 const SLIPPAGE_BPS: bigint = 100n;
 // Aerodrome tick spacing (100 or 200) — used when PROTOCOL_NAME is "aerodrome"
 const TICK_SPACING = 100;
@@ -111,7 +119,61 @@ async function main() {
     const block = await provider.getBlock("latest");
     const deadline = BigInt(block!.timestamp) + 1_200n;
 
-    // Fee amounts are unknown until the collect executes, so the swap legs
+    // Build the AERO -> USDC reward-swap leg from the gauge's currently-earned
+    // AERO priced at the AERO/USDC pool spot. The handler swaps only the newly
+    // claimed delta, which is >= `earned` now (it keeps accruing until exec),
+    // so an amountOutMin derived from `earned` stays a safe floor.
+    let rewardLeg = ZERO_LEG as { amountOutMin: bigint; expectedOut: bigint; poolParam: string };
+    if (SWAP_REWARD_TO_USDC) {
+        if (PROTOCOL_NAME !== "aerodrome") throw new Error("swapRewardToUsdc is only meaningful for staked Aerodrome");
+        const [aeroT0, aeroT1] =
+            AERO_ADDRESS.toLowerCase() < USDC_ADDRESS.toLowerCase()
+                ? [AERO_ADDRESS, USDC_ADDRESS]
+                : [USDC_ADDRESS, AERO_ADDRESS];
+        const rewardPoolParam = encodeAerodromePoolParam(aeroT0, aeroT1, REWARD_TICK_SPACING);
+        if (!(await manager.isPoolParamAllowed(protocol, rewardPoolParam))) {
+            throw new Error(`AERO/USDC pool (ts ${REWARD_TICK_SPACING}) is not allow-listed on the manager`);
+        }
+        const voter = new ethers.Contract(
+            AERODROME_VOTER_ADDRESS,
+            ["function gauges(address) view returns (address)"],
+            provider,
+        );
+        const clFactory = new ethers.Contract(
+            AERODROME_CL_FACTORY_ADDRESS,
+            ["function getPool(address,address,int24) view returns (address)"],
+            provider,
+        );
+        const lpPool = await clFactory.getPool(WETH_ADDRESS, USDC_ADDRESS, TICK_SPACING);
+        const gaugeAddr: string = await voter.gauges(lpPool);
+        const gauge = new ethers.Contract(
+            gaugeAddr,
+            ["function earned(address,uint256) view returns (uint256)"],
+            provider,
+        );
+        const earnedAero: bigint = await gauge.earned(SAFE_ADDRESS, TOKEN_ID);
+        if (earnedAero === 0n) throw new Error("No AERO earned yet — nothing to swap");
+
+        const aeroUsdcPool = await clFactory.getPool(aeroT0, aeroT1, REWARD_TICK_SPACING);
+        const pool = new ethers.Contract(aeroUsdcPool, ["function slot0() view returns (uint160,int24,uint16,uint16,uint16,bool)"], provider);
+        const [sqrtP] = await pool.slot0();
+        const sp = BigInt(sqrtP);
+        // token0 = USDC (6dp), token1 = AERO (18dp): AERO(token1) -> USDC(token0)
+        // out ≈ amountIn * 2^192 / sqrtP^2.
+        const expectedUsdcOut = (earnedAero * (1n << 192n)) / (sp * sp);
+        if (expectedUsdcOut === 0n) throw new Error("Earned AERO too small: USDC swap output rounds to zero");
+        const rewardAmountOutMin = (expectedUsdcOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
+        rewardLeg = {
+            amountOutMin: rewardAmountOutMin === 0n ? 1n : rewardAmountOutMin,
+            expectedOut: expectedUsdcOut,
+            poolParam: rewardPoolParam,
+        };
+        console.log("- earned AERO (wei):", earnedAero.toString());
+        console.log("- reward expectedUsdcOut (6dp):", expectedUsdcOut.toString());
+        console.log("- reward amountOutMin (6dp):", rewardLeg.amountOutMin.toString());
+    }
+
+    // Fee amounts are unknown until the collect executes, so the fee swap legs
     // carry the minimal validated floors (expectedOut/amountOutMin = 1).
     const feeLeg = { amountOutMin: 1n, expectedOut: 1n, poolParam };
     const collectParams = {
@@ -120,8 +182,8 @@ async function main() {
         swapFeesToUsdc: SWAP_FEES_TO_USDC,
         swap0: SWAP_FEES_TO_USDC ? feeLeg : ZERO_LEG,
         swap1: ZERO_LEG, // USDC side never needs a swap leg
-        swapRewardToUsdc: false,
-        rewardSwap: ZERO_LEG,
+        swapRewardToUsdc: SWAP_REWARD_TO_USDC,
+        rewardSwap: rewardLeg,
         slippageBps: SLIPPAGE_BPS,
         deadline,
     };
@@ -132,6 +194,7 @@ async function main() {
     console.log("- Protocol:", PROTOCOL_NAME, `(id ${protocol})`);
     console.log("- Token id:", TOKEN_ID.toString());
     console.log("- swapFeesToUsdc:", SWAP_FEES_TO_USDC);
+    console.log("- swapRewardToUsdc:", SWAP_REWARD_TO_USDC);
     console.log("- Deadline:", deadline.toString());
 
     const collectLpData = manager.interface.encodeFunctionData("collectLp", [protocol, collectParams]);

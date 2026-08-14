@@ -54,6 +54,9 @@ const PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "aerodrome";
 const SLIPPAGE_BPS: bigint = 100n;
 // Aerodrome tick spacing (100 or 200) — used when PROTOCOL_NAME is "aerodrome"
 const TICK_SPACING = 100;
+// Stake the minted NFT into the pool's gauge (Aerodrome only; reverts
+// StakingNotSupported on univ3/univ4). Requires the pool to have a live gauge.
+const STAKE = false;
 // UniV3 fee tier (100 / 500 / 3000) — used when PROTOCOL_NAME is "univ3"
 const FEE_TIER = 500;
 // Uniswap V4 PoolKey fields — used when PROTOCOL_NAME is "univ4". Native
@@ -174,7 +177,7 @@ async function main() {
         slippageBps: SLIPPAGE_BPS,
         deadline,
         lpPoolParam: poolParam,
-        stake: false,
+        stake: STAKE,
     };
 
     console.log("Configuration:");
