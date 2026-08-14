@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import {
+    AERO_ADDRESS,
     AERODROME_CL_FACTORY_ADDRESS,
     AERODROME_SLIPSTREAM_NPM_ADDRESS,
     AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
@@ -17,6 +18,12 @@ const TICK_SPACING = 100;
 const AERO_TICK_SPACING = 50; // tick spacing of the live USDC/AERO CL pool
 const FORK_BLOCK = Number(process.env.BASE_FORK_BLOCK_NUMBER ?? 49_470_000);
 const POOL_PARAM = encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, TICK_SPACING);
+// USDC < AERO, so USDC is token0 of the USDC/AERO CL pools — the pair
+// ordering the WETH/USDC tests never exercise (funding token as token0,
+// swap1 leg doing the real work). The ts-50 pool is nearly empty; ts 200
+// is the deep USDC/AERO pool that can absorb LP-sized swaps.
+const AERO_LP_TICK_SPACING = 200;
+const AERO_POOL_PARAM = encodeAerodromePoolParam(USDC_ADDRESS, AERO_ADDRESS, AERO_LP_TICK_SPACING);
 
 const ERC20_ABI = [
     "function balanceOf(address) view returns (uint256)",
@@ -78,7 +85,7 @@ async function deployAeroStack() {
 
     await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
-    return { operator, treasury, safeAddress, handler, manager };
+    return { operator, treasury, safeAddress, handler, manager, registry };
 }
 
 async function readAeroPool() {
@@ -419,6 +426,112 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             }),
         ).to.emit(manager, "PositionClosed");
         await expect(npm.ownerOf(tokenId)).to.be.reverted;
+        expect(await usdc.balanceOf(safeAddress)).to.be.greaterThan(0);
+    });
+
+    it("opens, collects, partially closes, and fully closes a USDC/AERO position (USDC as token0)", async function () {
+        const { operator, safeAddress, manager, registry } = await deployAeroStack();
+        await (await registry.setWhitelisted(AERO_ADDRESS, true)).wait();
+        await (await manager.setPoolParamAllowed(AERODROME, AERO_POOL_PARAM, true)).wait();
+
+        const factory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, FACTORY_ABI, ethers.provider);
+        const aeroPoolAddress: string = await factory.getPool(USDC_ADDRESS, AERO_ADDRESS, AERO_LP_TICK_SPACING);
+        expect(aeroPoolAddress).to.not.equal(ethers.ZeroAddress);
+        const aeroPool = new ethers.Contract(aeroPoolAddress, POOL_ABI, ethers.provider);
+        expect(await aeroPool.token0()).to.equal(USDC_ADDRESS);
+        expect(await aeroPool.token1()).to.equal(ethers.getAddress(AERO_ADDRESS));
+        const [sqrtPriceRaw, tick] = await aeroPool.slot0();
+        const sqrtPriceX96 = BigInt(sqrtPriceRaw);
+        const alignedTick = Math.floor(Number(tick) / AERO_LP_TICK_SPACING) * AERO_LP_TICK_SPACING;
+        // token0 == USDC here, so the spot formulas flip vs the WETH/USDC tests.
+        const spotUsdcToAero = (amount: bigint) => (amount * sqrtPriceX96 * sqrtPriceX96) >> 192n;
+        const spotAeroToUsdc = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);
+
+        const { poolAddress: wethUsdcPool } = await readAeroPool();
+        const input = ethers.parseUnits("10", 6);
+        const usdc = await fundSafeUsdc(wethUsdcPool, safeAddress, input);
+        const aero = new ethers.Contract(AERO_ADDRESS, ERC20_ABI, ethers.provider);
+
+        const block = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(block!.timestamp + 3_600);
+        const expectedSwapOut = spotUsdcToAero(input / 2n);
+        const openParams = {
+            onBehalfOf: safeAddress,
+            usdcAmount: input,
+            tickLower: alignedTick - 1_000,
+            tickUpper: alignedTick + 1_000,
+            mintAmount0Min: 0,
+            mintAmount1Min: 0,
+            // USDC is token0: the funding half stays put, swap1 acquires AERO.
+            swap0: ZERO_LEG,
+            swap1: leg((expectedSwapOut * 9_700n) / 10_000n, expectedSwapOut, AERO_POOL_PARAM),
+            slippageBps: 300,
+            deadline,
+            lpPoolParam: AERO_POOL_PARAM,
+            stake: false,
+        };
+
+        await expect(manager.connect(operator).openLp(AERODROME, openParams)).to.emit(manager, "PositionOpened");
+        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
+        const opened = openedEvents[openedEvents.length - 1];
+        const tokenId = opened.args.tokenId;
+        const npm = new ethers.Contract(AERODROME_SLIPSTREAM_NPM_ADDRESS, NPM_ABI, ethers.provider);
+        expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
+        const initialBasis = await manager.residualBasisUsd6Of(AERODROME, tokenId);
+        expect(initialBasis).to.be.greaterThan(0);
+        // AERO the mint could not consume stays on the Safe as dust.
+        const aeroDustAfterOpen: bigint = await aero.balanceOf(safeAddress);
+
+        await expect(
+            manager.connect(operator).collectLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                tokenId,
+                swapFeesToUsdc: false,
+                swap0: ZERO_LEG,
+                swap1: ZERO_LEG,
+                swapRewardToUsdc: false,
+                rewardSwap: ZERO_LEG,
+                slippageBps: 0,
+                deadline,
+            }),
+        ).to.emit(manager, "FeesCollected");
+
+        const usdcToLp: bigint = opened.args.amount0ToLp;
+        const aeroToLp: bigint = opened.args.amount1ToLp;
+        const closeParams = (exitBps: number, shareOfOriginalBps: bigint) => {
+            const usdcShare = (usdcToLp * shareOfOriginalBps) / 10_000n;
+            const aeroShare = (aeroToLp * shareOfOriginalBps) / 10_000n;
+            const expectedOut = spotAeroToUsdc(aeroShare);
+            return {
+                onBehalfOf: safeAddress,
+                tokenId,
+                exitBps,
+                swap0: ZERO_LEG,
+                swap1: leg((expectedOut * 9_700n) / 10_000n, expectedOut, AERO_POOL_PARAM),
+                slippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                deadline,
+                minUsdcOut: ((usdcShare + expectedOut) * 9_500n) / 10_000n,
+            };
+        };
+
+        await expect(manager.connect(operator).closeLp(AERODROME, closeParams(5_000, 5_000n))).to.emit(
+            manager,
+            "PositionClosed",
+        );
+        expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
+        expect(await manager.residualBasisUsd6Of(AERODROME, tokenId)).to.be.lessThan(initialBasis);
+
+        await expect(manager.connect(operator).closeLp(AERODROME, closeParams(10_000, 5_000n))).to.emit(
+            manager,
+            "PositionClosed",
+        );
+        expect(await manager.residualBasisUsd6Of(AERODROME, tokenId)).to.equal(0);
+        await expect(npm.ownerOf(tokenId)).to.be.reverted;
+        // Closes swap only the AERO they withdraw (delta-measured), so the
+        // open-mint AERO dust is left untouched; realized USDC lands on the Safe.
+        expect(await aero.balanceOf(safeAddress)).to.equal(aeroDustAfterOpen);
         expect(await usdc.balanceOf(safeAddress)).to.be.greaterThan(0);
     });
 });
