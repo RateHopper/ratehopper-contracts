@@ -7,7 +7,16 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../../interfaces/safe/ISafe.sol";
-import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, SwapLeg} from "../../interfaces/IYieldHandler.sol";
+import {IWETH9} from "../../interfaces/IWETH9.sol";
+import {
+    IYieldHandler,
+    OpenLpParams,
+    CloseLpParams,
+    CollectLpParams,
+    WithdrawLpParams,
+    OpenLpInKindParams,
+    SwapLeg
+} from "../../interfaces/IYieldHandler.sol";
 import {PoolKey, ExactInputSingleParams} from "../../interfaces/uniswapV4/V4Types.sol";
 import {IV4PositionManager} from "../../interfaces/uniswapV4/IV4PositionManager.sol";
 import {IStateView} from "../../interfaces/uniswapV4/IStateView.sol";
@@ -63,6 +72,10 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     IAllowanceTransfer public immutable PERMIT2;
     IStateView public immutable STATE_VIEW;
     IERC20 public immutable USDC;
+    /// @notice Wrapped native token. In-kind switch legs deal in ERC20s only,
+    ///         so a native pool side is wrapped on withdraw / unwrapped on
+    ///         open (1:1, no price exposure).
+    IWETH9 public immutable WETH;
 
     /// @dev Own deployment address, captured at construction to enforce
     ///      delegatecall-only entry (a direct call would run against the
@@ -88,19 +101,22 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         address _universalRouter,
         IAllowanceTransfer _permit2,
         IStateView _stateView,
-        IERC20 _usdc
+        IERC20 _usdc,
+        IWETH9 _weth
     ) {
         if (address(_positionManager) == address(0)) revert ZeroAddress();
         if (_universalRouter == address(0)) revert ZeroAddress();
         if (address(_permit2) == address(0)) revert ZeroAddress();
         if (address(_stateView) == address(0)) revert ZeroAddress();
         if (address(_usdc) == address(0)) revert ZeroAddress();
+        if (address(_weth) == address(0)) revert ZeroAddress();
 
         POSITION_MANAGER = _positionManager;
         UNIVERSAL_ROUTER = _universalRouter;
         PERMIT2 = _permit2;
         STATE_VIEW = _stateView;
         USDC = _usdc;
+        WETH = _weth;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -158,7 +174,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         uint256 bal0Before = _balanceOf(key.currency0, p.onBehalfOf);
         uint256 bal1Before = _balanceOf(key.currency1, p.onBehalfOf);
 
-        _safeMintLp(p, key, liquidity, desired0, desired1);
+        _safeMintLp(p.onBehalfOf, key, p.tickLower, p.tickUpper, liquidity, desired0, desired1, p.deadline);
 
         if (key.currency0 != NATIVE) {
             _permit2Approve(p.onBehalfOf, key.currency0, address(POSITION_MANAGER), 0, 0, 56);
@@ -254,6 +270,108 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     }
 
     /// @inheritdoc IYieldHandler
+    /// @dev In-kind close leg of a switch: fee harvest + full BURN_POSITION
+    ///      with NO swaps. A native side is wrapped to WETH so the caller
+    ///      always receives ERC20 addresses and amounts.
+    function withdrawLp(
+        WithdrawLpParams calldata p
+    ) external onlyDelegatecall returns (address token0, address token1, uint256 amount0, uint256 amount1) {
+        (PoolKey memory key, ) = POSITION_MANAGER.getPoolAndPositionInfo(p.tokenId);
+        _requireOwnedBy(p.onBehalfOf, p.tokenId);
+
+        uint256 c0Before = _balanceOf(key.currency0, p.onBehalfOf);
+        uint256 c1Before = _balanceOf(key.currency1, p.onBehalfOf);
+
+        // Harvest fees before principal so feeCollectBps does not tax capital.
+        _collectV4Fees(p.onBehalfOf, p.tokenId, key);
+
+        // BURN_POSITION auto-decreases all remaining liquidity.
+        bytes[] memory params = new bytes[](2);
+        params[0] = abi.encode(
+            p.tokenId,
+            p.decreaseAmount0Min.toUint128(),
+            p.decreaseAmount1Min.toUint128(),
+            bytes("")
+        );
+        params[1] = abi.encode(key.currency0, key.currency1, p.onBehalfOf);
+        _safeModifyLiquidities(
+            p.onBehalfOf,
+            abi.encodePacked(V4Actions.BURN_POSITION, V4Actions.TAKE_PAIR),
+            params,
+            p.deadline,
+            62
+        );
+
+        amount0 = _balanceOf(key.currency0, p.onBehalfOf) - c0Before;
+        amount1 = _balanceOf(key.currency1, p.onBehalfOf) - c1Before;
+
+        token0 = key.currency0;
+        token1 = key.currency1;
+        if (key.currency0 == NATIVE) {
+            if (amount0 > 0) {
+                _safeExecValue(p.onBehalfOf, address(WETH), amount0, abi.encodeCall(IWETH9.deposit, ()), 73);
+            }
+            token0 = address(WETH);
+        }
+    }
+
+    /// @inheritdoc IYieldHandler
+    /// @dev In-kind open leg of a switch: mint straight from the withdrawn
+    ///      token amounts — no swaps. A native pool side settles in ETH, so
+    ///      the provided WETH is unwrapped first (1:1, no price exposure);
+    ///      SWEEP returns any unconsumed ETH to the Safe.
+    function openLpInKind(
+        OpenLpInKindParams calldata p
+    ) external onlyDelegatecall returns (uint256 tokenId, uint128 used0, uint128 used1) {
+        _validatePoolParamAllowed(p.lpPoolParam);
+        (PoolKey memory key, uint160 sqrtPriceX96) = _validatePoolReady(p.lpPoolParam);
+        bool native0 = key.currency0 == NATIVE;
+        address want0 = native0 ? address(WETH) : key.currency0;
+        if (p.token0 != want0 || p.token1 != key.currency1) revert WrongTokenPair();
+
+        if (native0 && p.amount0 > 0) {
+            _safeExecValue(p.onBehalfOf, address(WETH), 0, abi.encodeCall(IWETH9.withdraw, (p.amount0)), 74);
+        }
+
+        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+            sqrtPriceX96,
+            TickMath.getSqrtPriceAtTick(p.tickLower),
+            TickMath.getSqrtPriceAtTick(p.tickUpper),
+            p.amount0,
+            p.amount1
+        );
+        if (liquidity == 0 || liquidity < _yieldStorage().minPositionLiquidity[PROTOCOL]) {
+            revert PositionLiquidityTooLow();
+        }
+
+        if (!native0) {
+            _safeApprove(p.onBehalfOf, key.currency0, address(PERMIT2), p.amount0, 51);
+            _permit2Approve(p.onBehalfOf, key.currency0, address(POSITION_MANAGER), p.amount0, p.deadline, 52);
+        }
+        _safeApprove(p.onBehalfOf, key.currency1, address(PERMIT2), p.amount1, 53);
+        _permit2Approve(p.onBehalfOf, key.currency1, address(POSITION_MANAGER), p.amount1, p.deadline, 54);
+
+        tokenId = POSITION_MANAGER.nextTokenId();
+        uint256 bal0Before = _balanceOf(key.currency0, p.onBehalfOf);
+        uint256 bal1Before = _balanceOf(key.currency1, p.onBehalfOf);
+
+        _safeMintLp(p.onBehalfOf, key, p.tickLower, p.tickUpper, liquidity, p.amount0, p.amount1, p.deadline);
+
+        if (!native0) {
+            _permit2Approve(p.onBehalfOf, key.currency0, address(POSITION_MANAGER), 0, 0, 56);
+            _safeApprove(p.onBehalfOf, key.currency0, address(PERMIT2), 0, 57);
+        }
+        _permit2Approve(p.onBehalfOf, key.currency1, address(POSITION_MANAGER), 0, 0, 58);
+        _safeApprove(p.onBehalfOf, key.currency1, address(PERMIT2), 0, 59);
+
+        used0 = (bal0Before - _balanceOf(key.currency0, p.onBehalfOf)).toUint128();
+        used1 = (bal1Before - _balanceOf(key.currency1, p.onBehalfOf)).toUint128();
+        if (used0 < p.mintAmount0Min || used1 < p.mintAmount1Min) revert MintAmountBelowMin();
+
+        _requireOwnedBy(p.onBehalfOf, tokenId);
+    }
+
+    /// @inheritdoc IYieldHandler
     function collectLp(CollectLpParams calldata p) external onlyDelegatecall {
         // V4 has no stakePool: `swapRewardToUsdc` / `rewardSwap` are ignored,
         // matching how unstaked positions behave on the staking protocols.
@@ -325,11 +443,14 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     ///      SWEEP back to the Safe on native pools (the mint's call value is
     ///      the acquired ETH; SETTLE consumes only what the liquidity needs).
     function _safeMintLp(
-        OpenLpParams calldata p,
+        address _onBehalfOf,
         PoolKey memory key,
+        int24 tickLower,
+        int24 tickUpper,
         uint128 liquidity,
         uint256 desired0,
-        uint256 desired1
+        uint256 desired1,
+        uint256 deadline
     ) internal {
         bool native = key.currency0 == NATIVE;
         bytes memory actions = native
@@ -338,22 +459,22 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         bytes[] memory params = new bytes[](native ? 3 : 2);
         params[0] = abi.encode(
             key,
-            p.tickLower,
-            p.tickUpper,
+            tickLower,
+            tickUpper,
             uint256(liquidity),
             desired0.toUint128(),
             desired1.toUint128(),
-            p.onBehalfOf,
+            _onBehalfOf,
             bytes("")
         );
         params[1] = abi.encode(key.currency0, key.currency1);
-        if (native) params[2] = abi.encode(key.currency0, p.onBehalfOf);
+        if (native) params[2] = abi.encode(key.currency0, _onBehalfOf);
 
         _safeExecValue(
-            p.onBehalfOf,
+            _onBehalfOf,
             address(POSITION_MANAGER),
             native ? desired0 : 0,
-            abi.encodeCall(IV4PositionManager.modifyLiquidities, (abi.encode(actions, params), p.deadline)),
+            abi.encodeCall(IV4PositionManager.modifyLiquidities, (abi.encode(actions, params), deadline)),
             55
         );
     }

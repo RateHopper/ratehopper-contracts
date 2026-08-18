@@ -169,6 +169,11 @@
     },
     {
         "inputs": [],
+        "name": "InvalidTimelock",
+        "type": "error"
+    },
+    {
+        "inputs": [],
         "name": "InvalidTreasury",
         "type": "error"
     },
@@ -293,6 +298,17 @@
     {
         "inputs": [],
         "name": "SwapMinBelowSlippageFloor",
+        "type": "error"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+            }
+        ],
+        "name": "TokenNotWhitelisted",
         "type": "error"
     },
     {
@@ -756,25 +772,31 @@
             {
                 "indexed": false,
                 "internalType": "uint128",
-                "name": "oldBasisUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "realizedUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "deployedUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
                 "name": "carriedBasisUsd6",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "withdrawn0",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "withdrawn1",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "used0",
+                "type": "uint128"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint128",
+                "name": "used1",
                 "type": "uint128"
             }
         ],
@@ -1953,55 +1975,6 @@
                         "type": "uint256"
                     },
                     {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "uint256",
-                                "name": "expectedOut",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "closeSwap0",
-                        "type": "tuple"
-                    },
-                    {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "uint256",
-                                "name": "expectedOut",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "closeSwap1",
-                        "type": "tuple"
-                    },
-                    {
-                        "internalType": "uint16",
-                        "name": "closeSlippageBps",
-                        "type": "uint16"
-                    },
-                    {
                         "internalType": "uint256",
                         "name": "decreaseAmount0Min",
                         "type": "uint256"
@@ -2009,11 +1982,6 @@
                     {
                         "internalType": "uint256",
                         "name": "decreaseAmount1Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "minUsdcOut",
                         "type": "uint256"
                     },
                     {
@@ -2035,55 +2003,6 @@
                         "internalType": "uint256",
                         "name": "mintAmount1Min",
                         "type": "uint256"
-                    },
-                    {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "uint256",
-                                "name": "expectedOut",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "openSwap0",
-                        "type": "tuple"
-                    },
-                    {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "uint256",
-                                "name": "expectedOut",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "openSwap1",
-                        "type": "tuple"
-                    },
-                    {
-                        "internalType": "uint16",
-                        "name": "openSlippageBps",
-                        "type": "uint16"
                     },
                     {
                         "internalType": "bytes",

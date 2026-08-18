@@ -272,6 +272,7 @@ contract MockCLNonfungiblePositionManager {
             amount0 = (uint256(p.principal0) * params.liquidity) / p.liquidity;
             amount1 = (uint256(p.principal1) * params.liquidity) / p.liquidity;
         }
+        require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, "Price slippage check");
         p.principal0 -= uint128(amount0);
         p.principal1 -= uint128(amount1);
         p.owed0 += uint128(amount0);

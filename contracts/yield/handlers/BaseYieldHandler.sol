@@ -9,7 +9,15 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../../interfaces/safe/ISafe.sol";
 import {INonfungiblePositionManager} from "../../interfaces/uniswapV3/INonfungiblePositionManager.sol";
-import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, SwapLeg} from "../../interfaces/IYieldHandler.sol";
+import {
+    IYieldHandler,
+    OpenLpParams,
+    CloseLpParams,
+    CollectLpParams,
+    WithdrawLpParams,
+    OpenLpInKindParams,
+    SwapLeg
+} from "../../interfaces/IYieldHandler.sol";
 import {TokenReturnLib} from "../libraries/TokenReturnLib.sol";
 import {YieldStorage} from "./YieldStorage.sol";
 import "../../common/Types.sol";
@@ -175,7 +183,17 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         _safeApprove(p.onBehalfOf, token1, POSITION_MANAGER, desired1, 23);
 
         uint128 liquidityMinted;
-        (tokenId, liquidityMinted, used0, used1) = _safeMintLp(p, desired0, desired1);
+        (tokenId, liquidityMinted, used0, used1) = _safeMintLp(
+            p.onBehalfOf,
+            p.lpPoolParam,
+            p.tickLower,
+            p.tickUpper,
+            desired0,
+            desired1,
+            p.mintAmount0Min,
+            p.mintAmount1Min,
+            p.deadline
+        );
         if (liquidityMinted < _yieldStorage().minPositionLiquidity[PROTOCOL]) revert PositionLiquidityTooLow();
 
         _safeApprove(p.onBehalfOf, token0, POSITION_MANAGER, 0, 24);
@@ -264,6 +282,93 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
         // Caller's final-value guard on gross realized USDC.
         if (uint256(currentValueUsd6) < p.minUsdcOut) revert MinUsdcOutNotMet();
+    }
+
+    /// @inheritdoc IYieldHandler
+    /// @dev In-kind close leg of a switch: decrease-all + collect + burn with
+    ///      NO swaps — both pool tokens land on the Safe as-is. Fees are
+    ///      harvested first through the manager so `feeCollectBps` applies to
+    ///      fees only, exactly as in closeLp.
+    function withdrawLp(
+        WithdrawLpParams calldata p
+    ) external onlyDelegatecall returns (address token0, address token1, uint256 amount0, uint256 amount1) {
+        uint128 liquidity;
+        (token0, token1, , liquidity) = _position(p.tokenId);
+        // A staked position is owned by the stakePool; unstake it back to the
+        // Safe first so the ownership guard and decrease/collect/burn hold.
+        _unstakeIfStaked(p.onBehalfOf, p.tokenId);
+        _requireOwnedBy(p.onBehalfOf, p.tokenId);
+
+        uint256 t0Before = IERC20(token0).balanceOf(p.onBehalfOf);
+        uint256 t1Before = IERC20(token1).balanceOf(p.onBehalfOf);
+
+        // Harvest fees before principal so feeCollectBps does not tax capital.
+        _collectLpFees(p.onBehalfOf, p.tokenId, token0, token1);
+
+        if (liquidity > 0) {
+            _safeExec(
+                p.onBehalfOf,
+                POSITION_MANAGER,
+                abi.encodeCall(
+                    INonfungiblePositionManager.decreaseLiquidity,
+                    (
+                        INonfungiblePositionManager.DecreaseLiquidityParams({
+                            tokenId: p.tokenId,
+                            liquidity: liquidity,
+                            amount0Min: p.decreaseAmount0Min,
+                            amount1Min: p.decreaseAmount1Min,
+                            deadline: p.deadline
+                        })
+                    )
+                ),
+                7
+            );
+
+            // Collect principal straight to the Safe. No fee on capital.
+            _collectToRecipient(p.onBehalfOf, p.tokenId, p.onBehalfOf, 8);
+        }
+
+        _safeExec(p.onBehalfOf, POSITION_MANAGER, abi.encodeCall(INonfungiblePositionManager.burn, (p.tokenId)), 9);
+
+        amount0 = IERC20(token0).balanceOf(p.onBehalfOf) - t0Before;
+        amount1 = IERC20(token1).balanceOf(p.onBehalfOf) - t1Before;
+    }
+
+    /// @inheritdoc IYieldHandler
+    /// @dev In-kind open leg of a switch: mint straight from the withdrawn
+    ///      token amounts — no swaps, so the only price protection is the
+    ///      mint minimums (the withdraw leg's decrease minimums bound the
+    ///      input side). Never staked: staking stays an explicit openLp
+    ///      opt-in.
+    function openLpInKind(
+        OpenLpInKindParams calldata p
+    ) external onlyDelegatecall returns (uint256 tokenId, uint128 used0, uint128 used1) {
+        _validatePoolParamAllowed(p.lpPoolParam);
+        (address token0, address token1) = _poolTokens(p.lpPoolParam);
+        if (token0 != p.token0 || token1 != p.token1) revert WrongTokenPair();
+        _validatePool(_getPool(p.lpPoolParam), token0, token1);
+
+        _safeApprove(p.onBehalfOf, token0, POSITION_MANAGER, p.amount0, 22);
+        _safeApprove(p.onBehalfOf, token1, POSITION_MANAGER, p.amount1, 23);
+
+        uint128 liquidityMinted;
+        (tokenId, liquidityMinted, used0, used1) = _safeMintLp(
+            p.onBehalfOf,
+            p.lpPoolParam,
+            p.tickLower,
+            p.tickUpper,
+            p.amount0,
+            p.amount1,
+            p.mintAmount0Min,
+            p.mintAmount1Min,
+            p.deadline
+        );
+        if (liquidityMinted < _yieldStorage().minPositionLiquidity[PROTOCOL]) revert PositionLiquidityTooLow();
+
+        _safeApprove(p.onBehalfOf, token0, POSITION_MANAGER, 0, 24);
+        _safeApprove(p.onBehalfOf, token1, POSITION_MANAGER, 0, 25);
+
+        _requireOwnedBy(p.onBehalfOf, tokenId);
     }
 
     /// @inheritdoc IYieldHandler
@@ -558,22 +663,28 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev Module-mediated NPM mint; the (tokenId, liquidity, amount0,
     ///      amount1) return shape is shared by both position managers.
     function _safeMintLp(
-        OpenLpParams calldata p,
+        address _onBehalfOf,
+        bytes memory lpPoolParam,
+        int24 tickLower,
+        int24 tickUpper,
         uint256 amount0Desired,
-        uint256 amount1Desired
+        uint256 amount1Desired,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        uint256 deadline
     ) internal returns (uint256 tokenId, uint128 liquidityMinted, uint128 amount0Used, uint128 amount1Used) {
         bytes memory mintCall = _buildMintCalldata(
-            p.lpPoolParam,
-            p.tickLower,
-            p.tickUpper,
+            lpPoolParam,
+            tickLower,
+            tickUpper,
             amount0Desired,
             amount1Desired,
-            p.mintAmount0Min,
-            p.mintAmount1Min,
-            p.onBehalfOf,
-            p.deadline
+            amount0Min,
+            amount1Min,
+            _onBehalfOf,
+            deadline
         );
-        bytes memory ret = _safeExec(p.onBehalfOf, POSITION_MANAGER, mintCall, 4);
+        bytes memory ret = _safeExec(_onBehalfOf, POSITION_MANAGER, mintCall, 4);
 
         uint256 amount0Out;
         uint256 amount1Out;

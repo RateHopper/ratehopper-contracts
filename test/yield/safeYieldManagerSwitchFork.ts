@@ -58,17 +58,30 @@ const V4_PM_ABI = [
 ];
 
 const spotUsdcToWeth = (amount: bigint, sqrtP: bigint) => (amount << 192n) / (sqrtP * sqrtP);
-const spotWethToUsdc = (amount: bigint, sqrtP: bigint) => (amount * sqrtP * sqrtP) >> 192n;
-const sqrtRatio = (tick: number) => BigInt(Math.floor(Math.sqrt(1.0001 ** tick) * 2 ** 96));
-// Token amounts sitting in an in-range position of the given liquidity.
-const inRangeAmounts = (liquidity: bigint, sqrtP: bigint, tickLower: number, tickUpper: number) => {
-    const sqrtA = sqrtRatio(tickLower);
-    const sqrtB = sqrtRatio(tickUpper);
+
+// In-kind switch: no swap legs, no USDC realization — the withdraw leg's token
+// amounts are redeployed directly. Only decrease/mint minimums remain.
+function switchParams(
+    safeAddress: string,
+    tokenId: bigint,
+    tickLower: number,
+    tickUpper: number,
+    lpPoolParam: string,
+    deadline: bigint,
+) {
     return {
-        amount0: (liquidity * (sqrtB - sqrtP) * (1n << 96n)) / (sqrtP * sqrtB),
-        amount1: (liquidity * (sqrtP - sqrtA)) >> 96n,
+        onBehalfOf: safeAddress,
+        tokenId,
+        decreaseAmount0Min: 0,
+        decreaseAmount1Min: 0,
+        tickLower,
+        tickUpper,
+        mintAmount0Min: 0,
+        mintAmount1Min: 0,
+        lpPoolParam,
+        deadline,
     };
-};
+}
 
 async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
     const [admin, operator, treasury, pauser] = await ethers.getSigners();
@@ -108,6 +121,7 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
         PERMIT2_ADDRESS,
         UNISWAP_V4_STATE_VIEW_ADDRESS,
         USDC_ADDRESS,
+        WETH_ADDRESS,
     );
     await v4Handler.waitForDeployment();
 
@@ -175,6 +189,43 @@ async function fundSafeUsdcFromPool(poolAddress: string, safeAddress: string, am
     return usdc;
 }
 
+async function openUniV3(
+    manager: any,
+    operator: any,
+    safeAddress: string,
+    input: bigint,
+    sqrtP: bigint,
+    poolParam: string,
+    tickLower: number,
+    tickUpper: number,
+    deadline: bigint,
+) {
+    const openExpectedOut = spotUsdcToWeth(input / 2n, sqrtP);
+    await (
+        await manager.connect(operator).openLp(UNISWAP_V3, {
+            onBehalfOf: safeAddress,
+            usdcAmount: input,
+            tickLower,
+            tickUpper,
+            mintAmount0Min: 0,
+            mintAmount1Min: 0,
+            swap0: leg((openExpectedOut * 9_700n) / 10_000n, openExpectedOut, poolParam),
+            swap1: ZERO_LEG,
+            slippageBps: 300,
+            deadline,
+            lpPoolParam: poolParam,
+            stake: false,
+        })
+    ).wait();
+    const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
+    return openedEvents[openedEvents.length - 1];
+}
+
+async function lastSwitched(manager: any, safeAddress: string) {
+    const events = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
+    return events[events.length - 1];
+}
+
 describe("SafeYieldManager switchLp - integration (Base fork)", function () {
     this.timeout(300_000);
 
@@ -192,7 +243,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         });
     });
 
-    it("moves real positions in both directions while carrying the basis", async function () {
+    it("moves real positions in both directions in kind while carrying the basis", async function () {
         const { operator, treasury, safeAddress, uniHandler, aeroHandler, manager } = await deployStack(
             [UNIV3_POOL_PARAM],
             [AERO_POOL_PARAM],
@@ -200,82 +251,58 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
 
         const { poolAddress: uniPoolAddress, sqrtP: uniSqrtP, tick: uniTick } = await readUniPool(FEE_TIER);
         const uniAlignedTick = Math.floor(uniTick / UNIV3_TICK_SPACING) * UNIV3_TICK_SPACING;
-
-        const aeroFactory = new ethers.Contract(AERODROME_CL_FACTORY_ADDRESS, AERO_FACTORY_ABI, ethers.provider);
-        const aeroPoolAddress: string = await aeroFactory.getPool(WETH_ADDRESS, USDC_ADDRESS, AERO_TICK_SPACING);
-        const aeroPool = new ethers.Contract(aeroPoolAddress, AERO_POOL_ABI, ethers.provider);
-        const [aeroSqrtP, aeroTick] = await aeroPool.slot0();
-        const aeroAlignedTick = Math.floor(Number(aeroTick) / AERO_TICK_SPACING) * AERO_TICK_SPACING;
+        const { tick: aeroTick } = await readAeroPool();
+        const aeroAlignedTick = Math.floor(aeroTick / AERO_TICK_SPACING) * AERO_TICK_SPACING;
 
         const input = ethers.parseUnits("10", 6);
         const usdc = await fundSafeUsdcFromPool(uniPoolAddress, safeAddress, input);
+        const weth = new ethers.Contract(WETH_ADDRESS, ERC20_ABI, ethers.provider);
 
         const block = await ethers.provider.getBlock("latest");
         const deadline = BigInt(block!.timestamp + 3_600);
-        const openExpectedOut = spotUsdcToWeth(input / 2n, uniSqrtP);
-        await (
-            await manager.connect(operator).openLp(UNISWAP_V3, {
-                onBehalfOf: safeAddress,
-                usdcAmount: input,
-                tickLower: uniAlignedTick - 1_000,
-                tickUpper: uniAlignedTick + 1_000,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                swap0: leg((openExpectedOut * 9_900n) / 10_000n, openExpectedOut, UNIV3_POOL_PARAM),
-                swap1: ZERO_LEG,
-                slippageBps: 100,
-                deadline,
-                lpPoolParam: UNIV3_POOL_PARAM,
-                stake: false,
-            })
-        ).wait();
-
-        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
-        const opened = openedEvents[openedEvents.length - 1];
+        const opened = await openUniV3(
+            manager,
+            operator,
+            safeAddress,
+            input,
+            uniSqrtP,
+            UNIV3_POOL_PARAM,
+            uniAlignedTick - 1_000,
+            uniAlignedTick + 1_000,
+            deadline,
+        );
         const oldTokenId = opened.args.tokenId;
         const initialBasis = await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId);
         expect(initialBasis).to.be.greaterThan(0);
 
-        // Close-leg estimates from the amounts that actually entered the LP;
-        // the open leg redeploys the realized USDC, estimated the same way.
-        const wethToLp: bigint = opened.args.amount0ToLp;
-        const usdcToLp: bigint = opened.args.amount1ToLp;
-        const closeExpectedOut = spotWethToUsdc(wethToLp, uniSqrtP);
-        const realizedEstimate = usdcToLp + closeExpectedOut;
-        const switchOpenExpectedOut = spotUsdcToWeth(realizedEstimate / 2n, aeroSqrtP);
+        const safeWethBefore = await weth.balanceOf(safeAddress);
+        const safeUsdcBefore = await usdc.balanceOf(safeAddress);
 
         await expect(
-            manager.connect(operator).switchLp(UNISWAP_V3, AERODROME, {
-                onBehalfOf: safeAddress,
-                tokenId: oldTokenId,
-                closeSwap0: leg((closeExpectedOut * 9_700n) / 10_000n, closeExpectedOut, UNIV3_POOL_PARAM),
-                closeSwap1: ZERO_LEG,
-                closeSlippageBps: 300,
-                decreaseAmount0Min: 0,
-                decreaseAmount1Min: 0,
-                minUsdcOut: (realizedEstimate * 9_500n) / 10_000n,
-                tickLower: aeroAlignedTick - 1_000,
-                tickUpper: aeroAlignedTick + 1_000,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                openSwap0: leg((switchOpenExpectedOut * 9_700n) / 10_000n, switchOpenExpectedOut, AERO_POOL_PARAM),
-                openSwap1: ZERO_LEG,
-                openSlippageBps: 300,
-                lpPoolParam: AERO_POOL_PARAM,
-                deadline,
-            }),
+            manager
+                .connect(operator)
+                .switchLp(
+                    UNISWAP_V3,
+                    AERODROME,
+                    switchParams(safeAddress, oldTokenId, aeroAlignedTick - 1_000, aeroAlignedTick + 1_000, AERO_POOL_PARAM, deadline),
+                ),
         ).to.emit(manager, "PositionSwitched");
 
-        const switchedEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
-        const switched = switchedEvents[switchedEvents.length - 1];
+        const switched = await lastSwitched(manager, safeAddress);
         const newTokenId = switched.args.newTokenId;
-        expect(switched.args.oldBasisUsd6).to.equal(initialBasis);
-        // Value left outside the new LP (mint leftovers) is returned as basis
-        // first, so the carried basis shrinks by exactly the undeployed value.
-        const undeployed: bigint = switched.args.realizedUsd6 - switched.args.deployedUsd6;
-        const carriedBasis: bigint = switched.args.carriedBasisUsd6;
-        expect(carriedBasis).to.equal(initialBasis - undeployed);
-        expect(carriedBasis).to.be.greaterThan(0);
+        // In kind: the basis rides along unchanged, and every withdrawn token
+        // either entered the new LP or stayed in the Safe as residue.
+        expect(switched.args.carriedBasisUsd6).to.equal(initialBasis);
+        expect(switched.args.withdrawn0).to.be.greaterThan(0);
+        expect(switched.args.withdrawn1).to.be.greaterThan(0);
+        expect(switched.args.used0).to.be.lessThanOrEqual(switched.args.withdrawn0);
+        expect(switched.args.used1).to.be.lessThanOrEqual(switched.args.withdrawn1);
+        expect((await weth.balanceOf(safeAddress)) - safeWethBefore).to.equal(
+            switched.args.withdrawn0 - switched.args.used0,
+        );
+        expect((await usdc.balanceOf(safeAddress)) - safeUsdcBefore).to.equal(
+            switched.args.withdrawn1 - switched.args.used1,
+        );
 
         const uniNpm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, ethers.provider);
         const aeroNpm = new ethers.Contract(AERODROME_SLIPSTREAM_NPM_ADDRESS, NPM_ABI, ethers.provider);
@@ -283,113 +310,33 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(await aeroNpm.ownerOf(newTokenId)).to.equal(safeAddress);
 
         expect(await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(AERODROME, newTokenId)).to.equal(carriedBasis);
+        expect(await manager.residualBasisUsd6Of(AERODROME, newTokenId)).to.equal(initialBasis);
         expect(await manager.positionHandlerOf(AERODROME, newTokenId)).to.equal(await aeroHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
 
-        // Estimate the new position's WETH leg from its actual liquidity:
-        // amount0 = L * (sqrtB - sqrtP) * Q96 / (sqrtP * sqrtB) for an
-        // in-range position.
-        const aeroNpmPositions = new ethers.Contract(
-            AERODROME_SLIPSTREAM_NPM_ADDRESS,
-            [
-                "function positions(uint256) view returns (uint96,address,address,address,int24,int24,int24,uint128,uint256,uint256,uint128,uint128)",
-            ],
-            ethers.provider,
-        );
-        const position = await aeroNpmPositions.positions(newTokenId);
-        const newLiquidity: bigint = position[7];
-        const sqrtB = sqrtRatio(aeroAlignedTick + 1_000);
-        const wethInPosition = (newLiquidity * (sqrtB - aeroSqrtP) * (1n << 96n)) / (aeroSqrtP * sqrtB);
-        const closeFinalExpectedOut = spotWethToUsdc(wethInPosition, aeroSqrtP);
+        // Reverse composition: Aerodrome withdraw followed by Uniswap V3 open.
         await expect(
-            manager.connect(operator).closeLp(AERODROME, {
-                onBehalfOf: safeAddress,
-                tokenId: newTokenId,
-                exitBps: 10_000,
-                swap0: leg((closeFinalExpectedOut * 9_700n) / 10_000n, closeFinalExpectedOut, AERO_POOL_PARAM),
-                swap1: ZERO_LEG,
-                slippageBps: 300,
-                decreaseAmount0Min: 0,
-                decreaseAmount1Min: 0,
-                deadline,
-                minUsdcOut: 0,
-            }),
-        ).to.emit(manager, "PositionClosed");
-        expect(await manager.residualBasisUsd6Of(AERODROME, newTokenId)).to.equal(0);
-        expect(await usdc.balanceOf(safeAddress)).to.be.greaterThan(0);
-
-        // Exercise the opposite handler composition as well: Aerodrome close
-        // followed by Uniswap V3 open.
-        const reverseInput = ethers.parseUnits("5", 6);
-        const reverseOpenExpectedOut = spotUsdcToWeth(reverseInput / 2n, aeroSqrtP);
-        await (
-            await manager.connect(operator).openLp(AERODROME, {
-                onBehalfOf: safeAddress,
-                usdcAmount: reverseInput,
-                tickLower: aeroAlignedTick - 1_000,
-                tickUpper: aeroAlignedTick + 1_000,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                swap0: leg((reverseOpenExpectedOut * 9_900n) / 10_000n, reverseOpenExpectedOut, AERO_POOL_PARAM),
-                swap1: ZERO_LEG,
-                slippageBps: 100,
-                deadline,
-                lpPoolParam: AERO_POOL_PARAM,
-                stake: false,
-            })
-        ).wait();
-
-        const reverseOpenedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
-        const reverseOpened = reverseOpenedEvents[reverseOpenedEvents.length - 1];
-        const reverseOldTokenId = reverseOpened.args.tokenId;
-        const reverseInitialBasis = await manager.residualBasisUsd6Of(AERODROME, reverseOldTokenId);
-        const reverseCloseExpectedOut = spotWethToUsdc(reverseOpened.args.amount0ToLp, aeroSqrtP);
-        const reverseRealizedEstimate = reverseOpened.args.amount1ToLp + reverseCloseExpectedOut;
-        const reverseSwitchOpenExpectedOut = spotUsdcToWeth(reverseRealizedEstimate / 2n, uniSqrtP);
-
-        await expect(
-            manager.connect(operator).switchLp(AERODROME, UNISWAP_V3, {
-                onBehalfOf: safeAddress,
-                tokenId: reverseOldTokenId,
-                closeSwap0: leg((reverseCloseExpectedOut * 9_700n) / 10_000n, reverseCloseExpectedOut, AERO_POOL_PARAM),
-                closeSwap1: ZERO_LEG,
-                closeSlippageBps: 300,
-                decreaseAmount0Min: 0,
-                decreaseAmount1Min: 0,
-                minUsdcOut: (reverseRealizedEstimate * 9_500n) / 10_000n,
-                tickLower: uniAlignedTick - 1_000,
-                tickUpper: uniAlignedTick + 1_000,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                openSwap0: leg(
-                    (reverseSwitchOpenExpectedOut * 9_700n) / 10_000n,
-                    reverseSwitchOpenExpectedOut,
-                    UNIV3_POOL_PARAM,
+            manager
+                .connect(operator)
+                .switchLp(
+                    AERODROME,
+                    UNISWAP_V3,
+                    switchParams(safeAddress, newTokenId, uniAlignedTick - 1_000, uniAlignedTick + 1_000, UNIV3_POOL_PARAM, deadline),
                 ),
-                openSwap1: ZERO_LEG,
-                openSlippageBps: 300,
-                lpPoolParam: UNIV3_POOL_PARAM,
-                deadline,
-            }),
         ).to.emit(manager, "PositionSwitched");
 
-        const reverseSwitchedEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
-        const reverseSwitched = reverseSwitchedEvents[reverseSwitchedEvents.length - 1];
-        const reverseNewTokenId = reverseSwitched.args.newTokenId;
-        expect(reverseSwitched.args.oldBasisUsd6).to.equal(reverseInitialBasis);
-        const reverseUndeployed: bigint = reverseSwitched.args.realizedUsd6 - reverseSwitched.args.deployedUsd6;
-        expect(reverseSwitched.args.carriedBasisUsd6).to.equal(reverseInitialBasis - reverseUndeployed);
-        await expect(aeroNpm.ownerOf(reverseOldTokenId)).to.be.reverted;
-        expect(await uniNpm.ownerOf(reverseNewTokenId)).to.equal(safeAddress);
-        expect(await manager.residualBasisUsd6Of(AERODROME, reverseOldTokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, reverseNewTokenId)).to.equal(
-            reverseSwitched.args.carriedBasisUsd6,
-        );
-        expect(await manager.positionHandlerOf(UNISWAP_V3, reverseNewTokenId)).to.equal(await uniHandler.getAddress());
+        const reverse = await lastSwitched(manager, safeAddress);
+        const reverseTokenId = reverse.args.newTokenId;
+        expect(reverse.args.carriedBasisUsd6).to.equal(initialBasis);
+        await expect(aeroNpm.ownerOf(newTokenId)).to.be.reverted;
+        expect(await uniNpm.ownerOf(reverseTokenId)).to.equal(safeAddress);
+        expect(await manager.residualBasisUsd6Of(AERODROME, newTokenId)).to.equal(0);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, reverseTokenId)).to.equal(initialBasis);
+        expect(await manager.positionHandlerOf(UNISWAP_V3, reverseTokenId)).to.equal(await uniHandler.getAddress());
+        expect(await usdc.balanceOf(treasury.address)).to.equal(0);
     });
 
-    it("switches between Uniswap V3 fee tiers (0.3% -> 0.05%) carrying the basis", async function () {
+    it("switches between Uniswap V3 fee tiers (0.3% -> 0.05%) in kind carrying the basis", async function () {
         const { operator, treasury, safeAddress, uniHandler, manager } = await deployStack(
             [UNIV3_POOL_PARAM_3000, UNIV3_POOL_PARAM],
             [AERO_POOL_PARAM],
@@ -405,69 +352,37 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
 
         const block = await ethers.provider.getBlock("latest");
         const deadline = BigInt(block!.timestamp + 3_600);
-        const openExpectedOut = spotUsdcToWeth(input / 2n, from.sqrtP);
-        await (
-            await manager.connect(operator).openLp(UNISWAP_V3, {
-                onBehalfOf: safeAddress,
-                usdcAmount: input,
-                tickLower: fromAlignedTick - 1_020,
-                tickUpper: fromAlignedTick + 1_020,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                swap0: leg((openExpectedOut * 9_700n) / 10_000n, openExpectedOut, UNIV3_POOL_PARAM_3000),
-                swap1: ZERO_LEG,
-                slippageBps: 300,
-                deadline,
-                lpPoolParam: UNIV3_POOL_PARAM_3000,
-                stake: false,
-            })
-        ).wait();
-
-        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
-        const opened = openedEvents[openedEvents.length - 1];
+        const opened = await openUniV3(
+            manager,
+            operator,
+            safeAddress,
+            input,
+            from.sqrtP,
+            UNIV3_POOL_PARAM_3000,
+            fromAlignedTick - 1_020,
+            fromAlignedTick + 1_020,
+            deadline,
+        );
         const oldTokenId = opened.args.tokenId;
         const initialBasis = await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId);
         expect(initialBasis).to.be.greaterThan(0);
 
-        // Close leg swaps back through the 0.3% pool it sits in; the open leg
-        // redeploys the realized USDC into the 0.05% pool.
-        const closeExpectedOut = spotWethToUsdc(opened.args.amount0ToLp, from.sqrtP);
-        const realizedEstimate = opened.args.amount1ToLp + closeExpectedOut;
-        const switchOpenExpectedOut = spotUsdcToWeth(realizedEstimate / 2n, to.sqrtP);
-
         await expect(
-            manager.connect(operator).switchLp(UNISWAP_V3, UNISWAP_V3, {
-                onBehalfOf: safeAddress,
-                tokenId: oldTokenId,
-                closeSwap0: leg((closeExpectedOut * 9_700n) / 10_000n, closeExpectedOut, UNIV3_POOL_PARAM_3000),
-                closeSwap1: ZERO_LEG,
-                closeSlippageBps: 300,
-                decreaseAmount0Min: 0,
-                decreaseAmount1Min: 0,
-                minUsdcOut: (realizedEstimate * 9_500n) / 10_000n,
-                tickLower: toAlignedTick - 1_000,
-                tickUpper: toAlignedTick + 1_000,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                openSwap0: leg((switchOpenExpectedOut * 9_700n) / 10_000n, switchOpenExpectedOut, UNIV3_POOL_PARAM),
-                openSwap1: ZERO_LEG,
-                openSlippageBps: 300,
-                lpPoolParam: UNIV3_POOL_PARAM,
-                deadline,
-            }),
+            manager
+                .connect(operator)
+                .switchLp(
+                    UNISWAP_V3,
+                    UNISWAP_V3,
+                    switchParams(safeAddress, oldTokenId, toAlignedTick - 1_000, toAlignedTick + 1_000, UNIV3_POOL_PARAM, deadline),
+                ),
         ).to.emit(manager, "PositionSwitched");
 
-        const switchedEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
-        const switched = switchedEvents[switchedEvents.length - 1];
+        const switched = await lastSwitched(manager, safeAddress);
         const newTokenId = switched.args.newTokenId;
         expect(newTokenId).to.not.equal(oldTokenId);
         expect(switched.args.fromProtocol).to.equal(UNISWAP_V3);
         expect(switched.args.toProtocol).to.equal(UNISWAP_V3);
-        expect(switched.args.oldBasisUsd6).to.equal(initialBasis);
-        const undeployed: bigint = switched.args.realizedUsd6 - switched.args.deployedUsd6;
-        const carriedBasis: bigint = switched.args.carriedBasisUsd6;
-        expect(carriedBasis).to.equal(initialBasis - undeployed);
-        expect(carriedBasis).to.be.greaterThan(0);
+        expect(switched.args.carriedBasisUsd6).to.equal(initialBasis);
 
         const uniNpm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, ethers.provider);
         await expect(uniNpm.ownerOf(oldTokenId)).to.be.reverted;
@@ -484,12 +399,12 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(position[4]).to.equal(FEE_TIER);
 
         expect(await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, newTokenId)).to.equal(carriedBasis);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, newTokenId)).to.equal(initialBasis);
         expect(await manager.positionHandlerOf(UNISWAP_V3, newTokenId)).to.equal(await uniHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
     });
 
-    it("moves real positions between Uniswap V3 and Uniswap V4 in both directions carrying the basis", async function () {
+    it("moves real positions between Uniswap V3 and Uniswap V4 in both directions in kind", async function () {
         const { operator, treasury, safeAddress, uniHandler, v4Handler, manager } = await deployStack(
             [UNIV3_POOL_PARAM],
             [AERO_POOL_PARAM],
@@ -497,7 +412,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
 
         const { poolAddress: uniPoolAddress, sqrtP: uniSqrtP, tick: uniTick } = await readUniPool(FEE_TIER);
         const uniAlignedTick = Math.floor(uniTick / UNIV3_TICK_SPACING) * UNIV3_TICK_SPACING;
-        const { sqrtP: v4SqrtP, tick: v4Tick } = await readV4Pool();
+        const { tick: v4Tick } = await readV4Pool();
         const v4AlignedTick = Math.floor(v4Tick / UNIV4_TICK_SPACING) * UNIV4_TICK_SPACING;
 
         const input = ethers.parseUnits("10", 6);
@@ -505,66 +420,36 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
 
         const block = await ethers.provider.getBlock("latest");
         const deadline = BigInt(block!.timestamp + 3_600);
-        const openExpectedOut = spotUsdcToWeth(input / 2n, uniSqrtP);
-        await (
-            await manager.connect(operator).openLp(UNISWAP_V3, {
-                onBehalfOf: safeAddress,
-                usdcAmount: input,
-                tickLower: uniAlignedTick - 1_000,
-                tickUpper: uniAlignedTick + 1_000,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                swap0: leg((openExpectedOut * 9_900n) / 10_000n, openExpectedOut, UNIV3_POOL_PARAM),
-                swap1: ZERO_LEG,
-                slippageBps: 100,
-                deadline,
-                lpPoolParam: UNIV3_POOL_PARAM,
-                stake: false,
-            })
-        ).wait();
-
-        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
-        const opened = openedEvents[openedEvents.length - 1];
+        const opened = await openUniV3(
+            manager,
+            operator,
+            safeAddress,
+            input,
+            uniSqrtP,
+            UNIV3_POOL_PARAM,
+            uniAlignedTick - 1_000,
+            uniAlignedTick + 1_000,
+            deadline,
+        );
         const oldTokenId = opened.args.tokenId;
         const initialBasis = await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId);
         expect(initialBasis).to.be.greaterThan(0);
 
-        // The close leg swaps WETH back through the V3 pool; the open leg
-        // redeploys the realized USDC into the native ETH/USDC V4 pool.
-        const closeExpectedOut = spotWethToUsdc(opened.args.amount0ToLp, uniSqrtP);
-        const realizedEstimate = opened.args.amount1ToLp + closeExpectedOut;
-        const switchOpenExpectedOut = spotUsdcToWeth(realizedEstimate / 2n, v4SqrtP);
-
+        // V3 -> native V4: the withdrawn WETH is unwrapped to ETH inside the
+        // V4 handler's in-kind open leg.
         await expect(
-            manager.connect(operator).switchLp(UNISWAP_V3, UNISWAP_V4, {
-                onBehalfOf: safeAddress,
-                tokenId: oldTokenId,
-                closeSwap0: leg((closeExpectedOut * 9_700n) / 10_000n, closeExpectedOut, UNIV3_POOL_PARAM),
-                closeSwap1: ZERO_LEG,
-                closeSlippageBps: 300,
-                decreaseAmount0Min: 0,
-                decreaseAmount1Min: 0,
-                minUsdcOut: (realizedEstimate * 9_500n) / 10_000n,
-                tickLower: v4AlignedTick - 1_000,
-                tickUpper: v4AlignedTick + 1_000,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                openSwap0: leg((switchOpenExpectedOut * 9_700n) / 10_000n, switchOpenExpectedOut, UNIV4_POOL_PARAM),
-                openSwap1: ZERO_LEG,
-                openSlippageBps: 300,
-                lpPoolParam: UNIV4_POOL_PARAM,
-                deadline,
-            }),
+            manager
+                .connect(operator)
+                .switchLp(
+                    UNISWAP_V3,
+                    UNISWAP_V4,
+                    switchParams(safeAddress, oldTokenId, v4AlignedTick - 1_000, v4AlignedTick + 1_000, UNIV4_POOL_PARAM, deadline),
+                ),
         ).to.emit(manager, "PositionSwitched");
 
-        const switchedEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
-        const switched = switchedEvents[switchedEvents.length - 1];
+        const switched = await lastSwitched(manager, safeAddress);
         const v4TokenId = switched.args.newTokenId;
-        expect(switched.args.oldBasisUsd6).to.equal(initialBasis);
-        const undeployed: bigint = switched.args.realizedUsd6 - switched.args.deployedUsd6;
-        const carriedBasis: bigint = switched.args.carriedBasisUsd6;
-        expect(carriedBasis).to.equal(initialBasis - undeployed);
-        expect(carriedBasis).to.be.greaterThan(0);
+        expect(switched.args.carriedBasisUsd6).to.equal(initialBasis);
 
         const uniNpm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, ethers.provider);
         const v4Pm = new ethers.Contract(UNISWAP_V4_POSITION_MANAGER_ADDRESS, V4_PM_ABI, ethers.provider);
@@ -572,62 +457,35 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(await v4Pm.ownerOf(v4TokenId)).to.equal(safeAddress);
         expect(await v4Pm.getPositionLiquidity(v4TokenId)).to.be.greaterThan(0);
         expect(await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(carriedBasis);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(initialBasis);
         expect(await manager.positionHandlerOf(UNISWAP_V4, v4TokenId)).to.equal(await v4Handler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
 
-        // Back leg: estimate the V4 position's composition from its actual
-        // liquidity, then close it through the V4 pool and reopen on V3.
-        const v4Liquidity: bigint = await v4Pm.getPositionLiquidity(v4TokenId);
-        const { amount0: ethInPosition, amount1: usdcInPosition } = inRangeAmounts(
-            v4Liquidity,
-            v4SqrtP,
-            v4AlignedTick - 1_000,
-            v4AlignedTick + 1_000,
-        );
-        const backCloseExpectedOut = spotWethToUsdc(ethInPosition, v4SqrtP);
-        const backRealizedEstimate = usdcInPosition + backCloseExpectedOut;
-        const backOpenExpectedOut = spotUsdcToWeth(backRealizedEstimate / 2n, uniSqrtP);
-
+        // Back leg: native V4 -> V3 wraps the withdrawn ETH into WETH.
         await expect(
-            manager.connect(operator).switchLp(UNISWAP_V4, UNISWAP_V3, {
-                onBehalfOf: safeAddress,
-                tokenId: v4TokenId,
-                closeSwap0: leg((backCloseExpectedOut * 9_700n) / 10_000n, backCloseExpectedOut, UNIV4_POOL_PARAM),
-                closeSwap1: ZERO_LEG,
-                closeSlippageBps: 300,
-                decreaseAmount0Min: 0,
-                decreaseAmount1Min: 0,
-                minUsdcOut: (backRealizedEstimate * 9_500n) / 10_000n,
-                tickLower: uniAlignedTick - 1_000,
-                tickUpper: uniAlignedTick + 1_000,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                openSwap0: leg((backOpenExpectedOut * 9_700n) / 10_000n, backOpenExpectedOut, UNIV3_POOL_PARAM),
-                openSwap1: ZERO_LEG,
-                openSlippageBps: 300,
-                lpPoolParam: UNIV3_POOL_PARAM,
-                deadline,
-            }),
+            manager
+                .connect(operator)
+                .switchLp(
+                    UNISWAP_V4,
+                    UNISWAP_V3,
+                    switchParams(safeAddress, v4TokenId, uniAlignedTick - 1_000, uniAlignedTick + 1_000, UNIV3_POOL_PARAM, deadline),
+                ),
         ).to.emit(manager, "PositionSwitched");
 
-        const backEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
-        const back = backEvents[backEvents.length - 1];
+        const back = await lastSwitched(manager, safeAddress);
         const backTokenId = back.args.newTokenId;
         expect(back.args.fromProtocol).to.equal(UNISWAP_V4);
         expect(back.args.toProtocol).to.equal(UNISWAP_V3);
-        expect(back.args.oldBasisUsd6).to.equal(carriedBasis);
-        const backUndeployed: bigint = back.args.realizedUsd6 - back.args.deployedUsd6;
-        expect(back.args.carriedBasisUsd6).to.equal(carriedBasis - backUndeployed);
+        expect(back.args.carriedBasisUsd6).to.equal(initialBasis);
         await expect(v4Pm.ownerOf(v4TokenId)).to.be.reverted;
         expect(await uniNpm.ownerOf(backTokenId)).to.equal(safeAddress);
         expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, backTokenId)).to.equal(back.args.carriedBasisUsd6);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, backTokenId)).to.equal(initialBasis);
         expect(await manager.positionHandlerOf(UNISWAP_V3, backTokenId)).to.equal(await uniHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
     });
 
-    it("moves real positions between Aerodrome and Uniswap V4 in both directions carrying the basis", async function () {
+    it("moves real positions between Aerodrome and Uniswap V4 in both directions in kind", async function () {
         const { operator, treasury, safeAddress, aeroHandler, v4Handler, manager } = await deployStack(
             [UNIV3_POOL_PARAM],
             [AERO_POOL_PARAM],
@@ -636,7 +494,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         const { poolAddress: uniPoolAddress } = await readUniPool(FEE_TIER);
         const { sqrtP: aeroSqrtP, tick: aeroTick } = await readAeroPool();
         const aeroAlignedTick = Math.floor(aeroTick / AERO_TICK_SPACING) * AERO_TICK_SPACING;
-        const { sqrtP: v4SqrtP, tick: v4Tick } = await readV4Pool();
+        const { tick: v4Tick } = await readV4Pool();
         const v4AlignedTick = Math.floor(v4Tick / UNIV4_TICK_SPACING) * UNIV4_TICK_SPACING;
 
         const input = ethers.parseUnits("10", 6);
@@ -653,9 +511,9 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 tickUpper: aeroAlignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                swap0: leg((openExpectedOut * 9_900n) / 10_000n, openExpectedOut, AERO_POOL_PARAM),
+                swap0: leg((openExpectedOut * 9_700n) / 10_000n, openExpectedOut, AERO_POOL_PARAM),
                 swap1: ZERO_LEG,
-                slippageBps: 100,
+                slippageBps: 300,
                 deadline,
                 lpPoolParam: AERO_POOL_PARAM,
                 stake: false,
@@ -668,42 +526,19 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         const initialBasis = await manager.residualBasisUsd6Of(AERODROME, oldTokenId);
         expect(initialBasis).to.be.greaterThan(0);
 
-        // The close leg swaps WETH back through the Aerodrome pool; the open
-        // leg redeploys the realized USDC into the native ETH/USDC V4 pool.
-        const closeExpectedOut = spotWethToUsdc(opened.args.amount0ToLp, aeroSqrtP);
-        const realizedEstimate = opened.args.amount1ToLp + closeExpectedOut;
-        const switchOpenExpectedOut = spotUsdcToWeth(realizedEstimate / 2n, v4SqrtP);
-
         await expect(
-            manager.connect(operator).switchLp(AERODROME, UNISWAP_V4, {
-                onBehalfOf: safeAddress,
-                tokenId: oldTokenId,
-                closeSwap0: leg((closeExpectedOut * 9_700n) / 10_000n, closeExpectedOut, AERO_POOL_PARAM),
-                closeSwap1: ZERO_LEG,
-                closeSlippageBps: 300,
-                decreaseAmount0Min: 0,
-                decreaseAmount1Min: 0,
-                minUsdcOut: (realizedEstimate * 9_500n) / 10_000n,
-                tickLower: v4AlignedTick - 1_000,
-                tickUpper: v4AlignedTick + 1_000,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                openSwap0: leg((switchOpenExpectedOut * 9_700n) / 10_000n, switchOpenExpectedOut, UNIV4_POOL_PARAM),
-                openSwap1: ZERO_LEG,
-                openSlippageBps: 300,
-                lpPoolParam: UNIV4_POOL_PARAM,
-                deadline,
-            }),
+            manager
+                .connect(operator)
+                .switchLp(
+                    AERODROME,
+                    UNISWAP_V4,
+                    switchParams(safeAddress, oldTokenId, v4AlignedTick - 1_000, v4AlignedTick + 1_000, UNIV4_POOL_PARAM, deadline),
+                ),
         ).to.emit(manager, "PositionSwitched");
 
-        const switchedEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
-        const switched = switchedEvents[switchedEvents.length - 1];
+        const switched = await lastSwitched(manager, safeAddress);
         const v4TokenId = switched.args.newTokenId;
-        expect(switched.args.oldBasisUsd6).to.equal(initialBasis);
-        const undeployed: bigint = switched.args.realizedUsd6 - switched.args.deployedUsd6;
-        const carriedBasis: bigint = switched.args.carriedBasisUsd6;
-        expect(carriedBasis).to.equal(initialBasis - undeployed);
-        expect(carriedBasis).to.be.greaterThan(0);
+        expect(switched.args.carriedBasisUsd6).to.equal(initialBasis);
 
         const aeroNpm = new ethers.Contract(AERODROME_SLIPSTREAM_NPM_ADDRESS, NPM_ABI, ethers.provider);
         const v4Pm = new ethers.Contract(UNISWAP_V4_POSITION_MANAGER_ADDRESS, V4_PM_ABI, ethers.provider);
@@ -711,57 +546,29 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(await v4Pm.ownerOf(v4TokenId)).to.equal(safeAddress);
         expect(await v4Pm.getPositionLiquidity(v4TokenId)).to.be.greaterThan(0);
         expect(await manager.residualBasisUsd6Of(AERODROME, oldTokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(carriedBasis);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(initialBasis);
         expect(await manager.positionHandlerOf(UNISWAP_V4, v4TokenId)).to.equal(await v4Handler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
 
-        // Back leg: estimate the V4 position's composition from its actual
-        // liquidity, then close it through the V4 pool and reopen on Aerodrome.
-        const v4Liquidity: bigint = await v4Pm.getPositionLiquidity(v4TokenId);
-        const { amount0: ethInPosition, amount1: usdcInPosition } = inRangeAmounts(
-            v4Liquidity,
-            v4SqrtP,
-            v4AlignedTick - 1_000,
-            v4AlignedTick + 1_000,
-        );
-        const backCloseExpectedOut = spotWethToUsdc(ethInPosition, v4SqrtP);
-        const backRealizedEstimate = usdcInPosition + backCloseExpectedOut;
-        const backOpenExpectedOut = spotUsdcToWeth(backRealizedEstimate / 2n, aeroSqrtP);
-
         await expect(
-            manager.connect(operator).switchLp(UNISWAP_V4, AERODROME, {
-                onBehalfOf: safeAddress,
-                tokenId: v4TokenId,
-                closeSwap0: leg((backCloseExpectedOut * 9_700n) / 10_000n, backCloseExpectedOut, UNIV4_POOL_PARAM),
-                closeSwap1: ZERO_LEG,
-                closeSlippageBps: 300,
-                decreaseAmount0Min: 0,
-                decreaseAmount1Min: 0,
-                minUsdcOut: (backRealizedEstimate * 9_500n) / 10_000n,
-                tickLower: aeroAlignedTick - 1_000,
-                tickUpper: aeroAlignedTick + 1_000,
-                mintAmount0Min: 0,
-                mintAmount1Min: 0,
-                openSwap0: leg((backOpenExpectedOut * 9_700n) / 10_000n, backOpenExpectedOut, AERO_POOL_PARAM),
-                openSwap1: ZERO_LEG,
-                openSlippageBps: 300,
-                lpPoolParam: AERO_POOL_PARAM,
-                deadline,
-            }),
+            manager
+                .connect(operator)
+                .switchLp(
+                    UNISWAP_V4,
+                    AERODROME,
+                    switchParams(safeAddress, v4TokenId, aeroAlignedTick - 1_000, aeroAlignedTick + 1_000, AERO_POOL_PARAM, deadline),
+                ),
         ).to.emit(manager, "PositionSwitched");
 
-        const backEvents = await manager.queryFilter(manager.filters.PositionSwitched(safeAddress), -5);
-        const back = backEvents[backEvents.length - 1];
+        const back = await lastSwitched(manager, safeAddress);
         const backTokenId = back.args.newTokenId;
         expect(back.args.fromProtocol).to.equal(UNISWAP_V4);
         expect(back.args.toProtocol).to.equal(AERODROME);
-        expect(back.args.oldBasisUsd6).to.equal(carriedBasis);
-        const backUndeployed: bigint = back.args.realizedUsd6 - back.args.deployedUsd6;
-        expect(back.args.carriedBasisUsd6).to.equal(carriedBasis - backUndeployed);
+        expect(back.args.carriedBasisUsd6).to.equal(initialBasis);
         await expect(v4Pm.ownerOf(v4TokenId)).to.be.reverted;
         expect(await aeroNpm.ownerOf(backTokenId)).to.equal(safeAddress);
         expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(AERODROME, backTokenId)).to.equal(back.args.carriedBasisUsd6);
+        expect(await manager.residualBasisUsd6Of(AERODROME, backTokenId)).to.equal(initialBasis);
         expect(await manager.positionHandlerOf(AERODROME, backTokenId)).to.equal(await aeroHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
     });

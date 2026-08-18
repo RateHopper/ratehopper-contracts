@@ -58,6 +58,39 @@ struct CloseLpParams {
     uint256 minUsdcOut;
 }
 
+/// @notice Parameters for the withdraw leg of an in-kind switch: a full
+///         decrease + collect + burn with NO swaps — the pool tokens land on
+///         the Safe as-is. A handler whose pool side is native ETH wraps that
+///         side to its ERC20, so callers always receive ERC20 addresses and
+///         amounts.
+struct WithdrawLpParams {
+    address onBehalfOf;
+    uint256 tokenId;
+    uint256 decreaseAmount0Min;
+    uint256 decreaseAmount1Min;
+    uint256 deadline;
+}
+
+/// @notice Parameters for the open leg of an in-kind switch: mint straight
+///         from the token amounts the withdraw leg delivered, with NO swaps.
+///         `token0/token1` are the ERC20s as withdrawn; a handler whose pool
+///         side is native ETH unwraps its side itself. The handler reverts
+///         `WrongTokenPair` when the provided tokens do not match the
+///         destination pool's pair.
+struct OpenLpInKindParams {
+    address onBehalfOf;
+    address token0;
+    address token1;
+    uint256 amount0;
+    uint256 amount1;
+    int24 tickLower;
+    int24 tickUpper;
+    uint256 mintAmount0Min;
+    uint256 mintAmount1Min;
+    bytes lpPoolParam;
+    uint256 deadline;
+}
+
 /// @notice Parameters for harvesting accrued LP fees without exiting.
 struct CollectLpParams {
     address onBehalfOf;
@@ -108,6 +141,27 @@ interface IYieldHandler {
     ///                     rounding guard, never trusted from the caller.
     /// @return currentValueUsd6 Gross realized USDC credited to the Safe.
     function closeLp(CloseLpParams calldata params, uint128 basisForExit) external returns (uint128 currentValueUsd6);
+
+    /// @notice In-kind close leg of a switch: full decrease + collect + burn,
+    ///         NO swaps — both pool tokens land on the Safe (native ETH
+    ///         wrapped to its ERC20).
+    /// @return token0  ERC20 address of the withdrawn token0 side.
+    /// @return token1  ERC20 address of the withdrawn token1 side.
+    /// @return amount0 token0 delivered to the Safe by this withdrawal.
+    /// @return amount1 token1 delivered to the Safe by this withdrawal.
+    function withdrawLp(
+        WithdrawLpParams calldata params
+    ) external returns (address token0, address token1, uint256 amount0, uint256 amount1);
+
+    /// @notice In-kind open leg of a switch: mint from the provided token
+    ///         amounts, NO swaps. Amounts the mint cannot consume stay on the
+    ///         Safe.
+    /// @return tokenId Newly minted LP NFT id (owned by the Safe).
+    /// @return used0   token0 consumed by the mint.
+    /// @return used1   token1 consumed by the mint.
+    function openLpInKind(
+        OpenLpInKindParams calldata params
+    ) external returns (uint256 tokenId, uint128 used0, uint128 used1);
 
     function collectLp(CollectLpParams calldata params) external;
 }

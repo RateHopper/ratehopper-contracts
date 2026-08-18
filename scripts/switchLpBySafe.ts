@@ -44,9 +44,11 @@ import {
  *
  *   npx hardhat run scripts/switchLpBySafe.ts --network base
  *
- * The script derives the source close parameters from the existing NFT and
- * the target open parameters from the target pool's current spot price. It
- * starts in DRY_RUN mode so the calldata can be reviewed before submission.
+ * The switch is IN KIND: the withdrawn token amounts are redeployed into the
+ * target pool directly, with no swaps. The script only derives the target
+ * tick range from the target pool's current spot price and logs the estimated
+ * withdrawal for review. It starts in DRY_RUN mode so the calldata can be
+ * reviewed before submission.
  */
 
 // ─── Configuration ───────────────────────────────────────────────────────
@@ -66,9 +68,8 @@ const TARGET_V4_HOOKS = "0x0000000000000000000000000000000000000000";
 // Half-width in raw ticks. Zero means 10 * target pool tick spacing.
 const TARGET_TICK_RANGE = 0;
 
-const CLOSE_SLIPPAGE_BPS = 300n;
-const OPEN_SLIPPAGE_BPS = 300n;
-const MIN_USDC_SLIPPAGE_BPS = 500n;
+const DECREASE_AMOUNT0_MIN = 0n;
+const DECREASE_AMOUNT1_MIN = 0n;
 const MINT_AMOUNT0_MIN = 0n;
 const MINT_AMOUNT1_MIN = 0n;
 const MANAGER_ADDRESS_OVERRIDE = "";
@@ -229,29 +230,12 @@ async function main() {
     const target = await resolvePool(TO_PROTOCOL_NAME, targetValue);
 
     const withdrawn = amountsForLiquidity(source.sqrtPriceX96, sourceTickLower, sourceTickUpper, liquidity);
-    let closeExpectedSwapOut = (withdrawn.amount0 * source.sqrtPriceX96 * source.sqrtPriceX96) >> 192n;
-    if (closeExpectedSwapOut === 0n) closeExpectedSwapOut = 1n;
-    let closeSwapAmountOutMin = (closeExpectedSwapOut * (10_000n - CLOSE_SLIPPAGE_BPS)) / 10_000n;
-    if (closeSwapAmountOutMin === 0n) closeSwapAmountOutMin = 1n;
-    const realizedEstimate = withdrawn.amount1 + closeExpectedSwapOut;
     const targetTickRange = TARGET_TICK_RANGE || target.tickSpacing * 10;
     const targetAlignedTick = alignTick(target.tick, target.tickSpacing);
     const tickLower = alignTick(targetAlignedTick - targetTickRange, target.tickSpacing);
     const tickUpper = alignTick(targetAlignedTick + targetTickRange, target.tickSpacing);
     if (tickLower >= tickUpper) throw new Error("Target tick range is invalid");
 
-    const openExpectedSwapOut = ((realizedEstimate / 2n) << 192n) / (target.sqrtPriceX96 * target.sqrtPriceX96);
-    if (openExpectedSwapOut === 0n) throw new Error("Estimated open swap output rounds to zero");
-    const openSwapAmountOutMin = (openExpectedSwapOut * (10_000n - OPEN_SLIPPAGE_BPS)) / 10_000n;
-    const minUsdcOut = (realizedEstimate * (10_000n - MIN_USDC_SLIPPAGE_BPS)) / 10_000n;
-
-    const maxSlippageBps: bigint = await manager.maxSlippageBps();
-    for (const [name, value] of [
-        ["CLOSE_SLIPPAGE_BPS", CLOSE_SLIPPAGE_BPS],
-        ["OPEN_SLIPPAGE_BPS", OPEN_SLIPPAGE_BPS],
-    ] as [string, bigint][]) {
-        if (value === 0n || value > maxSlippageBps) throw new Error(`${name} must be in 1..${maxSlippageBps}`);
-    }
     if (!(await manager.protocolEnabledForClose(source.protocol)))
         throw new Error("Source protocol is disabled for close");
     if (!(await manager.protocolEnabledForOpen(target.protocol)))
@@ -264,28 +248,12 @@ async function main() {
     const params = {
         onBehalfOf: SAFE_ADDRESS,
         tokenId: TOKEN_ID,
-        // WETH is token0 on Base; the USDC side needs no swap leg.
-        closeSwap0: {
-            amountOutMin: closeSwapAmountOutMin,
-            expectedOut: closeExpectedSwapOut,
-            poolParam: source.poolParam,
-        },
-        closeSwap1: { amountOutMin: 0, expectedOut: 0, poolParam: "0x" },
-        closeSlippageBps: CLOSE_SLIPPAGE_BPS,
-        decreaseAmount0Min: 0n,
-        decreaseAmount1Min: 0n,
-        minUsdcOut,
+        decreaseAmount0Min: DECREASE_AMOUNT0_MIN,
+        decreaseAmount1Min: DECREASE_AMOUNT1_MIN,
         tickLower,
         tickUpper,
         mintAmount0Min: MINT_AMOUNT0_MIN,
         mintAmount1Min: MINT_AMOUNT1_MIN,
-        openSwap0: {
-            amountOutMin: openSwapAmountOutMin,
-            expectedOut: openExpectedSwapOut,
-            poolParam: target.poolParam,
-        },
-        openSwap1: { amountOutMin: 0, expectedOut: 0, poolParam: "0x" },
-        openSlippageBps: OPEN_SLIPPAGE_BPS,
         lpPoolParam: target.poolParam,
         deadline,
     };
@@ -298,10 +266,8 @@ async function main() {
     console.log("- Token id:", TOKEN_ID.toString());
     console.log("- Source range:", sourceTickLower, "..", sourceTickUpper, "| liquidity:", liquidity.toString());
     console.log("- Target range:", tickLower, "..", tickUpper);
-    console.log("- Estimated USDC realized:", ethers.formatUnits(realizedEstimate, 6));
-    console.log("- Close expected swap out (USDC):", ethers.formatUnits(closeExpectedSwapOut, 6));
-    console.log("- Open expected swap out (WETH):", ethers.formatEther(openExpectedSwapOut));
-    console.log("- minUsdcOut (USDC):", ethers.formatUnits(minUsdcOut, 6));
+    console.log("- Estimated withdrawal (WETH/ETH):", ethers.formatEther(withdrawn.amount0));
+    console.log("- Estimated withdrawal (USDC):", ethers.formatUnits(withdrawn.amount1, 6));
     console.log("- Deadline:", deadline.toString());
 
     const switchLpData = manager.interface.encodeFunctionData("switchLp", [source.protocol, target.protocol, params]);
@@ -338,7 +304,9 @@ async function main() {
                 console.log("PositionSwitched — old token:", parsed.args.oldTokenId.toString());
                 console.log("- New token:", parsed.args.newTokenId.toString());
                 console.log("- Carried basis (USD):", ethers.formatUnits(parsed.args.carriedBasisUsd6, 6));
-                // A switch charges no performance fee (basis carries over; realized cash stays in the Safe).
+                console.log("- Withdrawn:", parsed.args.withdrawn0.toString(), "/", parsed.args.withdrawn1.toString());
+                console.log("- Deployed:", parsed.args.used0.toString(), "/", parsed.args.used1.toString());
+                // In kind: no swaps, no performance fee — the basis carries over unchanged.
                 return;
             }
         } catch {

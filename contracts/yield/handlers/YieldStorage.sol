@@ -76,10 +76,11 @@ abstract contract YieldStorage {
         uint8 indexed toProtocol,
         uint256 oldTokenId,
         uint256 newTokenId,
-        uint128 oldBasisUsd6,
-        uint128 realizedUsd6,
-        uint128 deployedUsd6,
-        uint128 carriedBasisUsd6
+        uint128 carriedBasisUsd6,
+        uint256 withdrawn0,
+        uint256 withdrawn1,
+        uint128 used0,
+        uint128 used1
     );
     event PositionClosed(
         address indexed onBehalfOf,

@@ -178,6 +178,7 @@ export default buildModule("DeployYieldManager", (m) => {
         permit2,
         stateView,
         USDC_ADDRESS,
+        WETH_ADDRESS,
     ]);
 
     const safeYieldManager = m.contract(

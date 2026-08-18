@@ -116,15 +116,19 @@ async function deployUniV4Harness() {
     const [deployer, operatorEOA, treasury, stranger, pauser] = await ethers.getSigners();
 
     const ERC = await ethers.getContractFactory("MockERC20");
-    const tokenA = await ERC.deploy("Token A", "TKA", 18);
-    const tokenB = await ERC.deploy("Token B", "TKB", 6);
-    await tokenA.waitForDeployment();
-    await tokenB.waitForDeployment();
-    const addrA = (await tokenA.getAddress()).toLowerCase();
-    const addrB = (await tokenB.getAddress()).toLowerCase();
-    const [weth, usdc] = addrA < addrB ? [tokenA, tokenB] : [tokenB, tokenA];
-    const wethAddr = await weth.getAddress();
+    const usdc = await ERC.deploy("USD Coin", "USDC", 6);
+    await usdc.waitForDeployment();
     const usdcAddr = await usdc.getAddress();
+
+    // WETH must sort BELOW USDC (currency0 side) and expose deposit/withdraw
+    // for the V4 handler's in-kind wrap/unwrap; place MockWETH code at
+    // usdc - 1 directly — deterministically the next address down.
+    const WETHFactory = await ethers.getContractFactory("MockWETH");
+    const wethImpl = await WETHFactory.deploy();
+    await wethImpl.waitForDeployment();
+    const wethAddr = ethers.getAddress(ethers.toBeHex(BigInt(usdcAddr) - 1n, 20));
+    await network.provider.send("hardhat_setCode", [wethAddr, await ethers.provider.getCode(wethImpl)]);
+    const weth = await ethers.getContractAt("MockWETH", wethAddr);
 
     // A token that sorts ABOVE USDC, so a {USDC, tokenC} pool has USDC as
     // currency0 (drives the currency0-is-USDC branches). Deployed addresses
@@ -234,6 +238,7 @@ async function deployUniV4Harness() {
         await permit2.getAddress(),
         await stateView.getAddress(),
         usdcAddr,
+        wethAddr,
     );
     await v4Handler.waitForDeployment();
 
@@ -266,9 +271,11 @@ async function deployUniV4Harness() {
         await (await usdc.mint(await target.getAddress(), 10n ** 18n)).wait();
         await (await tokenC.mint(await target.getAddress(), 10n ** 24n)).wait();
     }
-    // Native ETH liquidity for the router (swap output) and the PM (fee/принcipal takes).
+    // Native ETH liquidity for the router (swap output), the PM (fee/principal
+    // takes), and MockWETH (honouring `withdraw` for minted balances).
     await (await deployer.sendTransaction({ to: await universalRouter.getAddress(), value: 10n ** 18n })).wait();
     await (await deployer.sendTransaction({ to: await v4Pm.getAddress(), value: 10n ** 18n })).wait();
+    await (await deployer.sendTransaction({ to: wethAddr, value: 10n ** 18n })).wait();
     await (await uniRouter.setOutput(WETH_OUT)).wait();
     await (await clRouter.setOutput(WETH_OUT)).wait();
     await (await universalRouter.setOutput(WETH_OUT)).wait();
@@ -331,7 +338,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         });
 
         it("rejects zero addresses in the handler constructor", async function () {
-            const { v4Pm, universalRouter, permit2, stateView, usdcAddr, v4Handler } =
+            const { v4Pm, universalRouter, permit2, stateView, usdcAddr, wethAddr, v4Handler } =
                 await loadFixture(deployUniV4Harness);
             const V4Handler = await ethers.getContractFactory("UniV4YieldHandler");
             const args = [
@@ -340,14 +347,14 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 await permit2.getAddress(),
                 await stateView.getAddress(),
                 usdcAddr,
+                wethAddr,
             ];
             for (let i = 0; i < args.length; i++) {
                 const bad = [...args];
                 bad[i] = ZERO;
-                await expect(V4Handler.deploy(bad[0], bad[1], bad[2], bad[3], bad[4])).to.be.revertedWithCustomError(
-                    v4Handler,
-                    "ZeroAddress",
-                );
+                await expect(
+                    V4Handler.deploy(bad[0], bad[1], bad[2], bad[3], bad[4], bad[5]),
+                ).to.be.revertedWithCustomError(v4Handler, "ZeroAddress");
             }
         });
 
@@ -931,106 +938,107 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         function switchParams(
             safeAddr: string,
             tokenId: bigint | number,
-            closeSwapPoolParam: string,
             openPoolParam: string,
             overrides: Record<string, any> = {},
         ) {
             return {
                 onBehalfOf: safeAddr,
                 tokenId,
-                closeSwap0: leg(CLOSE_OUT, CLOSE_OUT, closeSwapPoolParam),
-                closeSwap1: ZERO_LEG,
-                closeSlippageBps: SLIP,
                 decreaseAmount0Min: 0,
                 decreaseAmount1Min: 0,
-                minUsdcOut: 0,
                 tickLower: -100,
                 tickUpper: 100,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                openSwap0: leg(WETH_OUT, WETH_OUT, openPoolParam),
-                openSwap1: ZERO_LEG,
-                openSlippageBps: SLIP,
                 lpPoolParam: openPoolParam,
                 deadline: DEADLINE,
                 ...overrides,
             };
         }
 
-        it("switches V3 -> V4 with zero manager changes", async function () {
-            const { manager, operatorEOA, safeAddr, uniRouter, usdcAddr, v4Handler, v4Pm } =
-                await loadFixture(deployUniV4Harness);
+        it("switches V3 -> V4 in kind with zero manager changes", async function () {
+            const { manager, operatorEOA, safeAddr, v4Handler, v4Pm } = await loadFixture(deployUniV4Harness);
             await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
-            await (await uniRouter.setOutputFor(usdcAddr, CLOSE_OUT)).wait();
 
-            await expect(
-                manager
-                    .connect(operatorEOA)
-                    .switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, FEE_TIER, V4_KEY)),
-            )
+            await expect(manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)))
                 .to.emit(manager, "PositionSwitched")
-                .withArgs(safeAddr, UNISWAP_V3, UNISWAP_V4, 1n, 1n, USDC_AMOUNT, anyValue, anyValue, anyValue);
+                .withArgs(safeAddr, UNISWAP_V3, UNISWAP_V4, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
 
             expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(0n);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(USDC_AMOUNT);
             expect(await manager.positionHandlerOf(UNISWAP_V4, 1)).to.equal(await v4Handler.getAddress());
             expect(await v4Pm.ownerOf(1)).to.equal(safeAddr);
         });
 
-        it("switches V4 -> V3, including into a native-source close", async function () {
-            const { manager, operatorEOA, safeAddr, universalRouter, usdcAddr, uniHandler, uniNpm } =
-                await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY));
-            await (await universalRouter.setOutputFor(usdcAddr, CLOSE_OUT)).wait();
+        it("switches V3 -> native V4, unwrapping the withdrawn WETH", async function () {
+            const { manager, operatorEOA, safeAddr, weth, v4Pm } = await loadFixture(deployUniV4Harness);
+            await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
 
             await expect(
-                manager
-                    .connect(operatorEOA)
-                    .switchLp(UNISWAP_V4, UNISWAP_V3, switchParams(safeAddr, 1, V4_NATIVE_KEY, FEE_TIER)),
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_NATIVE_KEY)),
             )
                 .to.emit(manager, "PositionSwitched")
-                .withArgs(safeAddr, UNISWAP_V4, UNISWAP_V3, 1n, 1n, USDC_AMOUNT, anyValue, anyValue, anyValue);
+                .withArgs(safeAddr, UNISWAP_V3, UNISWAP_V4, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
+
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(USDC_AMOUNT);
+            expect(await v4Pm.ownerOf(1)).to.equal(safeAddr);
+            expect(await weth.balanceOf(safeAddr)).to.equal(0n);
+        });
+
+        it("switches V4 -> V3, wrapping the native side of the withdrawal", async function () {
+            const { manager, operatorEOA, safeAddr, weth, uniHandler, uniNpm } = await loadFixture(deployUniV4Harness);
+            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY));
+
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V4, UNISWAP_V3, switchParams(safeAddr, 1, FEE_TIER)),
+            )
+                .to.emit(manager, "PositionSwitched")
+                .withArgs(safeAddr, UNISWAP_V4, UNISWAP_V3, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
 
             expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(0n);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(USDC_AMOUNT);
             expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.equal(await uniHandler.getAddress());
             expect(await uniNpm.ownerOf(1)).to.equal(safeAddr);
+            expect(await weth.balanceOf(safeAddr)).to.equal(0n);
         });
 
-        it("switches Aerodrome -> V4 with zero manager changes", async function () {
-            const { manager, operatorEOA, safeAddr, clRouter, usdcAddr, v4Handler, v4Pm } =
-                await loadFixture(deployUniV4Harness);
+        it("switches Aerodrome -> V4 in kind with zero manager changes", async function () {
+            const { manager, operatorEOA, safeAddr, v4Handler, v4Pm } = await loadFixture(deployUniV4Harness);
             await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING));
-            await (await clRouter.setOutputFor(usdcAddr, CLOSE_OUT)).wait();
 
-            await expect(
-                manager
-                    .connect(operatorEOA)
-                    .switchLp(AERODROME, UNISWAP_V4, switchParams(safeAddr, 1, TICK_SPACING, V4_KEY)),
-            )
+            await expect(manager.connect(operatorEOA).switchLp(AERODROME, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)))
                 .to.emit(manager, "PositionSwitched")
-                .withArgs(safeAddr, AERODROME, UNISWAP_V4, 1n, 1n, USDC_AMOUNT, anyValue, anyValue, anyValue);
+                .withArgs(safeAddr, AERODROME, UNISWAP_V4, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
 
             expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(0n);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(USDC_AMOUNT);
             expect(await manager.positionHandlerOf(UNISWAP_V4, 1)).to.equal(await v4Handler.getAddress());
             expect(await v4Pm.ownerOf(1)).to.equal(safeAddr);
         });
 
-        it("switches V4 -> Aerodrome, including from a native-source close", async function () {
-            const { manager, operatorEOA, safeAddr, universalRouter, usdcAddr, aeroHandler, clNpm } =
-                await loadFixture(deployUniV4Harness);
+        it("switches V4 -> Aerodrome, wrapping the native side of the withdrawal", async function () {
+            const { manager, operatorEOA, safeAddr, aeroHandler, clNpm } = await loadFixture(deployUniV4Harness);
             await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY));
-            await (await universalRouter.setOutputFor(usdcAddr, CLOSE_OUT)).wait();
 
             await expect(
-                manager
-                    .connect(operatorEOA)
-                    .switchLp(UNISWAP_V4, AERODROME, switchParams(safeAddr, 1, V4_NATIVE_KEY, TICK_SPACING)),
+                manager.connect(operatorEOA).switchLp(UNISWAP_V4, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
             )
                 .to.emit(manager, "PositionSwitched")
-                .withArgs(safeAddr, UNISWAP_V4, AERODROME, 1n, 1n, USDC_AMOUNT, anyValue, anyValue, anyValue);
+                .withArgs(safeAddr, UNISWAP_V4, AERODROME, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
 
             expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(0n);
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(USDC_AMOUNT);
             expect(await manager.positionHandlerOf(AERODROME, 1)).to.equal(await aeroHandler.getAddress());
             expect(await clNpm.ownerOf(1)).to.equal(safeAddr);
+        });
+
+        it("rejects an in-kind open whose tokens do not match the destination pool", async function () {
+            const { manager, operatorEOA, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
+            await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
+
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_WRONG1_KEY)),
+            ).to.be.revertedWithCustomError(v4Handler, "WrongTokenPair");
         });
     });
 });

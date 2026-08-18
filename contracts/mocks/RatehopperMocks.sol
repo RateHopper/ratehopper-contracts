@@ -89,6 +89,30 @@ contract MockERC20 is IERC20 {
     }
 }
 
+/// @notice WETH9-shaped MockERC20: payable `deposit` mints against received
+///         ETH, `withdraw` burns and sends ETH back — the wrap/unwrap surface
+///         the V4 handler's in-kind switch legs use.
+contract MockWETH is MockERC20 {
+    constructor() MockERC20("Wrapped Ether", "WETH", 18) {}
+
+    receive() external payable {}
+
+    function deposit() external payable {
+        balanceOf[msg.sender] += msg.value;
+        totalSupply += msg.value;
+        emit Transfer(address(0), msg.sender, msg.value);
+    }
+
+    function withdraw(uint256 amount) external {
+        require(balanceOf[msg.sender] >= amount, "WETH: balance");
+        balanceOf[msg.sender] -= amount;
+        totalSupply -= amount;
+        emit Transfer(msg.sender, address(0), amount);
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        require(sent, "WETH: send");
+    }
+}
+
 /// @notice Stand-in for `IProtocolRegistry` exposing `safeOperator` and the
 ///         token whitelist.
 contract MockRegistry {
@@ -280,12 +304,22 @@ contract MockNonfungiblePositionManager {
     uint128 public mintLiquidity = 1_000_000;
     address public mintOwnerOverride;
 
+    // Reentrancy vector: called at the top of `decreaseLiquidity` when set,
+    // mirroring an NFT/pool callback re-entering the manager mid-flow.
+    address public callbackTarget;
+    bytes public callbackData;
+
     function setMintLiquidity(uint128 value) external {
         mintLiquidity = value;
     }
 
     function setMintOwnerOverride(address account) external {
         mintOwnerOverride = account;
+    }
+
+    function setCallback(address target, bytes calldata data) external {
+        callbackTarget = target;
+        callbackData = data;
     }
 
     /// @dev Seed a position directly (for collectLp/closeLp tests that bypass
@@ -371,12 +405,21 @@ contract MockNonfungiblePositionManager {
     function decreaseLiquidity(
         INonfungiblePositionManager.DecreaseLiquidityParams calldata params
     ) external payable returns (uint256 amount0, uint256 amount1) {
+        if (callbackTarget != address(0)) {
+            (bool success, bytes memory ret) = callbackTarget.call(callbackData);
+            if (!success) {
+                assembly {
+                    revert(add(ret, 32), mload(ret))
+                }
+            }
+        }
         Position storage p = positionsData[params.tokenId];
         require(params.liquidity <= p.liquidity, "liquidity");
         if (p.liquidity > 0) {
             amount0 = (uint256(p.principal0) * params.liquidity) / p.liquidity;
             amount1 = (uint256(p.principal1) * params.liquidity) / p.liquidity;
         }
+        require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, "Price slippage check");
         p.principal0 -= uint128(amount0);
         p.principal1 -= uint128(amount1);
         p.owed0 += uint128(amount0);

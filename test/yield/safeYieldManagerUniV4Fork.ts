@@ -96,6 +96,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             PERMIT2_ADDRESS,
             UNISWAP_V4_STATE_VIEW_ADDRESS,
             USDC_ADDRESS,
+            WETH_ADDRESS,
         );
         await handler.waitForDeployment();
 
@@ -271,6 +272,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             PERMIT2_ADDRESS,
             UNISWAP_V4_STATE_VIEW_ADDRESS,
             USDC_ADDRESS,
+            WETH_ADDRESS,
         );
         await handler.waitForDeployment();
 

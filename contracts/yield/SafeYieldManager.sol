@@ -12,7 +12,14 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../interfaces/safe/ISafe.sol";
 import {IProtocolRegistry} from "../interfaces/IProtocolRegistry.sol";
-import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, SwapLeg} from "../interfaces/IYieldHandler.sol";
+import {
+    IYieldHandler,
+    OpenLpParams,
+    CloseLpParams,
+    CollectLpParams,
+    WithdrawLpParams,
+    OpenLpInKindParams
+} from "../interfaces/IYieldHandler.sol";
 import {TokenReturnLib} from "./libraries/TokenReturnLib.sol";
 import {YieldStorage} from "./handlers/YieldStorage.sol";
 import "../common/Types.sol";
@@ -22,28 +29,22 @@ interface ITimelockControllerLike {
 }
 
 /// @notice Parameters for atomically moving a full position to another pool
-///         (different protocol, pair and/or pool param). The close leg's
-///         realized USDC becomes the open leg's input, so no `usdcAmount` is
-///         supplied. Swap legs follow the SwapLeg convention: legs whose pool
-///         token IS USDC are ignored.
+///         of the SAME token pair (different protocol, fee tier / tick
+///         spacing, or any mix). The move is IN KIND: the withdraw leg's
+///         token amounts become the open leg's input directly — no swaps, so
+///         the only price protection is the decrease minimums (withdraw leg)
+///         and the mint minimums (open leg).
 struct SwitchLpParams {
     address onBehalfOf;
     uint256 tokenId;
-    // close leg (exitBps is always 10_000)
-    SwapLeg closeSwap0;
-    SwapLeg closeSwap1;
-    uint16 closeSlippageBps;
+    // withdraw leg (always a full exit)
     uint256 decreaseAmount0Min;
     uint256 decreaseAmount1Min;
-    uint256 minUsdcOut;
     // open leg
     int24 tickLower;
     int24 tickUpper;
     uint256 mintAmount0Min;
     uint256 mintAmount1Min;
-    SwapLeg openSwap0;
-    SwapLeg openSwap1;
-    uint16 openSlippageBps;
     bytes lpPoolParam;
     uint256 deadline;
 }
@@ -295,15 +296,19 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         );
     }
 
-    /// @notice Atomically move a full position to another pool — a different
-    ///         protocol, a different pair, a different fee tier / tick
-    ///         spacing, or any mix. The close leg realizes the position to USDC through the
-    ///         pinned handler; the open leg supplies that exact USDC to the
-    ///         target protocol's current handler.
-    /// @dev    The original basis is carried onto the replacement position
-    ///         after deducting value left outside the new LP (return of basis
-    ///         first, floored at zero). A switch takes NO performance fee —
-    ///         realized profit is charged only at the real exit via closeLp.
+    /// @notice Atomically move a full position to another pool of the SAME
+    ///         token pair — a different protocol, a different fee tier / tick
+    ///         spacing, or any mix. The withdraw leg takes the position out
+    ///         IN KIND through the pinned handler (no swaps); the open leg
+    ///         redeploys those exact token amounts through the target
+    ///         protocol's current handler (no swaps). Amounts the destination
+    ///         mint cannot consume stay in the Safe.
+    /// @dev    An in-kind switch realizes nothing — there is no USDC moment
+    ///         to re-measure the position against — so the original basis is
+    ///         carried onto the replacement position UNCHANGED and NO
+    ///         performance fee is taken: realized profit is charged only at
+    ///         the real exit via closeLp. Withdrawn residue left in the Safe
+    ///         only under-states later realized profit, never inflates it.
     ///         A switch opens new exposure, hence `whenNotPaused` (unlike
     ///         exits) plus BOTH per-protocol switches:
     ///         `protocolEnabledForClose[from]` and `protocolEnabledForOpen[to]`.
@@ -324,22 +329,12 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         delete $.residualBasisUsd6Of[fromProtocol][params.tokenId];
         delete $.positionHandlerOf[fromProtocol][params.tokenId];
 
-        uint128 realizedUsd6 = _switchCloseLeg(closeHandler, params, residualBasis);
-        if (realizedUsd6 == 0) revert InvalidUsdcAmount();
-        uint128 deployedUsd6;
-        (newTokenId, deployedUsd6) = _switchOpenLeg(openHandler, params, realizedUsd6);
+        (address token0, address token1, uint256 amount0, uint256 amount1) = _switchWithdrawLeg(closeHandler, params);
+        uint128 used0;
+        uint128 used1;
+        (newTokenId, used0, used1) = _switchOpenLeg(openHandler, params, token0, token1, amount0, amount1);
 
-        // Every supported handler computes deployed value from amounts used
-        // out of this exact input, so a bad future handler reporting more
-        // than `realizedUsd6` fails here by checked arithmetic.
-        // A switch takes NO performance fee: the redeployed leg carries its
-        // basis over, and any USDC not redeployed (undeployed remainder) simply
-        // stays in the Safe as cash. The realized-profit fee is charged only on
-        // an actual close (`closeLp`), never on a switch.
-        uint128 undeployedUsd6 = realizedUsd6 - deployedUsd6;
-        uint128 carriedBasisUsd6 = residualBasis > undeployedUsd6 ? residualBasis - undeployedUsd6 : 0;
-
-        $.residualBasisUsd6Of[toProtocol][newTokenId] = carriedBasisUsd6;
+        $.residualBasisUsd6Of[toProtocol][newTokenId] = residualBasis;
         $.positionHandlerOf[toProtocol][newTokenId] = openHandler;
 
         emit PositionSwitched(
@@ -349,76 +344,72 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             params.tokenId,
             newTokenId,
             residualBasis,
-            realizedUsd6,
-            deployedUsd6,
-            carriedBasisUsd6
+            amount0,
+            amount1,
+            used0,
+            used1
         );
     }
 
-    /// @dev Full close of the old position via its pinned handler; returns
-    ///      the USDC the close realized onto the Safe.
-    function _switchCloseLeg(
+    /// @dev Full in-kind withdrawal of the old position via its pinned
+    ///      handler; the pool tokens land on the Safe unswapped (a native
+    ///      side arrives wrapped as its ERC20).
+    function _switchWithdrawLeg(
         address handler,
-        SwitchLpParams calldata p,
-        uint128 basisForExit
-    ) internal returns (uint128) {
+        SwitchLpParams calldata p
+    ) internal returns (address token0, address token1, uint256 amount0, uint256 amount1) {
         bytes memory ret = _delegateToHandler(
             handler,
             abi.encodeCall(
-                IYieldHandler.closeLp,
+                IYieldHandler.withdrawLp,
                 (
-                    CloseLpParams({
+                    WithdrawLpParams({
                         onBehalfOf: p.onBehalfOf,
                         tokenId: p.tokenId,
-                        exitBps: 10_000,
-                        swap0: p.closeSwap0,
-                        swap1: p.closeSwap1,
-                        slippageBps: p.closeSlippageBps,
                         decreaseAmount0Min: p.decreaseAmount0Min,
                         decreaseAmount1Min: p.decreaseAmount1Min,
-                        deadline: p.deadline,
-                        minUsdcOut: p.minUsdcOut
-                    }),
-                    basisForExit
-                )
-            )
-        );
-        return abi.decode(ret, (uint128));
-    }
-
-    /// @dev Open the replacement position through the target protocol's
-    ///      current handler with the USDC the close leg realized.
-    function _switchOpenLeg(
-        address handler,
-        SwitchLpParams calldata p,
-        uint128 usdcAmount
-    ) internal returns (uint256 tokenId, uint128 deployedUsd6) {
-        bytes memory ret = _delegateToHandler(
-            handler,
-            abi.encodeCall(
-                IYieldHandler.openLp,
-                (
-                    OpenLpParams({
-                        onBehalfOf: p.onBehalfOf,
-                        usdcAmount: uint256(usdcAmount),
-                        tickLower: p.tickLower,
-                        tickUpper: p.tickUpper,
-                        mintAmount0Min: p.mintAmount0Min,
-                        mintAmount1Min: p.mintAmount1Min,
-                        swap0: p.openSwap0,
-                        swap1: p.openSwap1,
-                        slippageBps: p.openSlippageBps,
-                        deadline: p.deadline,
-                        lpPoolParam: p.lpPoolParam,
-                        // Switch re-opens the leg unstaked; stakePool staking is only
-                        // offered on the direct openLp path (SwitchLpParams has no
-                        // stake flag).
-                        stake: false
+                        deadline: p.deadline
                     })
                 )
             )
         );
-        (tokenId, deployedUsd6, , ) = abi.decode(ret, (uint256, uint128, uint128, uint128));
+        (token0, token1, amount0, amount1) = abi.decode(ret, (address, address, uint256, uint256));
+    }
+
+    /// @dev Open the replacement position through the target protocol's
+    ///      current handler with the exact tokens the withdraw leg delivered.
+    ///      The handler rejects a pair mismatch (`WrongTokenPair`), so a
+    ///      switch can never silently deploy unrelated Safe funds.
+    function _switchOpenLeg(
+        address handler,
+        SwitchLpParams calldata p,
+        address token0,
+        address token1,
+        uint256 amount0,
+        uint256 amount1
+    ) internal returns (uint256 tokenId, uint128 used0, uint128 used1) {
+        bytes memory ret = _delegateToHandler(
+            handler,
+            abi.encodeCall(
+                IYieldHandler.openLpInKind,
+                (
+                    OpenLpInKindParams({
+                        onBehalfOf: p.onBehalfOf,
+                        token0: token0,
+                        token1: token1,
+                        amount0: amount0,
+                        amount1: amount1,
+                        tickLower: p.tickLower,
+                        tickUpper: p.tickUpper,
+                        mintAmount0Min: p.mintAmount0Min,
+                        mintAmount1Min: p.mintAmount1Min,
+                        lpPoolParam: p.lpPoolParam,
+                        deadline: p.deadline
+                    })
+                )
+            )
+        );
+        (tokenId, used0, used1) = abi.decode(ret, (uint256, uint128, uint128));
     }
 
     /// @dev Registry token whitelist gate on an open-leg pool pair, resolved
@@ -666,9 +657,8 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     }
 
     /// @dev Basis and open-time handler of a position this contract manages.
-    ///      The handler is the managed-position sentinel because a switch can
-    ///      legitimately carry zero basis when the old basis was fully
-    ///      returned outside the replacement LP.
+    ///      The handler (not the basis) is the managed-position sentinel so a
+    ///      position whose recorded basis is zero stays manageable.
     function _pinnedPosition(
         YieldLayout storage $,
         uint8 protocol,
