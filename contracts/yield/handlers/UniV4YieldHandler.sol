@@ -8,15 +8,7 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../../interfaces/safe/ISafe.sol";
 import {IWETH9} from "../../interfaces/IWETH9.sol";
-import {
-    IYieldHandler,
-    OpenLpParams,
-    CloseLpParams,
-    CollectLpParams,
-    WithdrawLpParams,
-    OpenLpInKindParams,
-    SwapLeg
-} from "../../interfaces/IYieldHandler.sol";
+import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, WithdrawLpParams, OpenLpInKindParams, SwapLeg} from "../../interfaces/IYieldHandler.sol";
 import {PoolKey, ExactInputSingleParams} from "../../interfaces/uniswapV4/V4Types.sol";
 import {IV4PositionManager} from "../../interfaces/uniswapV4/IV4PositionManager.sol";
 import {IStateView} from "../../interfaces/uniswapV4/IStateView.sol";

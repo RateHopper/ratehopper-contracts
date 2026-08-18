@@ -372,6 +372,30 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 v4Handler,
                 "OnlyDelegatecall",
             );
+            await expect(
+                v4Handler.withdrawLp({
+                    onBehalfOf: safeAddr,
+                    tokenId: 1,
+                    decreaseAmount0Min: 0,
+                    decreaseAmount1Min: 0,
+                    deadline: DEADLINE,
+                }),
+            ).to.be.revertedWithCustomError(v4Handler, "OnlyDelegatecall");
+            await expect(
+                v4Handler.openLpInKind({
+                    onBehalfOf: safeAddr,
+                    token0: safeAddr,
+                    token1: safeAddr,
+                    amount0: 0,
+                    amount1: 0,
+                    tickLower: -100,
+                    tickUpper: 100,
+                    mintAmount0Min: 0,
+                    mintAmount1Min: 0,
+                    lpPoolParam: V4_KEY,
+                    deadline: DEADLINE,
+                }),
+            ).to.be.revertedWithCustomError(v4Handler, "OnlyDelegatecall");
         });
     });
 
@@ -1036,9 +1060,63 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const { manager, operatorEOA, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
             await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
 
+            // currency1 mismatch: the destination trades {WETH, tokenC}, not {WETH, USDC}.
             await expect(
                 manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_WRONG1_KEY)),
             ).to.be.revertedWithCustomError(v4Handler, "WrongTokenPair");
+
+            // currency0 mismatch: the destination's currency0 is USDC, the withdrawal delivered WETH.
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_USDC0_KEY)),
+            ).to.be.revertedWithCustomError(v4Handler, "WrongTokenPair");
+        });
+
+        it("switches an ERC20-currency0 V4 position out without wrapping", async function () {
+            const { manager, operatorEOA, safeAddr, uniHandler, uniNpm, weth } = await loadFixture(deployUniV4Harness);
+            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            const safeWethBefore = await weth.balanceOf(safeAddr);
+
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V4, UNISWAP_V3, switchParams(safeAddr, 1, FEE_TIER)),
+            )
+                .to.emit(manager, "PositionSwitched")
+                .withArgs(safeAddr, UNISWAP_V4, UNISWAP_V3, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
+
+            expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.equal(await uniHandler.getAddress());
+            expect(await uniNpm.ownerOf(1)).to.equal(safeAddr);
+            // The WETH went straight from the V4 burn into the V3 mint — never parked on the Safe.
+            expect(await weth.balanceOf(safeAddr)).to.equal(safeWethBefore);
+        });
+
+        it("rejects a destination mint below the position-liquidity floor", async function () {
+            const { manager, deployer, operatorEOA, safeAddr } = await loadFixture(deployUniV4Harness);
+            await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
+            await (await manager.connect(deployer).setMinPositionLiquidity(UNISWAP_V4, 10n ** 18n)).wait();
+
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)),
+            ).to.be.revertedWithCustomError(manager, "PositionLiquidityTooLow");
+        });
+
+        it("enforces the destination mint minimums on each side", async function () {
+            const { manager, operatorEOA, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
+            await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(
+                        UNISWAP_V3,
+                        UNISWAP_V4,
+                        switchParams(safeAddr, 1, V4_KEY, { mintAmount0Min: WETH_OUT + 1n }),
+                    ),
+            ).to.be.revertedWithCustomError(v4Handler, "MintAmountBelowMin");
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY, { mintAmount1Min: HALF + 1n })),
+            ).to.be.revertedWithCustomError(v4Handler, "MintAmountBelowMin");
         });
     });
 });

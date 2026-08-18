@@ -963,6 +963,30 @@ describe("SafeYieldManager", function () {
                 aeroHandler,
                 "OnlyDelegatecall",
             );
+            await expect(
+                uniHandler.withdrawLp({
+                    onBehalfOf: safeAddr,
+                    tokenId: 1,
+                    decreaseAmount0Min: 0,
+                    decreaseAmount1Min: 0,
+                    deadline: DEADLINE,
+                }),
+            ).to.be.revertedWithCustomError(uniHandler, "OnlyDelegatecall");
+            await expect(
+                uniHandler.openLpInKind({
+                    onBehalfOf: safeAddr,
+                    token0: safeAddr,
+                    token1: safeAddr,
+                    amount0: 0,
+                    amount1: 0,
+                    tickLower: -100,
+                    tickUpper: 100,
+                    mintAmount0Min: 0,
+                    mintAmount1Min: 0,
+                    lpPoolParam: FEE_TIER,
+                    deadline: DEADLINE,
+                }),
+            ).to.be.revertedWithCustomError(uniHandler, "OnlyDelegatecall");
         });
 
         it("rejects zero addresses in handler constructors", async function () {
@@ -2076,6 +2100,45 @@ describe("SafeYieldManager", function () {
             await expect(
                 manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
             ).to.be.revertedWithCustomError(manager, "PositionLiquidityTooLow");
+        });
+
+        it("rejects an in-kind open whose withdrawn tokens do not match the destination pool", async function () {
+            const { manager, operatorEOA, safeAddr, uniNpm, wethAddr, usdcAddr } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+
+            const ERC = await ethers.getContractFactory("MockERC20");
+            const tokenC = await ERC.deploy("Token C", "TKC", 18);
+            await tokenC.waitForDeployment();
+            const tokenCAddr = await tokenC.getAddress();
+            await (await tokenC.mint(await uniNpm.getAddress(), 10n ** 24n)).wait();
+
+            // token0 mismatch: the withdrawal delivers tokenC, the destination trades WETH.
+            await (await uniNpm.setTokens(1, tokenCAddr, usdcAddr)).wait();
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
+            ).to.be.revertedWithCustomError(manager, "WrongTokenPair");
+
+            // token1 mismatch: token0 lines up, so only the second side rejects it.
+            await (await uniNpm.setTokens(1, wethAddr, tokenCAddr)).wait();
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
+            ).to.be.revertedWithCustomError(manager, "WrongTokenPair");
+        });
+
+        it("withdraws a zero-liquidity position without a decrease and still switches", async function () {
+            const { manager, operatorEOA, safeAddr, uniNpm, clNpm } = await loadFixture(deployYieldManagerHarness);
+            await (await uniNpm.setMintLiquidity(0)).wait();
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
+            )
+                .to.emit(manager, "PositionSwitched")
+                .withArgs(safeAddr, UNISWAP_V3, AERODROME, 1n, 1n, USDC_AMOUNT, 0n, 0n, 0n, 0n);
+
+            expect(await clNpm.ownerOf(1)).to.equal(safeAddr);
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(USDC_AMOUNT);
         });
 
         it("blocks reentrant switchLp through a position-manager callback", async function () {
