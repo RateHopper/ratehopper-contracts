@@ -66,6 +66,23 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     ///         whose handler has no stakePool (e.g. Uniswap V3).
     error StakingNotSupported();
 
+    /// @dev Inputs for `_mintFromAmounts`, the mint half shared by `openLp`
+    ///      and `openLpInKind`. Grouped in a struct so the shared helper takes
+    ///      three arguments instead of eleven — the flat form pushes both
+    ///      callers past the stack limit once coverage instrumentation is
+    ///      layered on (viaIR, see .solcover.js).
+    struct MintArgs {
+        address onBehalfOf;
+        bytes lpPoolParam;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 amount0;
+        uint256 amount1;
+        uint256 mintAmount0Min;
+        uint256 mintAmount1Min;
+        uint256 deadline;
+    }
+
     modifier onlyDelegatecall() {
         if (address(this) == __self) revert OnlyDelegatecall();
         _;
@@ -171,27 +188,21 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         uint256 desired0 = _acquireSide(p, token0, half0, p.swap0, 20, 3, 21);
         uint256 desired1 = _acquireSide(p, token1, half1, p.swap1, 31, 32, 33);
 
-        _safeApprove(p.onBehalfOf, token0, POSITION_MANAGER, desired0, 22);
-        _safeApprove(p.onBehalfOf, token1, POSITION_MANAGER, desired1, 23);
-
-        uint128 liquidityMinted;
-        (tokenId, liquidityMinted, used0, used1) = _safeMintLp(
-            p.onBehalfOf,
-            p.lpPoolParam,
-            p.tickLower,
-            p.tickUpper,
-            desired0,
-            desired1,
-            p.mintAmount0Min,
-            p.mintAmount1Min,
-            p.deadline
+        (tokenId, used0, used1) = _mintFromAmounts(
+            token0,
+            token1,
+            MintArgs({
+                onBehalfOf: p.onBehalfOf,
+                lpPoolParam: p.lpPoolParam,
+                tickLower: p.tickLower,
+                tickUpper: p.tickUpper,
+                amount0: desired0,
+                amount1: desired1,
+                mintAmount0Min: p.mintAmount0Min,
+                mintAmount1Min: p.mintAmount1Min,
+                deadline: p.deadline
+            })
         );
-        if (liquidityMinted < _yieldStorage().minPositionLiquidity[PROTOCOL]) revert PositionLiquidityTooLow();
-
-        _safeApprove(p.onBehalfOf, token0, POSITION_MANAGER, 0, 24);
-        _safeApprove(p.onBehalfOf, token1, POSITION_MANAGER, 0, 25);
-
-        _requireOwnedBy(p.onBehalfOf, tokenId);
 
         // Value each leg at its just-executed swap rate (identity for USDC).
         basisUsd6 = (_legValueUsdc(token0, used0, half0, desired0) + _legValueUsdc(token1, used1, half1, desired1))
@@ -340,27 +351,21 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         if (token0 != p.token0 || token1 != p.token1) revert WrongTokenPair();
         _validatePool(_getPool(p.lpPoolParam), token0, token1);
 
-        _safeApprove(p.onBehalfOf, token0, POSITION_MANAGER, p.amount0, 22);
-        _safeApprove(p.onBehalfOf, token1, POSITION_MANAGER, p.amount1, 23);
-
-        uint128 liquidityMinted;
-        (tokenId, liquidityMinted, used0, used1) = _safeMintLp(
-            p.onBehalfOf,
-            p.lpPoolParam,
-            p.tickLower,
-            p.tickUpper,
-            p.amount0,
-            p.amount1,
-            p.mintAmount0Min,
-            p.mintAmount1Min,
-            p.deadline
+        (tokenId, used0, used1) = _mintFromAmounts(
+            token0,
+            token1,
+            MintArgs({
+                onBehalfOf: p.onBehalfOf,
+                lpPoolParam: p.lpPoolParam,
+                tickLower: p.tickLower,
+                tickUpper: p.tickUpper,
+                amount0: p.amount0,
+                amount1: p.amount1,
+                mintAmount0Min: p.mintAmount0Min,
+                mintAmount1Min: p.mintAmount1Min,
+                deadline: p.deadline
+            })
         );
-        if (liquidityMinted < _yieldStorage().minPositionLiquidity[PROTOCOL]) revert PositionLiquidityTooLow();
-
-        _safeApprove(p.onBehalfOf, token0, POSITION_MANAGER, 0, 24);
-        _safeApprove(p.onBehalfOf, token1, POSITION_MANAGER, 0, 25);
-
-        _requireOwnedBy(p.onBehalfOf, tokenId);
     }
 
     /// @inheritdoc IYieldHandler
@@ -652,36 +657,45 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         }
     }
 
-    /// @dev Module-mediated NPM mint; the (tokenId, liquidity, amount0,
-    ///      amount1) return shape is shared by both position managers.
-    function _safeMintLp(
-        address _onBehalfOf,
-        bytes memory lpPoolParam,
-        int24 tickLower,
-        int24 tickUpper,
-        uint256 amount0Desired,
-        uint256 amount1Desired,
-        uint256 amount0Min,
-        uint256 amount1Min,
-        uint256 deadline
-    ) internal returns (uint256 tokenId, uint128 liquidityMinted, uint128 amount0Used, uint128 amount1Used) {
-        bytes memory mintCall = _buildMintCalldata(
-            lpPoolParam,
-            tickLower,
-            tickUpper,
-            amount0Desired,
-            amount1Desired,
-            amount0Min,
-            amount1Min,
-            _onBehalfOf,
-            deadline
-        );
-        bytes memory ret = _safeExec(_onBehalfOf, POSITION_MANAGER, mintCall, 4);
+    /// @dev The mint half shared by `openLp` and `openLpInKind`: approve the
+    ///      position manager for both sides, mint through the Safe, enforce the
+    ///      per-protocol liquidity floor, reset both allowances, and confirm the
+    ///      Safe owns the new NFT. The (tokenId, liquidity, amount0, amount1)
+    ///      mint return shape is shared by both position managers.
+    function _mintFromAmounts(
+        address token0,
+        address token1,
+        MintArgs memory a
+    ) internal returns (uint256 tokenId, uint128 used0, uint128 used1) {
+        _safeApprove(a.onBehalfOf, token0, POSITION_MANAGER, a.amount0, 22);
+        _safeApprove(a.onBehalfOf, token1, POSITION_MANAGER, a.amount1, 23);
 
-        uint256 amount0Out;
-        uint256 amount1Out;
-        (tokenId, liquidityMinted, amount0Out, amount1Out) = abi.decode(ret, (uint256, uint128, uint256, uint256));
-        amount0Used = amount0Out.toUint128();
-        amount1Used = amount1Out.toUint128();
+        bytes memory mintCall = _buildMintCalldata(
+            a.lpPoolParam,
+            a.tickLower,
+            a.tickUpper,
+            a.amount0,
+            a.amount1,
+            a.mintAmount0Min,
+            a.mintAmount1Min,
+            a.onBehalfOf,
+            a.deadline
+        );
+        bytes memory ret = _safeExec(a.onBehalfOf, POSITION_MANAGER, mintCall, 4);
+
+        uint128 liquidityMinted;
+        {
+            uint256 amount0Out;
+            uint256 amount1Out;
+            (tokenId, liquidityMinted, amount0Out, amount1Out) = abi.decode(ret, (uint256, uint128, uint256, uint256));
+            used0 = amount0Out.toUint128();
+            used1 = amount1Out.toUint128();
+        }
+        if (liquidityMinted < _yieldStorage().minPositionLiquidity[PROTOCOL]) revert PositionLiquidityTooLow();
+
+        _safeApprove(a.onBehalfOf, token0, POSITION_MANAGER, 0, 24);
+        _safeApprove(a.onBehalfOf, token1, POSITION_MANAGER, 0, 25);
+
+        _requireOwnedBy(a.onBehalfOf, tokenId);
     }
 }

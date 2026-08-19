@@ -83,6 +83,21 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     ///         against the amounts actually consumed.
     error MintAmountBelowMin();
 
+    /// @dev Inputs for `_mintFromAmounts`, the mint half shared by `openLp`
+    ///      and `openLpInKind`. Grouped in a struct so the shared helper takes
+    ///      three arguments instead of ten — the flat form pushes both callers
+    ///      past the stack limit once coverage instrumentation is layered on.
+    struct MintArgs {
+        address onBehalfOf;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 amount0;
+        uint256 amount1;
+        uint256 mintAmount0Min;
+        uint256 mintAmount1Min;
+        uint256 deadline;
+    }
+
     modifier onlyDelegatecall() {
         if (address(this) == __self) revert OnlyDelegatecall();
         _;
@@ -135,51 +150,23 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         uint256 desired0 = _acquireSide(p, key.currency0, half0, p.swap0, 41, 42, 43, 44, 45);
         uint256 desired1 = _acquireSide(p, key.currency1, half1, p.swap1, 46, 47, 48, 49, 50);
 
-        // Mint takes a liquidity amount, so derive it from the post-swap pool
-        // price (the leg swaps above moved it) and the acquired amounts.
-        uint128 liquidity;
-        {
-            (uint160 sqrtPriceX96, , , ) = STATE_VIEW.getSlot0(keccak256(p.lpPoolParam));
-            liquidity = LiquidityAmounts.getLiquidityForAmounts(
-                sqrtPriceX96,
-                TickMath.getSqrtPriceAtTick(p.tickLower),
-                TickMath.getSqrtPriceAtTick(p.tickUpper),
-                desired0,
-                desired1
-            );
-        }
-        if (liquidity == 0 || liquidity < _yieldStorage().minPositionLiquidity[PROTOCOL]) {
-            revert PositionLiquidityTooLow();
-        }
-
-        // Two-step Permit2 approvals for the ERC20 sides (native rides as value).
-        if (key.currency0 != NATIVE) {
-            _safeApprove(p.onBehalfOf, key.currency0, address(PERMIT2), desired0, 51);
-            _permit2Approve(p.onBehalfOf, key.currency0, address(POSITION_MANAGER), desired0, p.deadline, 52);
-        }
-        _safeApprove(p.onBehalfOf, key.currency1, address(PERMIT2), desired1, 53);
-        _permit2Approve(p.onBehalfOf, key.currency1, address(POSITION_MANAGER), desired1, p.deadline, 54);
-
-        // `modifyLiquidities` returns nothing: capture the id before the mint
-        // (atomic within this tx) and measure consumption as balance deltas.
-        tokenId = POSITION_MANAGER.nextTokenId();
-        uint256 bal0Before = _balanceOf(key.currency0, p.onBehalfOf);
-        uint256 bal1Before = _balanceOf(key.currency1, p.onBehalfOf);
-
-        _safeMintLp(p.onBehalfOf, key, p.tickLower, p.tickUpper, liquidity, desired0, desired1, p.deadline);
-
-        if (key.currency0 != NATIVE) {
-            _permit2Approve(p.onBehalfOf, key.currency0, address(POSITION_MANAGER), 0, 0, 56);
-            _safeApprove(p.onBehalfOf, key.currency0, address(PERMIT2), 0, 57);
-        }
-        _permit2Approve(p.onBehalfOf, key.currency1, address(POSITION_MANAGER), 0, 0, 58);
-        _safeApprove(p.onBehalfOf, key.currency1, address(PERMIT2), 0, 59);
-
-        used0 = (bal0Before - _balanceOf(key.currency0, p.onBehalfOf)).toUint128();
-        used1 = (bal1Before - _balanceOf(key.currency1, p.onBehalfOf)).toUint128();
-        if (used0 < p.mintAmount0Min || used1 < p.mintAmount1Min) revert MintAmountBelowMin();
-
-        _requireOwnedBy(p.onBehalfOf, tokenId);
+        // The leg swaps above moved the pool price, so the mint must price
+        // against a FRESH read — not the one `_validatePoolReady` returned.
+        (uint160 sqrtPriceX96, , , ) = STATE_VIEW.getSlot0(keccak256(p.lpPoolParam));
+        (tokenId, used0, used1) = _mintFromAmounts(
+            key,
+            sqrtPriceX96,
+            MintArgs({
+                onBehalfOf: p.onBehalfOf,
+                tickLower: p.tickLower,
+                tickUpper: p.tickUpper,
+                amount0: desired0,
+                amount1: desired1,
+                mintAmount0Min: p.mintAmount0Min,
+                mintAmount1Min: p.mintAmount1Min,
+                deadline: p.deadline
+            })
+        );
 
         // Value each leg at its just-executed swap rate (identity for USDC).
         basisUsd6 = (_legValueUsdc(key.currency0, used0, half0, desired0) +
@@ -325,42 +312,72 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             _safeExecValue(p.onBehalfOf, address(WETH), 0, abi.encodeCall(IWETH9.withdraw, (p.amount0)), 74);
         }
 
+        // No swaps ran, so the price `_validatePoolReady` read is still live.
+        (tokenId, used0, used1) = _mintFromAmounts(
+            key,
+            sqrtPriceX96,
+            MintArgs({
+                onBehalfOf: p.onBehalfOf,
+                tickLower: p.tickLower,
+                tickUpper: p.tickUpper,
+                amount0: p.amount0,
+                amount1: p.amount1,
+                mintAmount0Min: p.mintAmount0Min,
+                mintAmount1Min: p.mintAmount1Min,
+                deadline: p.deadline
+            })
+        );
+    }
+
+    /// @dev The mint half shared by `openLp` and `openLpInKind`. Derives the
+    ///      liquidity for `amount0/amount1` at `sqrtPriceX96`, grants the
+    ///      two-step Permit2 allowances (a native side rides as call value and
+    ///      needs none), mints, resets BOTH allowance hops, and reports what
+    ///      the mint actually consumed. `modifyLiquidities` returns nothing, so
+    ///      the token id comes from `nextTokenId()` before the mint (atomic
+    ///      within this tx) and consumption is measured as Safe balance deltas.
+    function _mintFromAmounts(
+        PoolKey memory key,
+        uint160 sqrtPriceX96,
+        MintArgs memory a
+    ) internal returns (uint256 tokenId, uint128 used0, uint128 used1) {
         uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
             sqrtPriceX96,
-            TickMath.getSqrtPriceAtTick(p.tickLower),
-            TickMath.getSqrtPriceAtTick(p.tickUpper),
-            p.amount0,
-            p.amount1
+            TickMath.getSqrtPriceAtTick(a.tickLower),
+            TickMath.getSqrtPriceAtTick(a.tickUpper),
+            a.amount0,
+            a.amount1
         );
         if (liquidity == 0 || liquidity < _yieldStorage().minPositionLiquidity[PROTOCOL]) {
             revert PositionLiquidityTooLow();
         }
 
+        bool native0 = key.currency0 == NATIVE;
         if (!native0) {
-            _safeApprove(p.onBehalfOf, key.currency0, address(PERMIT2), p.amount0, 51);
-            _permit2Approve(p.onBehalfOf, key.currency0, address(POSITION_MANAGER), p.amount0, p.deadline, 52);
+            _safeApprove(a.onBehalfOf, key.currency0, address(PERMIT2), a.amount0, 51);
+            _permit2Approve(a.onBehalfOf, key.currency0, address(POSITION_MANAGER), a.amount0, a.deadline, 52);
         }
-        _safeApprove(p.onBehalfOf, key.currency1, address(PERMIT2), p.amount1, 53);
-        _permit2Approve(p.onBehalfOf, key.currency1, address(POSITION_MANAGER), p.amount1, p.deadline, 54);
+        _safeApprove(a.onBehalfOf, key.currency1, address(PERMIT2), a.amount1, 53);
+        _permit2Approve(a.onBehalfOf, key.currency1, address(POSITION_MANAGER), a.amount1, a.deadline, 54);
 
         tokenId = POSITION_MANAGER.nextTokenId();
-        uint256 bal0Before = _balanceOf(key.currency0, p.onBehalfOf);
-        uint256 bal1Before = _balanceOf(key.currency1, p.onBehalfOf);
+        uint256 bal0Before = _balanceOf(key.currency0, a.onBehalfOf);
+        uint256 bal1Before = _balanceOf(key.currency1, a.onBehalfOf);
 
-        _safeMintLp(p.onBehalfOf, key, p.tickLower, p.tickUpper, liquidity, p.amount0, p.amount1, p.deadline);
+        _safeMintLp(a.onBehalfOf, key, a.tickLower, a.tickUpper, liquidity, a.amount0, a.amount1, a.deadline);
 
         if (!native0) {
-            _permit2Approve(p.onBehalfOf, key.currency0, address(POSITION_MANAGER), 0, 0, 56);
-            _safeApprove(p.onBehalfOf, key.currency0, address(PERMIT2), 0, 57);
+            _permit2Approve(a.onBehalfOf, key.currency0, address(POSITION_MANAGER), 0, 0, 56);
+            _safeApprove(a.onBehalfOf, key.currency0, address(PERMIT2), 0, 57);
         }
-        _permit2Approve(p.onBehalfOf, key.currency1, address(POSITION_MANAGER), 0, 0, 58);
-        _safeApprove(p.onBehalfOf, key.currency1, address(PERMIT2), 0, 59);
+        _permit2Approve(a.onBehalfOf, key.currency1, address(POSITION_MANAGER), 0, 0, 58);
+        _safeApprove(a.onBehalfOf, key.currency1, address(PERMIT2), 0, 59);
 
-        used0 = (bal0Before - _balanceOf(key.currency0, p.onBehalfOf)).toUint128();
-        used1 = (bal1Before - _balanceOf(key.currency1, p.onBehalfOf)).toUint128();
-        if (used0 < p.mintAmount0Min || used1 < p.mintAmount1Min) revert MintAmountBelowMin();
+        used0 = (bal0Before - _balanceOf(key.currency0, a.onBehalfOf)).toUint128();
+        used1 = (bal1Before - _balanceOf(key.currency1, a.onBehalfOf)).toUint128();
+        if (used0 < a.mintAmount0Min || used1 < a.mintAmount1Min) revert MintAmountBelowMin();
 
-        _requireOwnedBy(p.onBehalfOf, tokenId);
+        _requireOwnedBy(a.onBehalfOf, tokenId);
     }
 
     /// @inheritdoc IYieldHandler
