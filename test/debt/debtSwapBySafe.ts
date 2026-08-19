@@ -318,7 +318,28 @@ describe("Safe wallet should debtSwap", function () {
         console.log("Modules:", await safeWallet.getModules());
     }
 
+    // Every asset a case in this suite can touch. A handler is allowed to
+    // decline part of a repayment (Aave's 1 wei floor, Fluid's minimum operate
+    // amount, Moonwell's cap at the debt); the module must hand what it
+    // declined back to the Safe rather than hold it for the next operation.
+    const SWEPT_ASSETS = {
+        USDC: USDC_ADDRESS,
+        EURC: EURC_ADDRESS,
+        GHO: GHO_ADDRESS,
+        DAI: DAI_ADDRESS,
+        sUSDS: sUSDS_ADDRESS,
+        WETH: WETH_ADDRESS,
+        cbETH: cbETH_ADDRESS,
+        cbBTC: cbBTC_ADDRESS,
+        wstETH: wstETH_ADDRESS,
+    };
+
     this.afterEach(async () => {
+        for (const [symbol, address] of Object.entries(SWEPT_ASSETS)) {
+            const token = new ethers.Contract(address, ERC20_ABI, ethers.provider);
+            expect(await token.balanceOf(safeModuleAddress), `${symbol} left in the module`).to.equal(0);
+        }
+
         // Force garbage collection to free memory
         if (global.gc) {
             global.gc();

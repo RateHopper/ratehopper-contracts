@@ -364,6 +364,13 @@ contract LeveragedPosition is Ownable, ReentrancyGuard, Pausable {
             require(successRepay, "Repay remaining amount failed");
         }
 
+        // Whatever the handler declined to repay (Aave's 1 wei floor, Fluid's
+        // minimum operate amount, Moonwell's cap at the debt) is the user's.
+        uint256 remainingDebtAsset = IERC20(decoded.debtAsset).balanceOf(address(this));
+        if (remainingDebtAsset > 0) {
+            IERC20(decoded.debtAsset).safeTransfer(decoded.onBehalfOf, remainingDebtAsset);
+        }
+
         emit LeveragedPositionCreated(
             decoded.onBehalfOf,
             decoded.protocol,

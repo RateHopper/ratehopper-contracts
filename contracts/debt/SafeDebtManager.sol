@@ -365,6 +365,14 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
             require(success, "Repay remainingBalance failed");
         }
 
+        // A handler may decline part of the repayment: Aave skips 1 wei, Fluid
+        // skips below its minimum operate amount, Moonwell caps at the debt.
+        // Whatever it left belongs to the user, not to the next operation.
+        uint256 toTokenRemainingBalance = toToken.balanceOf(address(this));
+        if (toTokenRemainingBalance > 0) {
+            toToken.safeTransfer(decoded.onBehalfOf, toTokenRemainingBalance);
+        }
+
         // send dust amount back to user if it exists
         uint256 fromTokenRemainingBalance = IERC20(decoded.fromAsset).balanceOf(address(this));
         if (fromTokenRemainingBalance > 0) {

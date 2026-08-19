@@ -29,6 +29,11 @@ RateHopper Contracts is a smart contract system that enables users to automatica
 
 ## Architecture
 
+See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for what the Safe-module
+custody model implies: why the performance fee is cooperative, why repayment
+residue is refunded, and why the pauser can delay exits but never trap a
+position.
+
 The system consists of several key components:
 
 1. **Governance & Access Control**:
