@@ -27,6 +27,7 @@ import {
     UNIV4_PM_ABI,
     UNIV4_STATE_VIEW_ABI,
     amountsForLiquidity,
+    decreaseMinimums,
     deployedManagerAddress,
     resolveOwnerKey,
     unpackV4PositionTicks,
@@ -64,8 +65,9 @@ const SLIPPAGE_BPS: bigint = 100n;
 const TICK_SPACING = 100;
 // UniV3 fee tier (100 / 500 / 3000) — used when PROTOCOL_NAME is "univ3"
 const FEE_TIER = 500;
-const DECREASE_AMOUNT0_MIN = 0n;
-const DECREASE_AMOUNT1_MIN = 0n;
+// Slippage applied to the decrease minima — the floor on the principal the
+// position manager must actually hand back.
+const DECREASE_SLIPPAGE_BPS: bigint = 100n;
 // Empty = use the ignition-deployed address for chain 8453
 const MANAGER_ADDRESS_OVERRIDE = "";
 // true = print the resolved params and calldata without executing
@@ -154,6 +156,15 @@ async function main() {
     if (swapAmountOutMin === 0n) swapAmountOutMin = 1n;
     const minUsdcOut = ((usdcOut + expectedSwapOut) * (10_000n - SLIPPAGE_BPS)) / 10_000n;
 
+    // Floors on the withdrawal itself, prorated by exitBps. Zero survives only
+    // on a side the position mathematically does not hold at this price.
+    const decrease = decreaseMinimums(
+        { sqrtPriceX96, tickLower, tickUpper },
+        liquidity,
+        BigInt(EXIT_BPS),
+        DECREASE_SLIPPAGE_BPS,
+    );
+
     const manager = await ethers.getContractAt("SafeYieldManager", MANAGER_ADDRESS);
     const maxSlippageBps: bigint = await manager.maxSlippageBps();
     if (SLIPPAGE_BPS === 0n || SLIPPAGE_BPS > maxSlippageBps) {
@@ -174,8 +185,8 @@ async function main() {
         swap0: { amountOutMin: swapAmountOutMin, expectedOut: expectedSwapOut, poolParam },
         swap1: { amountOutMin: 0, expectedOut: 0, poolParam: "0x" },
         slippageBps: SLIPPAGE_BPS,
-        decreaseAmount0Min: DECREASE_AMOUNT0_MIN,
-        decreaseAmount1Min: DECREASE_AMOUNT1_MIN,
+        decreaseAmount0Min: decrease.amount0Min,
+        decreaseAmount1Min: decrease.amount1Min,
         deadline,
         minUsdcOut,
     };
@@ -192,6 +203,12 @@ async function main() {
     console.log("- swapAmountOutMin (USDC):", ethers.formatUnits(swapAmountOutMin, 6));
     console.log("- minUsdcOut (USDC):", ethers.formatUnits(minUsdcOut, 6));
     console.log("- Slippage bps:", SLIPPAGE_BPS.toString());
+    console.log(
+        "- Decrease minimums (token0/token1):",
+        decrease.amount0Min.toString(),
+        "/",
+        decrease.amount1Min.toString(),
+    );
     console.log("- Deadline:", deadline.toString());
 
     const closeLpData = manager.interface.encodeFunctionData("closeLp", [protocol, closeParams]);

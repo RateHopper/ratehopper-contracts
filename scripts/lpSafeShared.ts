@@ -62,42 +62,41 @@ export function resolveOwnerKey(): string {
     );
 }
 
-export function alignTick(tick: number, spacing: number): number {
-    return Math.floor(tick / spacing) * spacing;
-}
+// Tick and liquidity math lives in ./lpMath as exact bigint ports of the
+// Uniswap libraries; re-exported here so existing script imports keep working
+// and every script provably shares ONE implementation.
+export {
+    alignTick,
+    decreaseMinimums,
+    getAmountsForLiquidity,
+    getLiquidityForAmounts,
+    getSqrtRatioAtTick,
+    mintMinimums,
+    switchMintMinimums,
+} from "./lpMath";
 
-export function sqrtRatioAtTick(tick: number): bigint {
-    return BigInt(Math.floor(Math.sqrt(1.0001 ** tick) * 2 ** 96));
-}
+import { getAmountsForLiquidity, getSqrtRatioAtTick } from "./lpMath";
 
-// Token amounts withdrawn when removing `liquidity` from [tickLower, tickUpper]
-// at the current price.
+/// Token amounts held by `liquidity` over [tickLower, tickUpper] at the current
+/// price. Thin tick-indexed wrapper over the sqrt-price form in ./lpMath.
 export function amountsForLiquidity(
     sqrtPriceX96: bigint,
     tickLower: number,
     tickUpper: number,
     liquidity: bigint,
 ): { amount0: bigint; amount1: bigint } {
-    const sqrtA = sqrtRatioAtTick(tickLower);
-    const sqrtB = sqrtRatioAtTick(tickUpper);
-    if (sqrtPriceX96 <= sqrtA) {
-        return { amount0: (liquidity * (sqrtB - sqrtA) * Q96) / (sqrtA * sqrtB), amount1: 0n };
-    }
-    if (sqrtPriceX96 >= sqrtB) {
-        return { amount0: 0n, amount1: (liquidity * (sqrtB - sqrtA)) / Q96 };
-    }
-    return {
-        amount0: (liquidity * (sqrtB - sqrtPriceX96) * Q96) / (sqrtPriceX96 * sqrtB),
-        amount1: (liquidity * (sqrtPriceX96 - sqrtA)) / Q96,
-    };
+    return getAmountsForLiquidity(
+        sqrtPriceX96,
+        getSqrtRatioAtTick(tickLower),
+        getSqrtRatioAtTick(tickUpper),
+        liquidity,
+    );
 }
 
 // HardhatEthersProvider does not implement waitForTransaction — poll instead.
 export async function waitForReceipt(
     provider: {
-        getTransactionReceipt(
-            hash: string,
-        ): Promise<{
+        getTransactionReceipt(hash: string): Promise<{
             status: number | null;
             blockNumber: number;
             logs: ReadonlyArray<{ address: string; topics: ReadonlyArray<string>; data: string }>;

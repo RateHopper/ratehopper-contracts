@@ -155,7 +155,11 @@ async function main() {
         if (earnedAero === 0n) throw new Error("No AERO earned yet — nothing to swap");
 
         const aeroUsdcPool = await clFactory.getPool(aeroT0, aeroT1, REWARD_TICK_SPACING);
-        const pool = new ethers.Contract(aeroUsdcPool, ["function slot0() view returns (uint160,int24,uint16,uint16,uint16,bool)"], provider);
+        const pool = new ethers.Contract(
+            aeroUsdcPool,
+            ["function slot0() view returns (uint160,int24,uint16,uint16,uint16,bool)"],
+            provider,
+        );
         const [sqrtP] = await pool.slot0();
         const sp = BigInt(sqrtP);
         // token0 = USDC (6dp), token1 = AERO (18dp): AERO(token1) -> USDC(token0)
@@ -250,8 +254,22 @@ async function main() {
         }
         if (parsed?.name !== "FeesCollected") continue;
         console.log("FeesCollected — tokenId:", parsed.args.tokenId.toString());
-        console.log("- token0:", parsed.args.token0, "collected:", parsed.args.collected0.toString(), "fee:", parsed.args.fee0.toString());
-        console.log("- token1:", parsed.args.token1, "collected:", parsed.args.collected1.toString(), "fee:", parsed.args.fee1.toString());
+        console.log(
+            "- token0:",
+            parsed.args.token0,
+            "collected:",
+            parsed.args.collected0.toString(),
+            "fee:",
+            parsed.args.fee0.toString(),
+        );
+        console.log(
+            "- token1:",
+            parsed.args.token1,
+            "collected:",
+            parsed.args.collected1.toString(),
+            "fee:",
+            parsed.args.fee1.toString(),
+        );
         return;
     }
     console.log("No FeesCollected event found in the receipt — check the tx on Basescan.");

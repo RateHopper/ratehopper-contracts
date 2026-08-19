@@ -29,6 +29,8 @@ import {
     UNIV4_STATE_VIEW_ABI,
     alignTick,
     amountsForLiquidity,
+    decreaseMinimums,
+    switchMintMinimums,
     deployedManagerAddress,
     resolveOwnerKey,
     unpackV4PositionTicks,
@@ -68,10 +70,10 @@ const TARGET_V4_HOOKS = "0x0000000000000000000000000000000000000000";
 // Half-width in raw ticks. Zero means 10 * target pool tick spacing.
 const TARGET_TICK_RANGE = 0;
 
-const DECREASE_AMOUNT0_MIN = 0n;
-const DECREASE_AMOUNT1_MIN = 0n;
-const MINT_AMOUNT0_MIN = 0n;
-const MINT_AMOUNT1_MIN = 0n;
+// Slippage applied to the withdraw-leg floors, and to the destination mint
+// floors that are derived from them.
+const DECREASE_SLIPPAGE_BPS: bigint = 100n;
+const MINT_SLIPPAGE_BPS: bigint = 100n;
 const MANAGER_ADDRESS_OVERRIDE = "";
 // Keep true until the calldata and estimates have been reviewed.
 const DRY_RUN = true;
@@ -230,6 +232,14 @@ async function main() {
     const target = await resolvePool(TO_PROTOCOL_NAME, targetValue);
 
     const withdrawn = amountsForLiquidity(source.sqrtPriceX96, sourceTickLower, sourceTickUpper, liquidity);
+    // The switch is in kind, so the withdraw leg's floors ARE the budget the
+    // destination mint has to work with.
+    const decrease = decreaseMinimums(
+        { sqrtPriceX96: source.sqrtPriceX96, tickLower: sourceTickLower, tickUpper: sourceTickUpper },
+        liquidity,
+        10_000n,
+        DECREASE_SLIPPAGE_BPS,
+    );
     const targetTickRange = TARGET_TICK_RANGE || target.tickSpacing * 10;
     const targetAlignedTick = alignTick(target.tick, target.tickSpacing);
     const tickLower = alignTick(targetAlignedTick - targetTickRange, target.tickSpacing);
@@ -243,17 +253,27 @@ async function main() {
     const pinnedHandler: string = await manager.positionHandlerOf(source.protocol, TOKEN_ID);
     if (pinnedHandler === ethers.ZeroAddress) throw new Error(`Token ${TOKEN_ID} is not managed by SafeYieldManager`);
 
+    // Size the mint floors from the WORST accepted withdrawal, never from the
+    // optimistic estimate: a transaction that satisfies the withdraw leg must
+    // not then revert on the open leg.
+    const mint = switchMintMinimums(
+        { sqrtPriceX96: target.sqrtPriceX96, tickLower, tickUpper },
+        decrease.amount0Min,
+        decrease.amount1Min,
+        MINT_SLIPPAGE_BPS,
+    );
+
     const block = await provider.getBlock("latest");
     const deadline = BigInt(block!.timestamp) + 1_200n;
     const params = {
         onBehalfOf: SAFE_ADDRESS,
         tokenId: TOKEN_ID,
-        decreaseAmount0Min: DECREASE_AMOUNT0_MIN,
-        decreaseAmount1Min: DECREASE_AMOUNT1_MIN,
+        decreaseAmount0Min: decrease.amount0Min,
+        decreaseAmount1Min: decrease.amount1Min,
         tickLower,
         tickUpper,
-        mintAmount0Min: MINT_AMOUNT0_MIN,
-        mintAmount1Min: MINT_AMOUNT1_MIN,
+        mintAmount0Min: mint.amount0Min,
+        mintAmount1Min: mint.amount1Min,
         lpPoolParam: target.poolParam,
         deadline,
     };
@@ -268,6 +288,13 @@ async function main() {
     console.log("- Target range:", tickLower, "..", tickUpper);
     console.log("- Estimated withdrawal (WETH/ETH):", ethers.formatEther(withdrawn.amount0));
     console.log("- Estimated withdrawal (USDC):", ethers.formatUnits(withdrawn.amount1, 6));
+    console.log(
+        "- Decrease minimums (token0/token1):",
+        decrease.amount0Min.toString(),
+        "/",
+        decrease.amount1Min.toString(),
+    );
+    console.log("- Mint minimums (token0/token1):", mint.amount0Min.toString(), "/", mint.amount1Min.toString());
     console.log("- Deadline:", deadline.toString());
 
     const switchLpData = manager.interface.encodeFunctionData("switchLp", [source.protocol, target.protocol, params]);

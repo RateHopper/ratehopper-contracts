@@ -23,6 +23,7 @@ import {
     UNIV4_STATE_VIEW_ABI,
     alignTick,
     deployedManagerAddress,
+    mintMinimums,
     resolveOwnerKey,
     waitForReceipt,
 } from "./lpSafeShared";
@@ -68,8 +69,9 @@ const V4_USE_NATIVE_ETH = true;
 const V4_HOOKS = "0x0000000000000000000000000000000000000000";
 // Half-width of the range in raw ticks; 0 = default (10 * pool tick spacing)
 const TICK_RANGE = 0;
-const MINT_AMOUNT0_MIN = 0n;
-const MINT_AMOUNT1_MIN = 0n;
+// Slippage applied to the mint minima, derived from the worst accepted swap
+// output rather than the optimistic spot estimate.
+const MINT_SLIPPAGE_BPS: bigint = 100n;
 // Empty = use the ignition-deployed address for chain 8453
 const MANAGER_ADDRESS_OVERRIDE = "";
 // true = print the resolved params and calldata without executing
@@ -161,6 +163,16 @@ async function main() {
         throw new Error(`Safe USDC balance ${ethers.formatUnits(safeUsdcBalance, 6)} < requested ${USDC_AMOUNT}`);
     }
 
+    // Mint minima from the CONSERVATIVE budget: if the swap lands exactly on
+    // its floor, the mint must still clear its own. Sizing them off
+    // `expectedSwapOut` instead would revert honest transactions.
+    const mint = mintMinimums(
+        { sqrtPriceX96: BigInt(sqrtPriceX96), tickLower, tickUpper },
+        swapAmountOutMin,
+        halfUsdc,
+        MINT_SLIPPAGE_BPS,
+    );
+
     const block = await provider.getBlock("latest");
     const deadline = BigInt(block!.timestamp) + 1_200n;
 
@@ -169,8 +181,8 @@ async function main() {
         usdcAmount,
         tickLower,
         tickUpper,
-        mintAmount0Min: MINT_AMOUNT0_MIN,
-        mintAmount1Min: MINT_AMOUNT1_MIN,
+        mintAmount0Min: mint.amount0Min,
+        mintAmount1Min: mint.amount1Min,
         // WETH is token0 on Base; the USDC side needs no swap leg.
         swap0: { amountOutMin: swapAmountOutMin, expectedOut: expectedSwapOut, poolParam },
         swap1: { amountOutMin: 0, expectedOut: 0, poolParam: "0x" },
@@ -190,6 +202,8 @@ async function main() {
     console.log("- expectedSwapOut (WETH):", ethers.formatEther(expectedSwapOut));
     console.log("- swapAmountOutMin (WETH):", ethers.formatEther(swapAmountOutMin));
     console.log("- Slippage bps:", SLIPPAGE_BPS.toString());
+    console.log("- Mint minimums (token0/token1):", mint.amount0Min.toString(), "/", mint.amount1Min.toString());
+    console.log("- Mint expected consumed:", mint.expected0.toString(), "/", mint.expected1.toString());
     console.log("- Deadline:", deadline.toString());
 
     const openLpData = manager.interface.encodeFunctionData("openLp", [protocol, openParams]);
