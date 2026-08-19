@@ -326,8 +326,14 @@ contract MockStakePool {
         IERC721(NFT).transferFrom(msg.sender, address(this), tokenId);
     }
 
+    /// @dev Mirrors a real gauge: withdrawing also pays out everything accrued,
+    ///      so close/switch paths must settle that reward like a collect does.
     function withdraw(uint256 tokenId) external {
         IERC721(NFT).transferFrom(address(this), msg.sender, tokenId);
+        if (rewardToken != address(0) && rewardAmount > 0) {
+            emit RewardClaimed(tokenId, msg.sender);
+            IERC20(rewardToken).transfer(msg.sender, rewardAmount);
+        }
         if (msg.sender.code.length > 0) {
             require(
                 IERC721Receiver(msg.sender).onERC721Received(address(this), address(this), tokenId, "") ==

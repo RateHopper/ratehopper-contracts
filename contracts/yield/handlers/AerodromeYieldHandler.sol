@@ -70,9 +70,20 @@ contract AerodromeYieldHandler is BaseYieldHandler {
     ///      pin itself survives here and is cleared only by a full close.
     function _unstakeIfStaked(address _onBehalfOf, uint256 tokenId) internal override returns (address stakePool) {
         stakePool = _stakePoolOf(tokenId);
-        if (stakePool != address(0)) {
-            _safeExec(_onBehalfOf, stakePool, abi.encodeCall(IStakePool.withdraw, (tokenId)), 30);
-        }
+        if (stakePool == address(0)) return address(0);
+
+        // Withdrawing from a gauge pays out everything accrued so far. That is the
+        // same emission yield an explicit collect claims, so it is settled through
+        // the same fee path here — otherwise a close or a switch would be a way to
+        // take emissions without paying feeCollectBps. Callers run this BEFORE
+        // their own balance snapshots, so the reward can never leak into the close
+        // swap delta or the performance-fee valuation.
+        // A gauge that reports no reward token gets no snapshot: an exit must not
+        // brick on a misbehaving gauge, and `_settleStakedReward` no-ops on zero.
+        address rewardToken = IStakePool(stakePool).rewardToken();
+        uint256 rewardBefore = rewardToken == address(0) ? 0 : IERC20(rewardToken).balanceOf(_onBehalfOf);
+        _safeExec(_onBehalfOf, stakePool, abi.encodeCall(IStakePool.withdraw, (tokenId)), 30);
+        _settleStakedReward(_onBehalfOf, tokenId, rewardToken, rewardBefore);
     }
 
     /// @dev When `tokenId` is staked in its pool's stakePool, claim its accrued AERO
@@ -82,15 +93,15 @@ contract AerodromeYieldHandler is BaseYieldHandler {
     ///      the base can swap exactly the claimed amount to USDC.
     function _collectStakedRewardIfStaked(
         address _onBehalfOf,
-        uint256 tokenId,
-        bool captureReward
+        uint256 tokenId
     ) internal override returns (bool wasStaked, address rewardToken, uint256 rewardBalanceBefore) {
         address stakePool = _stakePoolOf(tokenId);
         if (stakePool == address(0)) return (false, address(0), 0);
-        if (captureReward) {
-            rewardToken = IStakePool(stakePool).rewardToken();
-            rewardBalanceBefore = IERC20(rewardToken).balanceOf(_onBehalfOf);
-        }
+        // Snapshot unconditionally: the claim is fee-bearing even when the caller
+        // does not want it swapped, so the amount must always be measurable. A
+        // gauge reporting no reward token yields no snapshot and no settlement.
+        rewardToken = IStakePool(stakePool).rewardToken();
+        rewardBalanceBefore = rewardToken == address(0) ? 0 : IERC20(rewardToken).balanceOf(_onBehalfOf);
         _safeExec(_onBehalfOf, stakePool, abi.encodeCall(IStakePool.getReward, (tokenId)), 37);
         return (true, rewardToken, rewardBalanceBefore);
     }

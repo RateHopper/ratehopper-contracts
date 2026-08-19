@@ -1141,8 +1141,19 @@ describe("SafeYieldManager", function () {
         });
 
         it("swaps the claimed stakePool reward to USDC when swapRewardToUsdc is set", async function () {
-            const { manager, deployer, operatorEOA, safeAddr, usdc, clNpm, clPool, clFactory, clRouter, voter } =
-                await loadFixture(deployYieldManagerHarness);
+            const {
+                manager,
+                deployer,
+                operatorEOA,
+                safeAddr,
+                treasury,
+                usdc,
+                clNpm,
+                clPool,
+                clFactory,
+                clRouter,
+                voter,
+            } = await loadFixture(deployYieldManagerHarness);
 
             const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
 
@@ -1180,10 +1191,15 @@ describe("SafeYieldManager", function () {
             await expect(collectTx).to.emit(stakePool, "RewardClaimed").withArgs(1n, safeAddr);
             await expect(collectTx).to.not.emit(manager, "FeesCollected");
 
-            // The whole claimed reward was swapped: the Safe keeps no AERO, the
-            // router took it, and the Safe received the USDC output.
+            // M-03: emissions are yield, so the claim pays feeCollectBps FIRST and
+            // only the net reaches the router — the Safe keeps no AERO either way.
+            const rewardFee = (500_000n * COLLECT_FEE_BPS) / 10_000n;
+            await expect(collectTx)
+                .to.emit(manager, "StakedRewardCollected")
+                .withArgs(safeAddr, AERODROME, 1n, aeroAddr, 500_000n, rewardFee);
+            expect(await aero.balanceOf(treasury.address)).to.equal(rewardFee);
             expect(await aero.balanceOf(safeAddr)).to.equal(0);
-            expect(await aero.balanceOf(await clRouter.getAddress())).to.equal(500_000n);
+            expect(await aero.balanceOf(await clRouter.getAddress())).to.equal(500_000n - rewardFee);
             expect((await usdc.balanceOf(safeAddr)) - safeUsdcBefore).to.equal(123_456n);
             expect(await clNpm.ownerOf(1)).to.equal(stakePoolAddr);
         });
@@ -1240,15 +1256,13 @@ describe("SafeYieldManager", function () {
             await (await clRouter.setOutput(300_000n)).wait();
 
             await expect(
-                manager
-                    .connect(operatorEOA)
-                    .closeLp(
-                        AERODROME,
-                        closeParams(safeAddr, 1, TICK_SPACING, {
-                            exitBps: 5_000,
-                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
-                        }),
-                    ),
+                manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, {
+                        exitBps: 5_000,
+                        swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                    }),
+                ),
             ).to.emit(manager, "PositionClosed");
 
             expect(await clNpm.ownerOf(1)).to.equal(stakePoolAddr);
@@ -1266,15 +1280,13 @@ describe("SafeYieldManager", function () {
             await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
             await (await clRouter.setOutput(300_000n)).wait();
             await (
-                await manager
-                    .connect(operatorEOA)
-                    .closeLp(
-                        AERODROME,
-                        closeParams(safeAddr, 1, TICK_SPACING, {
-                            exitBps: 5_000,
-                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
-                        }),
-                    )
+                await manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, {
+                        exitBps: 5_000,
+                        swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                    }),
+                )
             ).wait();
 
             // Still staked, so a later collect still routes to the stakePool.
@@ -1300,15 +1312,13 @@ describe("SafeYieldManager", function () {
             await (await clRouter.setOutput(300_000n)).wait();
 
             await expect(
-                manager
-                    .connect(operatorEOA)
-                    .closeLp(
-                        AERODROME,
-                        closeParams(safeAddr, 1, TICK_SPACING, {
-                            exitBps: 5_000,
-                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
-                        }),
-                    ),
+                manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, {
+                        exitBps: 5_000,
+                        swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                    }),
+                ),
             ).to.emit(manager, "PositionClosed");
 
             expect(await clNpm.ownerOf(1)).to.equal(safeAddr);
@@ -1328,15 +1338,13 @@ describe("SafeYieldManager", function () {
             await (await clRouter.setOutput(300_000n)).wait();
 
             await (
-                await manager
-                    .connect(operatorEOA)
-                    .closeLp(
-                        AERODROME,
-                        closeParams(safeAddr, 1, TICK_SPACING, {
-                            exitBps: 5_000,
-                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
-                        }),
-                    )
+                await manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, {
+                        exitBps: 5_000,
+                        swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                    }),
+                )
             ).wait();
 
             // The rotation must not move the user's position to the new gauge.
@@ -1356,15 +1364,13 @@ describe("SafeYieldManager", function () {
             await (await stakePool.setDepositFails(true)).wait();
 
             await expect(
-                manager
-                    .connect(operatorEOA)
-                    .closeLp(
-                        AERODROME,
-                        closeParams(safeAddr, 1, TICK_SPACING, {
-                            exitBps: 5_000,
-                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
-                        }),
-                    ),
+                manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, {
+                        exitBps: 5_000,
+                        swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                    }),
+                ),
             ).to.be.reverted;
 
             // Nothing moved: still staked in the same pool, same liquidity, same basis.
@@ -1372,6 +1378,213 @@ describe("SafeYieldManager", function () {
             expect((await clNpm.positionsData(1))[4]).to.equal(liquidityBefore);
             expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(basisBefore);
             expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(stakePoolAddr);
+        });
+
+        // M-03: emissions are fee-bearing yield on EVERY route that can claim them
+        // — an explicit collect, and the gauge withdrawal inside a close or switch.
+        describe("staked reward fee (M-03)", function () {
+            const REWARD = 500_000n;
+            const REWARD_FEE = (REWARD * COLLECT_FEE_BPS) / 10_000n;
+
+            /// Stake a position and arm its gauge with `rewardToken`/`REWARD`.
+            async function stakeWithReward(f: any, rewardToken?: any) {
+                const { manager, operatorEOA, safeAddr, clNpm, clPool, voter } = f;
+                const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+                let reward = rewardToken;
+                if (!reward) {
+                    const ERC = await ethers.getContractFactory("MockERC20");
+                    reward = await ERC.deploy("Mock Aero", "AERO", 18);
+                    await reward.waitForDeployment();
+                }
+                const rewardAddr = await reward.getAddress();
+                await (await reward.mint(stakePoolAddr, 10n ** 24n)).wait();
+                await (await stakePool.setReward(rewardAddr, REWARD)).wait();
+                await manager
+                    .connect(operatorEOA)
+                    .openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
+                return { stakePool, stakePoolAddr, reward, rewardAddr };
+            }
+
+            it("charges the collect fee on a claim even when the reward is not swapped", async function () {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, operatorEOA, safeAddr, treasury } = f;
+                const { reward, rewardAddr } = await stakeWithReward(f);
+
+                await expect(
+                    manager.connect(operatorEOA).collectLp(AERODROME, collectParams(safeAddr, 1, TICK_SPACING)),
+                )
+                    .to.emit(manager, "StakedRewardCollected")
+                    .withArgs(safeAddr, AERODROME, 1n, rewardAddr, REWARD, REWARD_FEE);
+
+                expect(await reward.balanceOf(treasury.address)).to.equal(REWARD_FEE);
+                expect(await reward.balanceOf(safeAddr)).to.equal(REWARD - REWARD_FEE);
+            });
+
+            it("taxes only the newly claimed delta, never a reward the Safe already held", async function () {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, operatorEOA, safeAddr, treasury } = f;
+                const { reward, rewardAddr } = await stakeWithReward(f);
+
+                // Pre-existing balance: not part of this claim, so not fee-bearing.
+                await (await reward.mint(safeAddr, 9_000_000n)).wait();
+
+                await expect(
+                    manager.connect(operatorEOA).collectLp(AERODROME, collectParams(safeAddr, 1, TICK_SPACING)),
+                )
+                    .to.emit(manager, "StakedRewardCollected")
+                    .withArgs(safeAddr, AERODROME, 1n, rewardAddr, REWARD, REWARD_FEE);
+
+                expect(await reward.balanceOf(treasury.address)).to.equal(REWARD_FEE);
+                expect(await reward.balanceOf(safeAddr)).to.equal(9_000_000n + REWARD - REWARD_FEE);
+            });
+
+            it("charges the reward paid out by the gauge on a full close", async function () {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, operatorEOA, safeAddr, treasury, clRouter } = f;
+                const { reward, rewardAddr } = await stakeWithReward(f);
+                await (await clRouter.setOutput(600_000n)).wait();
+
+                await expect(manager.connect(operatorEOA).closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING)))
+                    .to.emit(manager, "StakedRewardCollected")
+                    .withArgs(safeAddr, AERODROME, 1n, rewardAddr, REWARD, REWARD_FEE);
+
+                expect(await reward.balanceOf(treasury.address)).to.equal(REWARD_FEE);
+            });
+
+            it("keeps a USDC-denominated gauge reward out of the close's realized value", async function () {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, operatorEOA, safeAddr, treasury, usdc, clRouter } = f;
+                // Reward token == USDC is the sharpest probe: if the claim were
+                // settled after the close snapshot, it would inflate
+                // currentValueUsd6 and overstate the performance fee.
+                await stakeWithReward(f, usdc);
+                await (await clRouter.setOutput(600_000n)).wait();
+
+                await expect(manager.connect(operatorEOA).closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING)))
+                    .to.emit(manager, "PositionClosed")
+                    .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
+
+                // Treasury got the reward fee, and only the LP value drove the perf fee.
+                expect(await usdc.balanceOf(treasury.address)).to.equal(REWARD_FEE + 10_000n);
+            });
+
+            it("charges a partial close's gauge reward exactly once and restakes", async function () {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, operatorEOA, safeAddr, treasury, clNpm, clRouter } = f;
+                const { reward, stakePoolAddr } = await stakeWithReward(f);
+                await (await clRouter.setOutput(300_000n)).wait();
+
+                await (
+                    await manager.connect(operatorEOA).closeLp(
+                        AERODROME,
+                        closeParams(safeAddr, 1, TICK_SPACING, {
+                            exitBps: 5_000,
+                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                        }),
+                    )
+                ).wait();
+
+                // One withdrawal → one claim → one fee. The restake must not claim again.
+                expect(await reward.balanceOf(treasury.address)).to.equal(REWARD_FEE);
+                expect(await clNpm.ownerOf(1)).to.equal(stakePoolAddr);
+            });
+
+            it("charges a switch's gauge reward once and keeps it out of the moved amounts", async function () {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, operatorEOA, safeAddr, treasury, usdc } = f;
+                // USDC reward again: the switch moves token amounts in kind, so a
+                // leaked reward would show up as an inflated withdrawn1.
+                await stakeWithReward(f, usdc);
+
+                await expect(
+                    manager.connect(operatorEOA).switchLp(AERODROME, UNISWAP_V3, {
+                        onBehalfOf: safeAddr,
+                        tokenId: 1,
+                        decreaseAmount0Min: 0,
+                        decreaseAmount1Min: 0,
+                        tickLower: -100,
+                        tickUpper: 100,
+                        mintAmount0Min: 0,
+                        mintAmount1Min: 0,
+                        lpPoolParam: FEE_TIER,
+                        deadline: DEADLINE,
+                    }),
+                )
+                    .to.emit(manager, "PositionSwitched")
+                    .withArgs(safeAddr, AERODROME, UNISWAP_V3, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
+
+                expect(await usdc.balanceOf(treasury.address)).to.equal(REWARD_FEE);
+            });
+
+            it("handles a zero fee rate, a fee that rounds to zero, and no reward at all", async function () {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, timelock, operatorEOA, safeAddr, treasury } = f;
+                const { stakePool, reward, rewardAddr } = await stakeWithReward(f);
+
+                // Rounds to zero: 3 * 250 / 10_000 == 0 — claimed, reported, untaxed.
+                await (await stakePool.setReward(rewardAddr, 3n)).wait();
+                await expect(
+                    manager.connect(operatorEOA).collectLp(AERODROME, collectParams(safeAddr, 1, TICK_SPACING)),
+                )
+                    .to.emit(manager, "StakedRewardCollected")
+                    .withArgs(safeAddr, AERODROME, 1n, rewardAddr, 3n, 0n);
+                expect(await reward.balanceOf(treasury.address)).to.equal(0);
+
+                // Zero reward: nothing claimed, so nothing to report.
+                await (await stakePool.setReward(rewardAddr, 0n)).wait();
+                await expect(
+                    manager.connect(operatorEOA).collectLp(AERODROME, collectParams(safeAddr, 1, TICK_SPACING)),
+                ).to.not.emit(manager, "StakedRewardCollected");
+
+                // Fee rate zero: the claim still lands, still reported, still untaxed.
+                await (await stakePool.setReward(rewardAddr, REWARD)).wait();
+                await (await timelockCall(timelock, manager, "setFeeCollectBps", [0])).wait();
+                await expect(
+                    manager.connect(operatorEOA).collectLp(AERODROME, collectParams(safeAddr, 1, TICK_SPACING)),
+                )
+                    .to.emit(manager, "StakedRewardCollected")
+                    .withArgs(safeAddr, AERODROME, 1n, rewardAddr, REWARD, 0n);
+                expect(await reward.balanceOf(treasury.address)).to.equal(0);
+            });
+
+            it("waives the reward fee — without blocking the collect — when the treasury cannot receive it", async function () {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, operatorEOA, safeAddr, treasury } = f;
+                const { reward, rewardAddr } = await stakeWithReward(f);
+
+                // A token that REVERTS for the treasury (blacklist-style).
+                await (await reward.setRevertTransferTo(treasury.address)).wait();
+                const collectTx = manager
+                    .connect(operatorEOA)
+                    .collectLp(AERODROME, collectParams(safeAddr, 1, TICK_SPACING));
+                await expect(collectTx)
+                    .to.emit(manager, "CollectFeeTransferFailed")
+                    .withArgs(safeAddr, 1n, rewardAddr, REWARD_FEE);
+                await expect(collectTx)
+                    .to.emit(manager, "StakedRewardCollected")
+                    .withArgs(safeAddr, AERODROME, 1n, rewardAddr, REWARD, 0n);
+                expect(await reward.balanceOf(treasury.address)).to.equal(0);
+                expect(await reward.balanceOf(safeAddr)).to.equal(REWARD);
+            });
+
+            it("waives the reward fee on a silent false return and still closes", async function () {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, operatorEOA, safeAddr, treasury, clRouter } = f;
+                const { reward, rewardAddr } = await stakeWithReward(f);
+                await (await clRouter.setOutput(600_000n)).wait();
+
+                // A non-compliant token that returns false instead of reverting.
+                await (await reward.setFalseTransferTo(treasury.address)).wait();
+                const closeTx = manager.connect(operatorEOA).closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING));
+                await expect(closeTx)
+                    .to.emit(manager, "CollectFeeTransferFailed")
+                    .withArgs(safeAddr, 1n, rewardAddr, REWARD_FEE);
+                await expect(closeTx)
+                    .to.emit(manager, "StakedRewardCollected")
+                    .withArgs(safeAddr, AERODROME, 1n, rewardAddr, REWARD, 0n);
+                await expect(closeTx).to.emit(manager, "PositionClosed");
+                expect(await reward.balanceOf(treasury.address)).to.equal(0);
+            });
         });
     });
 

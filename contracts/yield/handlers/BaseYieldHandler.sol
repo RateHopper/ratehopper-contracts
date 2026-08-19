@@ -178,16 +178,68 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     }
 
     /// @dev Harvest stakePool rewards for a STAKED `tokenId` to the Safe and report
-    ///      whether the position was staked. With `captureReward`, also report the
-    ///      reward token and the Safe's pre-claim balance of it so the caller can
-    ///      swap exactly the claimed amount. Default: no stakePool → false.
-    ///      Aerodrome overrides it.
+    ///      whether the position was staked, plus the reward token and the Safe's
+    ///      pre-claim balance of it. The snapshot is taken UNCONDITIONALLY: the
+    ///      claimed delta is fee-bearing yield whether or not the caller asked to
+    ///      swap it. Default: no stakePool → false. Aerodrome overrides it.
     function _collectStakedRewardIfStaked(
         address /* _onBehalfOf */,
-        uint256 /* tokenId */,
-        bool /* captureReward */
+        uint256 /* tokenId */
     ) internal virtual returns (bool wasStaked, address rewardToken, uint256 rewardBalanceBefore) {
         return (false, address(0), 0);
+    }
+
+    /// @dev Charge `feeCollectBps` on emissions newly credited to the Safe since
+    ///      `balanceBefore`, and report what was claimed and what was actually
+    ///      paid. Every claim route funnels through here — an explicit collect and
+    ///      the gauge withdrawal inside a close or switch — so emissions can never
+    ///      reach a user untaxed. Measuring a delta (not a balance) leaves any
+    ///      reward the Safe already held alone.
+    ///
+    ///      A failed treasury transfer waives the fee instead of blocking the
+    ///      collect or exit, mirroring the LP-fee and performance-fee semantics;
+    ///      the emitted `feePaid` is then zero, so the event always states what
+    ///      really moved.
+    function _settleStakedReward(
+        address _onBehalfOf,
+        uint256 tokenId,
+        address rewardToken,
+        uint256 balanceBefore
+    ) internal returns (uint256 grossReward, uint256 feePaid) {
+        if (rewardToken == address(0)) return (0, 0);
+        grossReward = IERC20(rewardToken).balanceOf(_onBehalfOf) - balanceBefore;
+        if (grossReward == 0) return (0, 0);
+
+        YieldLayout storage $ = _yieldStorage();
+        uint256 fee = (grossReward * $.feeCollectBps) / 10_000;
+        if (fee > 0) {
+            if (_trySafeTokenTransfer(_onBehalfOf, rewardToken, $.treasury, fee)) {
+                feePaid = fee;
+            } else {
+                emit CollectFeeTransferFailed(_onBehalfOf, tokenId, rewardToken, fee);
+            }
+        }
+        emit StakedRewardCollected(_onBehalfOf, PROTOCOL, tokenId, rewardToken, grossReward, feePaid);
+    }
+
+    /// @dev Module-mediated ERC20 transfer OUT of the Safe that reports failure
+    ///      instead of reverting: accepts empty or canonical-true returndata and
+    ///      treats a false return, malformed returndata, or an inner revert as a
+    ///      failed transfer the caller must waive.
+    function _trySafeTokenTransfer(
+        address _onBehalfOf,
+        address token,
+        address to,
+        uint256 amount
+    ) internal returns (bool) {
+        (bool ok, bytes memory ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(
+            token,
+            0,
+            abi.encodeCall(IERC20.transfer, (to, amount)),
+            ISafe.Operation.Call
+        );
+        if (!ok) return false;
+        return TokenReturnLib.returnedTrue(ret);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -413,10 +465,14 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         // Opt-in: swap the claimed reward (e.g. AERO) to USDC through its leg.
         (bool wasStaked, address rewardToken, uint256 rewardBefore) = _collectStakedRewardIfStaked(
             p.onBehalfOf,
-            p.tokenId,
-            p.swapRewardToUsdc
+            p.tokenId
         );
         if (wasStaked) {
+            // The claim is yield, so it pays feeCollectBps whether or not it is
+            // swapped. Charging first also means the swap below moves only the
+            // NET reward: `_swapDeltaToUsdc` measures the delta from the same
+            // pre-claim snapshot, which the fee transfer has already reduced.
+            _settleStakedReward(p.onBehalfOf, p.tokenId, rewardToken, rewardBefore);
             if (p.swapRewardToUsdc) {
                 if (block.timestamp > p.deadline) revert DeadlineExpired();
                 _validateSwapLeg(rewardToken, p.rewardSwap, p.slippageBps);

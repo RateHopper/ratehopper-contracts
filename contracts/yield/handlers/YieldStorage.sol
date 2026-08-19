@@ -102,6 +102,19 @@ abstract contract YieldStorage {
         uint256 collected1,
         uint256 fee1
     );
+    /// @notice A stake-pool emission claim credited to the Safe, with the
+    ///         collect fee actually paid on it. Emitted wherever a claim can
+    ///         happen: an explicit collect, and the gauge withdrawal a close or
+    ///         switch performs. `feePaid` is zero when the fee rounded to zero
+    ///         or the treasury transfer failed (see CollectFeeTransferFailed).
+    event StakedRewardCollected(
+        address indexed onBehalfOf,
+        uint8 indexed protocol,
+        uint256 indexed tokenId,
+        address rewardToken,
+        uint256 grossReward,
+        uint256 feePaid
+    );
     event FeeTransferFailed(address indexed onBehalfOf, uint256 indexed tokenId, uint128 feeUsd6);
     event CollectFeeTransferFailed(
         address indexed onBehalfOf,

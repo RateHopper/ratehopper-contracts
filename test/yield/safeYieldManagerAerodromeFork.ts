@@ -389,6 +389,138 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         expect(await manager.stakePoolOf(AERODROME, tokenId)).to.equal(ethers.ZeroAddress);
     });
 
+    // M-03: real emissions, real gauge. Every route that can pay a reward — an
+    // explicit collect, the gauge withdrawal inside a partial close, and the one
+    // inside a full close — must hand feeCollectBps of the CLAIMED amount to the
+    // treasury. Gross is measured as (Safe delta + treasury delta) so the assertion
+    // is exact regardless of how much accrued.
+    it("charges the collect fee on real gauge emissions for collect, partial close, and full close", async function () {
+        const { operator, treasury, safeAddress, manager } = await deployAeroStack();
+        const { poolAddress, sqrtPriceX96, alignedTick } = await readAeroPool();
+        const spotUsdcToWeth = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);
+        const spotWethToUsdc = (amount: bigint) => (amount * sqrtPriceX96 * sqrtPriceX96) >> 192n;
+
+        const voter = new ethers.Contract(AERODROME_VOTER_ADDRESS, VOTER_ABI, ethers.provider);
+        const stakePoolAddress: string = await voter.gauges(poolAddress);
+        expect(stakePoolAddress).to.not.equal(ethers.ZeroAddress);
+        const stakePool = new ethers.Contract(
+            stakePoolAddress,
+            [
+                "function rewardToken() view returns (address)",
+                "function earned(address,uint256) view returns (uint256)",
+                "function periodFinish() view returns (uint256)",
+            ],
+            ethers.provider,
+        );
+        const aero = new ethers.Contract(await stakePool.rewardToken(), ERC20_ABI, ethers.provider);
+
+        const input = ethers.parseUnits("10", 6);
+        await fundSafeUsdc(poolAddress, safeAddress, input);
+        const block = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(block!.timestamp + 30 * 86_400);
+        const expectedSwapOut = spotUsdcToWeth(input / 2n);
+
+        await expect(
+            manager.connect(operator).openLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                usdcAmount: input,
+                tickLower: alignedTick - 1_000,
+                tickUpper: alignedTick + 1_000,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
+                swap1: ZERO_LEG,
+                slippageBps: 100,
+                deadline,
+                lpPoolParam: POOL_PARAM,
+                stake: true,
+            }),
+        ).to.emit(manager, "PositionOpened");
+
+        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
+        const opened = openedEvents[openedEvents.length - 1];
+        const tokenId = opened.args.tokenId;
+
+        /// Run `action`, then assert the treasury took exactly feeCollectBps of
+        /// everything the gauge newly paid out.
+        async function expectRewardFeeCharged(action: () => Promise<any>) {
+            const safeBefore: bigint = await aero.balanceOf(safeAddress);
+            const treasuryBefore: bigint = await aero.balanceOf(treasury.address);
+            await (await action()).wait();
+            const treasuryDelta: bigint = (await aero.balanceOf(treasury.address)) - treasuryBefore;
+            const claimed: bigint = (await aero.balanceOf(safeAddress)) - safeBefore + treasuryDelta;
+            expect(claimed).to.be.greaterThan(0n);
+            expect(treasuryDelta).to.equal((claimed * 250n) / 10_000n);
+        }
+
+        // Emissions only accrue until the gauge's current epoch ends, so the three
+        // claims below share the time that is actually left rather than warping a
+        // fixed span and silently claiming nothing after the period finishes.
+        const nowTs = (await ethers.provider.getBlock("latest"))!.timestamp;
+        const periodFinish = Number(await stakePool.periodFinish());
+        expect(periodFinish).to.be.greaterThan(nowTs + 4);
+        const warpStep = Math.floor((periodFinish - nowTs) / 4);
+        const warp = async () => {
+            await network.provider.send("evm_increaseTime", [warpStep]);
+            await network.provider.send("evm_mine");
+        };
+
+        const npmOwner = new ethers.Contract(AERODROME_SLIPSTREAM_NPM_ADDRESS, NPM_ABI, ethers.provider);
+        expect(await npmOwner.ownerOf(tokenId)).to.equal(stakePoolAddress);
+
+        await warp();
+        expect(await stakePool.earned(safeAddress, tokenId)).to.be.greaterThan(0n);
+        await expectRewardFeeCharged(() =>
+            manager.connect(operator).collectLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                tokenId,
+                swapFeesToUsdc: false,
+                swap0: ZERO_LEG,
+                swap1: ZERO_LEG,
+                swapRewardToUsdc: false,
+                rewardSwap: ZERO_LEG,
+                slippageBps: 0,
+                deadline,
+            }),
+        );
+
+        // Partial close: the gauge pays out on withdrawal, so that claim is taxed too.
+        await warp();
+        const halfOut = spotWethToUsdc(opened.args.amount0ToLp / 2n);
+        await expectRewardFeeCharged(() =>
+            manager.connect(operator).closeLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                tokenId,
+                exitBps: 5_000,
+                swap0: leg((halfOut * 9_700n) / 10_000n, halfOut, POOL_PARAM),
+                swap1: ZERO_LEG,
+                slippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                deadline,
+                minUsdcOut: 0,
+            }),
+        );
+
+        // Still staked after the partial close, so it keeps accruing for the final exit.
+        await warp();
+        const restOut = spotWethToUsdc(opened.args.amount0ToLp / 2n);
+        await expectRewardFeeCharged(() =>
+            manager.connect(operator).closeLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                tokenId,
+                exitBps: 10_000,
+                swap0: leg((restOut * 9_700n) / 10_000n, restOut, POOL_PARAM),
+                swap1: ZERO_LEG,
+                slippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                deadline,
+                minUsdcOut: 0,
+            }),
+        );
+    });
+
     // L-01: the mock can prove the restake call happens; only the fork can prove the
     // REAL gauge takes the NFT back and keeps paying emissions on the survivor.
     it("restakes into the same real gauge after a partial close and keeps accruing emissions", async function () {
