@@ -153,9 +153,29 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     }
 
     /// @dev Unstake `tokenId` from the protocol's stakePool when it is staked, so
-    ///      the close flow's `ownerOf == Safe` guard holds. Default: no stakePool →
-    ///      no-op. Aerodrome overrides it; idempotent for unstaked positions.
-    function _unstakeIfStaked(address /* _onBehalfOf */, uint256 /* tokenId */) internal virtual {}
+    ///      the close flow's `ownerOf == Safe` guard holds. Returns the pool the
+    ///      NFT came OUT of (address(0) when it was not staked) so a surviving
+    ///      partial position can go back into that exact pool. The stake pin is
+    ///      deliberately preserved here — only a full close clears it, via
+    ///      `_clearStakePin`. Default: no stakePool → no-op. Aerodrome overrides
+    ///      it; idempotent for unstaked positions.
+    function _unstakeIfStaked(address /* _onBehalfOf */, uint256 /* tokenId */) internal virtual returns (address) {
+        return address(0);
+    }
+
+    /// @dev Put `tokenId` back into `stakePool` — the pool it was just unstaked
+    ///      from, NEVER a freshly resolved one: the protocol's gauge mapping is
+    ///      governance-controlled and may have rotated since the position was
+    ///      staked. Only reached for protocols that staked in the first place.
+    function _restakeInto(address /* _onBehalfOf */, uint256 /* tokenId */, address /* stakePool */) internal virtual {
+        revert StakingNotSupported();
+    }
+
+    /// @dev Forget which pool a position was staked in. Full close only — the NFT
+    ///      is gone, so the pin would otherwise outlive the position.
+    function _clearStakePin(uint256 tokenId) internal {
+        delete _yieldStorage().stakePoolOf[PROTOCOL][tokenId];
+    }
 
     /// @dev Harvest stakePool rewards for a STAKED `tokenId` to the Safe and report
     ///      whether the position was staked. With `captureReward`, also report the
@@ -227,7 +247,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         // A staked position is owned by the stakePool; unstake it back to the Safe
         // first so the ownership guard and the existing decrease/collect/burn/swap
         // flow run unchanged. No-op for non-stakePool protocols or an unstaked NFT.
-        _unstakeIfStaked(p.onBehalfOf, p.tokenId);
+        address unstakedFrom = _unstakeIfStaked(p.onBehalfOf, p.tokenId);
         _requireOwnedBy(p.onBehalfOf, p.tokenId);
 
         // Measure only deltas from this close (USDC sides need no snapshot —
@@ -278,6 +298,19 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             _safeExec(p.onBehalfOf, POSITION_MANAGER, abi.encodeCall(INonfungiblePositionManager.burn, (p.tokenId)), 9);
         }
 
+        // Staking continuity: a position that was staked goes back into the SAME
+        // pool when it survives this close, so emissions resume and the pin keeps
+        // matching reality. A full close burned the NFT, so the pin is dropped.
+        // A restake failure reverts the whole close — a half-closed, unstaked
+        // position with a live pin is exactly the divergence this guards against.
+        if (unstakedFrom != address(0)) {
+            if (p.exitBps == 10_000) {
+                _clearStakePin(p.tokenId);
+            } else {
+                _restakeInto(p.onBehalfOf, p.tokenId, unstakedFrom);
+            }
+        }
+
         // Swap the non-USDC legs this close produced back to USDC.
         _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, 26, 10, 27);
         _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, 34, 35, 36);
@@ -299,7 +332,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         (token0, token1, , liquidity) = _position(p.tokenId);
         // A staked position is owned by the stakePool; unstake it back to the
         // Safe first so the ownership guard and decrease/collect/burn hold.
-        _unstakeIfStaked(p.onBehalfOf, p.tokenId);
+        address unstakedFrom = _unstakeIfStaked(p.onBehalfOf, p.tokenId);
         _requireOwnedBy(p.onBehalfOf, p.tokenId);
 
         uint256 t0Before = IERC20(token0).balanceOf(p.onBehalfOf);
@@ -332,6 +365,9 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         }
 
         _safeExec(p.onBehalfOf, POSITION_MANAGER, abi.encodeCall(INonfungiblePositionManager.burn, (p.tokenId)), 9);
+
+        // The NFT is gone: a withdraw is always a full exit, so the pin goes too.
+        if (unstakedFrom != address(0)) _clearStakePin(p.tokenId);
 
         amount0 = IERC20(token0).balanceOf(p.onBehalfOf) - t0Before;
         amount1 = IERC20(token1).balanceOf(p.onBehalfOf) - t1Before;

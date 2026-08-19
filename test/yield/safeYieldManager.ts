@@ -1227,6 +1227,152 @@ describe("SafeYieldManager", function () {
                 .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
             expect(await clNpm.ownerOf(1)).to.equal(ZERO);
         });
+
+        // L-01: a partial close must not silently stop emissions. The surviving NFT
+        // goes back into the pool it came out of, and the pin keeps pointing there.
+        it("restakes the surviving NFT into the same stakePool after a partial close", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, clRouter, voter } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+
+            await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
+            const liquidityBefore = (await clNpm.positionsData(1))[4];
+            await (await clRouter.setOutput(300_000n)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .closeLp(
+                        AERODROME,
+                        closeParams(safeAddr, 1, TICK_SPACING, {
+                            exitBps: 5_000,
+                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                        }),
+                    ),
+            ).to.emit(manager, "PositionClosed");
+
+            expect(await clNpm.ownerOf(1)).to.equal(stakePoolAddr);
+            expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(stakePoolAddr);
+            const liquidityAfter = (await clNpm.positionsData(1))[4];
+            expect(liquidityAfter).to.equal(liquidityBefore / 2n);
+            expect(liquidityAfter).to.be.lessThan(liquidityBefore);
+        });
+
+        it("keeps claiming rewards after a partial close, and clears the pin on the final close", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, clRouter, voter } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+
+            await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
+            await (await clRouter.setOutput(300_000n)).wait();
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .closeLp(
+                        AERODROME,
+                        closeParams(safeAddr, 1, TICK_SPACING, {
+                            exitBps: 5_000,
+                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                        }),
+                    )
+            ).wait();
+
+            // Still staked, so a later collect still routes to the stakePool.
+            await expect(manager.connect(operatorEOA).collectLp(AERODROME, collectParams(safeAddr, 1, TICK_SPACING)))
+                .to.emit(stakePool, "RewardClaimed")
+                .withArgs(1n, safeAddr);
+
+            await (await clRouter.setOutput(600_000n)).wait();
+            await expect(
+                manager.connect(operatorEOA).closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING)),
+            ).to.emit(manager, "PositionClosed");
+            expect(await clNpm.ownerOf(1)).to.equal(ZERO);
+            expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(ZERO);
+            void stakePoolAddr;
+        });
+
+        it("does not stake a never-staked position on a partial close", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, clRouter, voter } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+
+            await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING));
+            await (await clRouter.setOutput(300_000n)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .closeLp(
+                        AERODROME,
+                        closeParams(safeAddr, 1, TICK_SPACING, {
+                            exitBps: 5_000,
+                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                        }),
+                    ),
+            ).to.emit(manager, "PositionClosed");
+
+            expect(await clNpm.ownerOf(1)).to.equal(safeAddr);
+            expect(await clNpm.ownerOf(1)).to.not.equal(stakePoolAddr);
+            expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(ZERO);
+        });
+
+        it("restakes into the pinned stakePool even after the Voter gauge rotates", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, clRouter, voter } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePoolAddr: originalStakePool } = await deployStakePool(clNpm, clPool, voter);
+
+            await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
+
+            const { stakePoolAddr: replacementStakePool } = await deployStakePool(clNpm, clPool, voter);
+            expect(replacementStakePool).to.not.equal(originalStakePool);
+            await (await clRouter.setOutput(300_000n)).wait();
+
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .closeLp(
+                        AERODROME,
+                        closeParams(safeAddr, 1, TICK_SPACING, {
+                            exitBps: 5_000,
+                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                        }),
+                    )
+            ).wait();
+
+            // The rotation must not move the user's position to the new gauge.
+            expect(await clNpm.ownerOf(1)).to.equal(originalStakePool);
+            expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(originalStakePool);
+        });
+
+        it("reverts the whole partial close when the restake fails", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, clRouter, voter } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+
+            await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
+            const liquidityBefore = (await clNpm.positionsData(1))[4];
+            const basisBefore = await manager.residualBasisUsd6Of(AERODROME, 1);
+            await (await clRouter.setOutput(300_000n)).wait();
+            await (await stakePool.setDepositFails(true)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .closeLp(
+                        AERODROME,
+                        closeParams(safeAddr, 1, TICK_SPACING, {
+                            exitBps: 5_000,
+                            swap0: leg(300_000n, 300_000n, TICK_SPACING),
+                        }),
+                    ),
+            ).to.be.reverted;
+
+            // Nothing moved: still staked in the same pool, same liquidity, same basis.
+            expect(await clNpm.ownerOf(1)).to.equal(stakePoolAddr);
+            expect((await clNpm.positionsData(1))[4]).to.equal(liquidityBefore);
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(basisBefore);
+            expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(stakePoolAddr);
+        });
     });
 
     describe("constructor validation", function () {
@@ -1954,7 +2100,9 @@ describe("SafeYieldManager", function () {
                 await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
             await (
-                await manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING))
+                await manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING))
             ).wait();
 
             await (await clRouter.setOutput(600_000n)).wait();
@@ -2028,7 +2176,18 @@ describe("SafeYieldManager", function () {
                 manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
             )
                 .to.emit(manager, "PositionSwitched")
-                .withArgs(safeAddr, UNISWAP_V3, AERODROME, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT / 2n, HALF / 2n);
+                .withArgs(
+                    safeAddr,
+                    UNISWAP_V3,
+                    AERODROME,
+                    1n,
+                    1n,
+                    USDC_AMOUNT,
+                    WETH_OUT,
+                    HALF,
+                    WETH_OUT / 2n,
+                    HALF / 2n,
+                );
 
             expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(USDC_AMOUNT);
             expect(await weth.balanceOf(safeAddr)).to.equal(WETH_OUT / 2n);

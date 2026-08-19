@@ -455,6 +455,13 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         return _yieldStorage().positionHandlerOf[protocol][tokenId];
     }
 
+    /// @notice Stake pool a position is pinned to, or address(0) when it was never
+    ///         staked. The pin survives the temporary unstake a partial close does,
+    ///         so it also answers "where does this position go back to".
+    function stakePoolOf(uint8 protocol, uint256 tokenId) external view returns (address) {
+        return _yieldStorage().stakePoolOf[protocol][tokenId];
+    }
+
     function isPoolParamAllowed(uint8 protocol, bytes calldata poolParam) external view returns (bool) {
         return _yieldStorage().allowedPoolKey[protocol][keccak256(poolParam)];
     }

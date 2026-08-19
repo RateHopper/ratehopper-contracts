@@ -284,7 +284,14 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 .switchLp(
                     UNISWAP_V3,
                     AERODROME,
-                    switchParams(safeAddress, oldTokenId, aeroAlignedTick - 1_000, aeroAlignedTick + 1_000, AERO_POOL_PARAM, deadline),
+                    switchParams(
+                        safeAddress,
+                        oldTokenId,
+                        aeroAlignedTick - 1_000,
+                        aeroAlignedTick + 1_000,
+                        AERO_POOL_PARAM,
+                        deadline,
+                    ),
                 ),
         ).to.emit(manager, "PositionSwitched");
 
@@ -321,7 +328,14 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 .switchLp(
                     AERODROME,
                     UNISWAP_V3,
-                    switchParams(safeAddress, newTokenId, uniAlignedTick - 1_000, uniAlignedTick + 1_000, UNIV3_POOL_PARAM, deadline),
+                    switchParams(
+                        safeAddress,
+                        newTokenId,
+                        uniAlignedTick - 1_000,
+                        uniAlignedTick + 1_000,
+                        UNIV3_POOL_PARAM,
+                        deadline,
+                    ),
                 ),
         ).to.emit(manager, "PositionSwitched");
 
@@ -373,7 +387,14 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 .switchLp(
                     UNISWAP_V3,
                     UNISWAP_V3,
-                    switchParams(safeAddress, oldTokenId, toAlignedTick - 1_000, toAlignedTick + 1_000, UNIV3_POOL_PARAM, deadline),
+                    switchParams(
+                        safeAddress,
+                        oldTokenId,
+                        toAlignedTick - 1_000,
+                        toAlignedTick + 1_000,
+                        UNIV3_POOL_PARAM,
+                        deadline,
+                    ),
                 ),
         ).to.emit(manager, "PositionSwitched");
 
@@ -443,7 +464,14 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 .switchLp(
                     UNISWAP_V3,
                     UNISWAP_V4,
-                    switchParams(safeAddress, oldTokenId, v4AlignedTick - 1_000, v4AlignedTick + 1_000, UNIV4_POOL_PARAM, deadline),
+                    switchParams(
+                        safeAddress,
+                        oldTokenId,
+                        v4AlignedTick - 1_000,
+                        v4AlignedTick + 1_000,
+                        UNIV4_POOL_PARAM,
+                        deadline,
+                    ),
                 ),
         ).to.emit(manager, "PositionSwitched");
 
@@ -468,7 +496,14 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 .switchLp(
                     UNISWAP_V4,
                     UNISWAP_V3,
-                    switchParams(safeAddress, v4TokenId, uniAlignedTick - 1_000, uniAlignedTick + 1_000, UNIV3_POOL_PARAM, deadline),
+                    switchParams(
+                        safeAddress,
+                        v4TokenId,
+                        uniAlignedTick - 1_000,
+                        uniAlignedTick + 1_000,
+                        UNIV3_POOL_PARAM,
+                        deadline,
+                    ),
                 ),
         ).to.emit(manager, "PositionSwitched");
 
@@ -532,7 +567,14 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 .switchLp(
                     AERODROME,
                     UNISWAP_V4,
-                    switchParams(safeAddress, oldTokenId, v4AlignedTick - 1_000, v4AlignedTick + 1_000, UNIV4_POOL_PARAM, deadline),
+                    switchParams(
+                        safeAddress,
+                        oldTokenId,
+                        v4AlignedTick - 1_000,
+                        v4AlignedTick + 1_000,
+                        UNIV4_POOL_PARAM,
+                        deadline,
+                    ),
                 ),
         ).to.emit(manager, "PositionSwitched");
 
@@ -556,7 +598,14 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 .switchLp(
                     UNISWAP_V4,
                     AERODROME,
-                    switchParams(safeAddress, v4TokenId, aeroAlignedTick - 1_000, aeroAlignedTick + 1_000, AERO_POOL_PARAM, deadline),
+                    switchParams(
+                        safeAddress,
+                        v4TokenId,
+                        aeroAlignedTick - 1_000,
+                        aeroAlignedTick + 1_000,
+                        AERO_POOL_PARAM,
+                        deadline,
+                    ),
                 ),
         ).to.emit(manager, "PositionSwitched");
 

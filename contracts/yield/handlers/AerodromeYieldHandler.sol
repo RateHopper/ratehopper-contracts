@@ -41,9 +41,17 @@ contract AerodromeYieldHandler is BaseYieldHandler {
     function _stake(address _onBehalfOf, uint256 tokenId, bytes memory lpPoolParam) internal override {
         address stakePool = VOTER.gauges(_getPool(lpPoolParam));
         if (stakePool == address(0)) revert StakingNotSupported();
+        _restakeInto(_onBehalfOf, tokenId, stakePool);
+        _yieldStorage().stakePoolOf[PROTOCOL][tokenId] = stakePool;
+    }
+
+    /// @dev Deposit `tokenId` into `stakePool`. Shared by the initial stake and by
+    ///      the partial-close restake, which passes the PINNED pool rather than
+    ///      re-reading the Voter — the mapping is governance-controlled and a
+    ///      rotation must not silently move a user's position to another gauge.
+    function _restakeInto(address _onBehalfOf, uint256 tokenId, address stakePool) internal override {
         _safeExec(_onBehalfOf, POSITION_MANAGER, abi.encodeCall(IERC721.approve, (stakePool, tokenId)), 28);
         _safeExec(_onBehalfOf, stakePool, abi.encodeCall(IStakePool.deposit, (tokenId)), 29);
-        _yieldStorage().stakePoolOf[PROTOCOL][tokenId] = stakePool;
     }
 
     /// @dev The pool stakePool currently holding `tokenId`, or address(0) when the
@@ -57,12 +65,13 @@ contract AerodromeYieldHandler is BaseYieldHandler {
 
     /// @dev Withdraw `tokenId` from its pool's stakePool back to the Safe when it is
     ///      staked (stakePool owns the NFT); a no-op otherwise so unstaked and
-    ///      no-stakePool positions close normally.
-    function _unstakeIfStaked(address _onBehalfOf, uint256 tokenId) internal override {
-        address stakePool = _stakePoolOf(tokenId);
+    ///      no-stakePool positions close normally. Returns the pool it came out of
+    ///      so a surviving partial position is restaked into that same pool; the
+    ///      pin itself survives here and is cleared only by a full close.
+    function _unstakeIfStaked(address _onBehalfOf, uint256 tokenId) internal override returns (address stakePool) {
+        stakePool = _stakePoolOf(tokenId);
         if (stakePool != address(0)) {
             _safeExec(_onBehalfOf, stakePool, abi.encodeCall(IStakePool.withdraw, (tokenId)), 30);
-            delete _yieldStorage().stakePoolOf[PROTOCOL][tokenId];
         }
     }
 

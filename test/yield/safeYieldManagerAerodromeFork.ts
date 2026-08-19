@@ -385,6 +385,93 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         expect(await manager.residualBasisUsd6Of(AERODROME, tokenId)).to.equal(0);
         await expect(npm.ownerOf(tokenId)).to.be.reverted;
         expect(await usdc.balanceOf(safeAddress)).to.be.greaterThan(0);
+        // A burned position keeps no staking pin.
+        expect(await manager.stakePoolOf(AERODROME, tokenId)).to.equal(ethers.ZeroAddress);
+    });
+
+    // L-01: the mock can prove the restake call happens; only the fork can prove the
+    // REAL gauge takes the NFT back and keeps paying emissions on the survivor.
+    it("restakes into the same real gauge after a partial close and keeps accruing emissions", async function () {
+        const { operator, safeAddress, manager } = await deployAeroStack();
+        const { poolAddress, sqrtPriceX96, alignedTick } = await readAeroPool();
+        const spotUsdcToWeth = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);
+        const spotWethToUsdc = (amount: bigint) => (amount * sqrtPriceX96 * sqrtPriceX96) >> 192n;
+
+        const voter = new ethers.Contract(AERODROME_VOTER_ADDRESS, VOTER_ABI, ethers.provider);
+        const stakePoolAddress: string = await voter.gauges(poolAddress);
+        expect(stakePoolAddress).to.not.equal(ethers.ZeroAddress);
+
+        const input = ethers.parseUnits("10", 6);
+        await fundSafeUsdc(poolAddress, safeAddress, input);
+        const block = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(block!.timestamp + 3_600);
+        const expectedSwapOut = spotUsdcToWeth(input / 2n);
+
+        await expect(
+            manager.connect(operator).openLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                usdcAmount: input,
+                tickLower: alignedTick - 1_000,
+                tickUpper: alignedTick + 1_000,
+                mintAmount0Min: 0,
+                mintAmount1Min: 0,
+                swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
+                swap1: ZERO_LEG,
+                slippageBps: 100,
+                deadline,
+                lpPoolParam: POOL_PARAM,
+                stake: true,
+            }),
+        ).to.emit(manager, "PositionOpened");
+
+        const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
+        const opened = openedEvents[openedEvents.length - 1];
+        const tokenId = opened.args.tokenId;
+        const npm = new ethers.Contract(AERODROME_SLIPSTREAM_NPM_ADDRESS, NPM_ABI, ethers.provider);
+        const npmPositions = new ethers.Contract(
+            AERODROME_SLIPSTREAM_NPM_ADDRESS,
+            [
+                "function positions(uint256) view returns (uint96,address,address,address,int24,int24,int24,uint128,uint256,uint256,uint128,uint128)",
+            ],
+            ethers.provider,
+        );
+        expect(await npm.ownerOf(tokenId)).to.equal(stakePoolAddress);
+        expect(await manager.stakePoolOf(AERODROME, tokenId)).to.equal(stakePoolAddress);
+        const liquidityBefore: bigint = (await npmPositions.positions(tokenId))[7];
+
+        const halfWethOut = spotWethToUsdc(opened.args.amount0ToLp / 2n);
+        await expect(
+            manager.connect(operator).closeLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                tokenId,
+                exitBps: 5_000,
+                swap0: leg((halfWethOut * 9_700n) / 10_000n, halfWethOut, POOL_PARAM),
+                swap1: ZERO_LEG,
+                slippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                deadline,
+                minUsdcOut: 0,
+            }),
+        ).to.emit(manager, "PositionClosed");
+
+        // The survivor is back in the SAME gauge, with the pin still pointing there.
+        expect(await npm.ownerOf(tokenId)).to.equal(stakePoolAddress);
+        expect(await manager.stakePoolOf(AERODROME, tokenId)).to.equal(stakePoolAddress);
+        const liquidityAfter: bigint = (await npmPositions.positions(tokenId))[7];
+        expect(liquidityAfter).to.be.greaterThan(0n);
+        expect(liquidityAfter).to.be.lessThan(liquidityBefore);
+
+        // Emissions resume: only a staked NFT earns, so this would read zero if the
+        // partial close had left the position on the Safe.
+        await network.provider.send("evm_increaseTime", [5 * 86_400]);
+        await network.provider.send("evm_mine");
+        const stakePool = new ethers.Contract(
+            stakePoolAddress,
+            ["function earned(address,uint256) view returns (uint256)"],
+            ethers.provider,
+        );
+        expect(await stakePool.earned(safeAddress, tokenId)).to.be.greaterThan(0n);
     });
 
     it("collectLp on a staked position claims stakePool rewards only and leaves the NFT staked", async function () {
@@ -796,14 +883,10 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const feeEvents = await manager.queryFilter(manager.filters.FeesCollected(safeAddress), -5);
         const collected = feeEvents[feeEvents.length - 1].args;
         expect((await aero.balanceOf(treasury.address)) - treasuryAeroBefore).to.equal(collected.fee1);
-        expect((await usdc.balanceOf(treasury.address)) - treasuryUsdcBefore).to.equal(
-            collected.fee0 + closed.feeUsd6,
-        );
+        expect((await usdc.balanceOf(treasury.address)) - treasuryUsdcBefore).to.equal(collected.fee0 + closed.feeUsd6);
 
         // The Safe keeps the realized value net of the performance fee.
-        expect((await usdc.balanceOf(safeAddress)) - safeUsdcBefore).to.equal(
-            closed.currentValueUsd6 - closed.feeUsd6,
-        );
+        expect((await usdc.balanceOf(safeAddress)) - safeUsdcBefore).to.equal(closed.currentValueUsd6 - closed.feeUsd6);
         expect(await manager.residualBasisUsd6Of(AERODROME, tokenId)).to.equal(0);
         await expect(npm.ownerOf(tokenId)).to.be.reverted;
     });

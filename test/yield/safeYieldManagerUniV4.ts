@@ -984,7 +984,9 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const { manager, operatorEOA, safeAddr, v4Handler, v4Pm } = await loadFixture(deployUniV4Harness);
             await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
 
-            await expect(manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)))
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)),
+            )
                 .to.emit(manager, "PositionSwitched")
                 .withArgs(safeAddr, UNISWAP_V3, UNISWAP_V4, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
 
@@ -1030,7 +1032,9 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const { manager, operatorEOA, safeAddr, v4Handler, v4Pm } = await loadFixture(deployUniV4Harness);
             await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING));
 
-            await expect(manager.connect(operatorEOA).switchLp(AERODROME, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)))
+            await expect(
+                manager.connect(operatorEOA).switchLp(AERODROME, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)),
+            )
                 .to.emit(manager, "PositionSwitched")
                 .withArgs(safeAddr, AERODROME, UNISWAP_V4, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
 

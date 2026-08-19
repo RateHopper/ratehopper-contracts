@@ -309,11 +309,20 @@ contract MockVoter {
 contract MockStakePool {
     address public immutable NFT;
 
+    /// @dev Arms a deposit failure so tests can prove a restake that reverts
+    ///      takes the whole partial close down with it.
+    bool public depositFails;
+
     constructor(address _nft) {
         NFT = _nft;
     }
 
+    function setDepositFails(bool value) external {
+        depositFails = value;
+    }
+
     function deposit(uint256 tokenId) external {
+        require(!depositFails, "deposit disabled");
         IERC721(NFT).transferFrom(msg.sender, address(this), tokenId);
     }
 
