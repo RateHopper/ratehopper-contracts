@@ -544,7 +544,7 @@ describe("SafeYieldManager", function () {
             const treasuryBefore = await usdc.balanceOf(treasury.address);
             await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER)))
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
+                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000, 0n);
 
             expect((await usdc.balanceOf(treasury.address)) - treasuryBefore).to.equal(10_000n);
             expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(0);
@@ -599,7 +599,7 @@ describe("SafeYieldManager", function () {
 
             await expect(manager.connect(operatorEOA).closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING)))
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
+                .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000, 0n);
 
             expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(0);
             expect(await clNpm.ownerOf(1)).to.equal(ZERO);
@@ -620,7 +620,7 @@ describe("SafeYieldManager", function () {
                 ),
             )
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V3, 1n, HALF, 550_000n, 5_000n, 5_000);
+                .withArgs(safeAddr, UNISWAP_V3, 1n, HALF, 550_000n, 5_000n, 5_000, 0n);
 
             expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(HALF);
             expect(await uniNpm.ownerOf(1)).to.equal(safeAddr);
@@ -673,7 +673,7 @@ describe("SafeYieldManager", function () {
             await expect(tx).to.emit(manager, "FeeTransferFailed").withArgs(safeAddr, 1n, 10_000n);
             await expect(tx)
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 1_100_000n, 0n, 10_000);
+                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 1_100_000n, 0n, 10_000, 0n);
             expect(await usdc.balanceOf(treasury.address)).to.equal(0);
         });
 
@@ -740,6 +740,34 @@ describe("SafeYieldManager", function () {
             ).wait();
 
             expect(await weth.balanceOf(safeAddr)).to.equal(safeWethBefore);
+        });
+
+        // M-01: the collect fee swap is exactly the call that used to ship with
+        // `amountOutMin: 1`, because the amount collected is unknowable until
+        // the collect runs. It is now floored on the amount actually harvested.
+        it("floors the fee swap even though the collected amount is unknown up front", async function () {
+            const { manager, operatorEOA, safeAddr, uniNpm, uniRouter } = await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            const owed0 = 100_000n;
+            await (await uniNpm.setOwed(1, owed0, 0)).wait();
+            await (await uniRouter.setOutput(95_000n)).wait();
+
+            await (
+                await manager.connect(operatorEOA).collectLp(
+                    UNISWAP_V3,
+                    collectParams(safeAddr, 1, FEE_TIER, {
+                        swapFeesToUsdc: true,
+                        // The 1/1 sentinel the audit named. It no longer buys
+                        // the caller a floor-free swap.
+                        swap0: leg(1, FEE_TIER),
+                    }),
+                )
+            ).wait();
+
+            // feeCollectBps is skimmed first, so the swap sees the net harvest.
+            const netHarvest = owed0 - (owed0 * COLLECT_FEE_BPS) / 10_000n;
+            expect(await uniRouter.lastAmountIn()).to.equal(netHarvest);
+            expect(await uniRouter.lastAmountOutMinimum()).to.equal((netHarvest * (10_000n - BigInt(SLIP))) / 10_000n);
         });
 
         it("rejects tokenIds without a stored basis", async function () {
@@ -980,7 +1008,7 @@ describe("SafeYieldManager", function () {
             await (await uniRouter.setOutput(600_000n)).wait();
             await expect(manager.connect(operatorEOA).closeLp(NEXT_PROTOCOL, closeParams(safeAddr, 1, FEE_TIER)))
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, NEXT_PROTOCOL, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
+                .withArgs(safeAddr, NEXT_PROTOCOL, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000, 0n);
             expect(await manager.residualBasisUsd6Of(NEXT_PROTOCOL, 1)).to.equal(0);
             expect(await manager.positionHandlerOf(NEXT_PROTOCOL, 1)).to.equal(ZERO);
         });
@@ -1120,7 +1148,7 @@ describe("SafeYieldManager", function () {
             await (await clRouter.setOutput(600_000n)).wait();
             await expect(manager.connect(operatorEOA).closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING)))
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
+                .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000, 0n);
 
             expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(0);
             expect(await clNpm.ownerOf(1)).to.equal(ZERO);
@@ -1310,7 +1338,7 @@ describe("SafeYieldManager", function () {
             await (await clRouter.setOutput(600_000n)).wait();
             await expect(manager.connect(operatorEOA).closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING)))
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
+                .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000, 0n);
             expect(await clNpm.ownerOf(1)).to.equal(ZERO);
         });
 
@@ -1532,7 +1560,7 @@ describe("SafeYieldManager", function () {
 
                 await expect(manager.connect(operatorEOA).closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING)))
                     .to.emit(manager, "PositionClosed")
-                    .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
+                    .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000, 0n);
 
                 // Treasury got the reward fee, and only the LP value drove the perf fee.
                 expect(await usdc.balanceOf(treasury.address)).to.equal(REWARD_FEE + 10_000n);
@@ -1769,7 +1797,7 @@ describe("SafeYieldManager", function () {
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
             await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER)))
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 0n, 0n, 10_000);
+                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 0n, 0n, 10_000, 0n);
         });
 
         it("charges no performance fee when a close realizes a loss", async function () {
@@ -1783,7 +1811,7 @@ describe("SafeYieldManager", function () {
                 .closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER, { swap0: leg(300_000n, FEE_TIER) }));
             await expect(tx)
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 800_000n, 0n, 10_000);
+                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 800_000n, 0n, 10_000, 0n);
             await expect(tx).to.not.emit(manager, "FeeTransferFailed");
             expect(await usdc.balanceOf(treasury.address)).to.equal(0);
         });
@@ -1953,7 +1981,7 @@ describe("SafeYieldManager", function () {
             const tx = manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER));
             await expect(tx)
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
+                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000, 0n);
             await expect(tx).to.not.emit(manager, "FeeTransferFailed");
         });
 
@@ -2224,7 +2252,7 @@ describe("SafeYieldManager", function () {
                 ),
             )
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 900_000n, 0n, 10_000);
+                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 900_000n, 0n, 10_000, 0n);
 
             expect((await usdc.balanceOf(safeAddr)) - safeUsdcBefore).to.equal(900_000n);
             expect(await tokenX.balanceOf(safeAddr)).to.equal(0);
@@ -2301,7 +2329,7 @@ describe("SafeYieldManager", function () {
                 ),
             )
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, HALF + 450_000n, 0n, 10_000);
+                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, HALF + 450_000n, 0n, 10_000, 0n);
             expect((await usdc.balanceOf(safeAddr)) - safeUsdcBefore).to.equal(HALF + 450_000n);
             expect(await high.balanceOf(safeAddr)).to.equal(0);
         });
@@ -2416,7 +2444,7 @@ describe("SafeYieldManager", function () {
                 ),
             )
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000);
+                .withArgs(safeAddr, AERODROME, 1n, USDC_AMOUNT, 1_100_000n, 10_000n, 10_000, 0n);
             expect(await usdc.balanceOf(treasury.address)).to.equal(10_000n);
         });
 
@@ -2466,34 +2494,194 @@ describe("SafeYieldManager", function () {
             expect(await clNpm.nextId()).to.equal(1);
         });
 
-        it("carries the full basis even when the destination mint leaves residue in the Safe", async function () {
+        // ─────────────────────────────────────────────────────────────
+        //  M-02: residue an in-kind switch could not redeploy
+        // ─────────────────────────────────────────────────────────────
+
+        // With mint usage at 50%, the destination consumes half of each side
+        // and the rest lands on the Safe: 1_000_000 wei of WETH and 250_000
+        // USDC. The reference sits at tick 0, so the WETH side values 1:1 and
+        // the residue is worth 1_250_000 against a 1_000_000 basis.
+        const HALF_USAGE_RESIDUE_WETH = WETH_OUT / 2n;
+        const HALF_USAGE_RESIDUE_USDC = HALF / 2n;
+        const HALF_USAGE_RESIDUE_USD6 = HALF_USAGE_RESIDUE_WETH + HALF_USAGE_RESIDUE_USDC;
+
+        it("books residue above the basis as carried profit", async function () {
             const { manager, operatorEOA, safeAddr, treasury, usdc, weth, clNpm } =
                 await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
             await (await clNpm.setMintUsageBps(5_000)).wait();
             const safeUsdcBefore = await usdc.balanceOf(safeAddr);
 
+            const carry = HALF_USAGE_RESIDUE_USD6 - USDC_AMOUNT;
             await expect(
                 manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
             )
-                .to.emit(manager, "PositionSwitched")
+                .to.emit(manager, "SwitchResidueSettled")
                 .withArgs(
                     safeAddr,
-                    UNISWAP_V3,
                     AERODROME,
                     1n,
-                    1n,
-                    USDC_AMOUNT,
-                    WETH_OUT,
-                    HALF,
-                    WETH_OUT / 2n,
-                    HALF / 2n,
+                    HALF_USAGE_RESIDUE_WETH,
+                    HALF_USAGE_RESIDUE_USDC,
+                    HALF_USAGE_RESIDUE_USD6,
+                    0n,
+                    carry,
                 );
 
-            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(USDC_AMOUNT);
-            expect(await weth.balanceOf(safeAddr)).to.equal(WETH_OUT / 2n);
-            expect((await usdc.balanceOf(safeAddr)) - safeUsdcBefore).to.equal(HALF / 2n);
+            // The residue repaid the whole basis, so the replacement position
+            // starts with none and owes a fee on the excess instead.
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(0);
+            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(carry);
+            expect(await weth.balanceOf(safeAddr)).to.equal(HALF_USAGE_RESIDUE_WETH);
+            expect((await usdc.balanceOf(safeAddr)) - safeUsdcBefore).to.equal(HALF_USAGE_RESIDUE_USDC);
+            // Nothing is charged at the switch itself; the fee is settled on exit.
             expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+        });
+
+        it("repays basis first when the residue is smaller than it", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm } = await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await clNpm.setMintUsageBps(9_000)).wait();
+
+            // 10% of each side left behind: 200_000 wei WETH + 50_000 USDC.
+            const residue = WETH_OUT / 10n + HALF / 10n;
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING))
+            ).wait();
+
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(USDC_AMOUNT - residue);
+            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(0);
+        });
+
+        it("needs no price at all when the switch redeploys everything", async function () {
+            const { manager, deployer, operatorEOA, safeAddr, wethAddr } = await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await manager.connect(deployer).setTwapConfig(wethAddr, ethers.ZeroAddress, 0, 0)).wait();
+
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING))
+            ).wait();
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(USDC_AMOUNT);
+            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(0);
+        });
+
+        it("refuses to guess at a residue it cannot price", async function () {
+            const { manager, deployer, operatorEOA, safeAddr, wethAddr, clNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await clNpm.setMintUsageBps(5_000)).wait();
+            await (await manager.connect(deployer).setTwapConfig(wethAddr, ethers.ZeroAddress, 0, 0)).wait();
+
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
+            ).to.be.revertedWithCustomError(manager, "TwapNotConfigured");
+        });
+
+        it("charges the carried profit at the eventual close", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, usdc, clNpm, clRouter } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await clNpm.setMintUsageBps(5_000)).wait();
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING))
+            ).wait();
+            const carry = await manager.carryProfitUsd6Of(AERODROME, 1);
+            expect(carry).to.be.greaterThan(0);
+
+            await (await clRouter.setOutput(600_000n)).wait();
+            const treasuryBefore = await usdc.balanceOf(treasury.address);
+            const receipt = await (
+                await manager
+                    .connect(operatorEOA)
+                    .closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING, { swap0: leg(600_000n, TICK_SPACING) }))
+            ).wait();
+
+            const closed = receipt!.logs
+                .map((l: any) => {
+                    try {
+                        return manager.interface.parseLog(l);
+                    } catch {
+                        return null;
+                    }
+                })
+                .find((e: any) => e && e.name === "PositionClosed")!;
+            const [, , , basisForExit, currentValue, feeUsd6, , carryForExit] = closed.args as unknown as [
+                string,
+                bigint,
+                bigint,
+                bigint,
+                bigint,
+                bigint,
+                bigint,
+                bigint,
+            ];
+
+            expect(basisForExit).to.equal(0);
+            expect(carryForExit).to.equal(carry);
+            // The fee follows lifecycle profit, not just this exit's proceeds.
+            const expectedFee = ((currentValue + carryForExit - basisForExit) * PERF_FEE_BPS) / 10_000n;
+            expect(feeUsd6).to.equal(expectedFee);
+            expect((await usdc.balanceOf(treasury.address)) - treasuryBefore).to.equal(expectedFee);
+            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(0);
+        });
+
+        it("prorates the carried profit across a partial close", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clRouter } = await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await clNpm.setMintUsageBps(5_000)).wait();
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING))
+            ).wait();
+            const carry = await manager.carryProfitUsd6Of(AERODROME, 1);
+
+            await (await clRouter.setOutput(600_000n)).wait();
+            await (
+                await manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, {
+                        exitBps: 5_000,
+                        swap0: leg(600_000n, TICK_SPACING),
+                    }),
+                )
+            ).wait();
+
+            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(carry - carry / 2n);
+        });
+
+        it("accumulates carry across successive switches", async function () {
+            const { manager, deployer, operatorEOA, safeAddr, uniNpm, clNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, BAD_FEE_TIER, true)).wait();
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+
+            await (await clNpm.setMintUsageBps(5_000)).wait();
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING))
+            ).wait();
+            const firstCarry = await manager.carryProfitUsd6Of(AERODROME, 1);
+            expect(firstCarry).to.be.greaterThan(0);
+
+            // Second hop: basis is already zero, so every unit of residue is
+            // profit and the carry can only grow.
+            await (await uniNpm.setMintUsageBps(5_000)).wait();
+            await (
+                await manager.connect(operatorEOA).switchLp(AERODROME, UNISWAP_V3, switchParams(safeAddr, 1, FEE_TIER))
+            ).wait();
+
+            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(0);
+            expect(await manager.carryProfitUsd6Of(UNISWAP_V3, 2)).to.be.greaterThan(firstCarry);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 2)).to.equal(0);
         });
 
         it("enforces gating: pause, per-protocol switches, and missing handlers", async function () {

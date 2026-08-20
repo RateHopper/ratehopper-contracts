@@ -668,7 +668,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             // perf fee = 10% of (1_119_500 - 1_000_000) = 11_950
             await expect(tx)
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, 1_119_500n, 11_950n, 10_000);
+                .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, 1_119_500n, 11_950n, 10_000, 0n);
 
             expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore + 1_119_500n - 11_950n);
             expect(await weth.balanceOf(treasury.address)).to.equal(1_000n);
@@ -686,7 +686,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { exitBps: 5000 })),
             )
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V4, 1n, HALF, anyValue, anyValue, 5000);
+                .withArgs(safeAddr, UNISWAP_V4, 1n, HALF, anyValue, anyValue, 5000, 0n);
 
             expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(HALF);
             expect(await v4Pm.getPositionLiquidity(1)).to.be.gt(0n);
@@ -768,7 +768,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 .withArgs(safeAddr, UNISWAP_V4, 1n, ZERO, 40_000n, 1_000n, ctx.usdcAddr, 20_000n, 500n);
             await expect(tx)
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, 1_119_500n, 11_950n, 10_000);
+                .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, 1_119_500n, 11_950n, 10_000, 0n);
 
             // ETH fee skim landed on the treasury; the Safe holds no stray ETH.
             expect(await ethers.provider.getBalance(treasury.address)).to.equal(treasuryEthBefore + 1_000n);
@@ -961,7 +961,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { exitBps: 1 })),
             )
                 .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V4, 1n, 0n, 0n, 0n, 1);
+                .withArgs(safeAddr, UNISWAP_V4, 1n, 0n, 0n, 0n, 1, 0n);
 
             expect(await v4Pm.getPositionLiquidity(1)).to.equal(liquidityBefore);
             expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(8_000n);

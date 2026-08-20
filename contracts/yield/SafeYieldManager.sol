@@ -268,21 +268,32 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         (uint128 residualBasis, address handler) = _pinnedPosition($, protocol, params.tokenId);
 
         uint128 basisForExit = Math.mulDiv(uint256(residualBasis), uint256(params.exitBps), 10_000).toUint128();
+        // Profit an earlier in-kind switch already handed back leaves with the
+        // same share of the position it was attached to.
+        uint128 carry = $.carryProfitUsd6Of[protocol][params.tokenId];
+        uint128 carryForExit = Math.mulDiv(uint256(carry), uint256(params.exitBps), 10_000).toUint128();
         if (params.exitBps == 10_000) {
             delete $.residualBasisUsd6Of[protocol][params.tokenId];
             delete $.positionHandlerOf[protocol][params.tokenId];
+            delete $.carryProfitUsd6Of[protocol][params.tokenId];
         } else {
             $.residualBasisUsd6Of[protocol][params.tokenId] = residualBasis - basisForExit;
+            $.carryProfitUsd6Of[protocol][params.tokenId] = carry - carryForExit;
         }
 
         bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.closeLp, (params, basisForExit)));
         uint128 currentValueUsd6 = abi.decode(ret, (uint128));
 
-        // Performance fee applies only to realized profit; a failed treasury
-        // transfer must never block an exit.
+        // Lifecycle profit, not just this exit's proceeds: value realized here
+        // PLUS value already withdrawn as switch residue, against the cost the
+        // position still carries. Without the carry term, a user could switch
+        // repeatedly, take profit out as residue each time, and close a
+        // zero-profit position paying nothing.
+        // A failed treasury transfer must never block an exit.
         uint128 feeUsd6 = 0;
-        if (currentValueUsd6 > basisForExit) {
-            uint256 profit = uint256(currentValueUsd6) - uint256(basisForExit);
+        uint256 realized = uint256(currentValueUsd6) + uint256(carryForExit);
+        if (realized > basisForExit) {
+            uint256 profit = realized - uint256(basisForExit);
             feeUsd6 = ((profit * $.performanceFeeBps) / 10_000).toUint128();
             if (feeUsd6 > 0 && !_trySafeTransfer(params.onBehalfOf, address(USDC), $.treasury, uint256(feeUsd6))) {
                 emit FeeTransferFailed(params.onBehalfOf, params.tokenId, feeUsd6);
@@ -297,7 +308,8 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             basisForExit,
             currentValueUsd6,
             feeUsd6,
-            params.exitBps
+            params.exitBps,
+            carryForExit
         );
     }
 
@@ -328,13 +340,23 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
 
         YieldLayout storage $ = _yieldStorage();
         (uint128 residualBasis, address handler) = _pinnedPosition($, protocol, params.tokenId);
+        uint128 releasedCarry = $.carryProfitUsd6Of[protocol][params.tokenId];
         delete $.residualBasisUsd6Of[protocol][params.tokenId];
         delete $.positionHandlerOf[protocol][params.tokenId];
+        delete $.carryProfitUsd6Of[protocol][params.tokenId];
 
         bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.withdrawLp, (params)));
         (, , amount0, amount1) = abi.decode(ret, (address, address, uint256, uint256));
 
-        emit PositionWithdrawn(params.onBehalfOf, protocol, params.tokenId, residualBasis, amount0, amount1);
+        emit PositionWithdrawn(
+            params.onBehalfOf,
+            protocol,
+            params.tokenId,
+            residualBasis,
+            releasedCarry,
+            amount0,
+            amount1
+        );
     }
 
     /// @notice Atomically move a full position to another pool of the SAME
@@ -375,7 +397,23 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         uint128 used1;
         (newTokenId, used0, used1) = _switchOpenLeg(openHandler, params, token0, token1, amount0, amount1);
 
-        $.residualBasisUsd6Of[toProtocol][newTokenId] = residualBasis;
+        (uint128 newBasis, uint128 newCarry) = _settleSwitchResidue(
+            SwitchResidue({
+                onBehalfOf: params.onBehalfOf,
+                protocol: toProtocol,
+                newTokenId: newTokenId,
+                token0: token0,
+                token1: token1,
+                residual0: amount0 - used0,
+                residual1: amount1 - used1,
+                basis: residualBasis,
+                carry: $.carryProfitUsd6Of[fromProtocol][params.tokenId]
+            })
+        );
+        delete $.carryProfitUsd6Of[fromProtocol][params.tokenId];
+
+        $.residualBasisUsd6Of[toProtocol][newTokenId] = newBasis;
+        $.carryProfitUsd6Of[toProtocol][newTokenId] = newCarry;
         $.positionHandlerOf[toProtocol][newTokenId] = openHandler;
 
         emit PositionSwitched(
@@ -384,12 +422,77 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             toProtocol,
             params.tokenId,
             newTokenId,
-            residualBasis,
+            newBasis,
             amount0,
             amount1,
             used0,
             used1
         );
+    }
+
+    /// @dev Inputs to `_settleSwitchResidue`, grouped so the helper takes one
+    ///      argument rather than nine (viaIR stack, same reason as MintArgs).
+    struct SwitchResidue {
+        address onBehalfOf;
+        uint8 protocol;
+        uint256 newTokenId;
+        address token0;
+        address token1;
+        uint256 residual0;
+        uint256 residual1;
+        uint128 basis;
+        uint128 carry;
+    }
+
+    /// @dev Account for what an in-kind switch could NOT redeploy.
+    ///
+    ///      A concentrated-liquidity mint consumes the two sides only in the
+    ///      ratio its range demands, so it stops at whichever side runs out and
+    ///      leaves the other on the Safe. That residue is real money the user
+    ///      now holds — measured on Base at 2.75% of the token0 side when the
+    ///      range is carried over, and 9.55% across protocols.
+    ///
+    ///      Treated as a withdrawal: it repays cost basis first, and whatever
+    ///      exceeds the basis is profit already taken. Booking that excess as
+    ///      `carry` is what stops a user from switching repeatedly, drawing
+    ///      profit out as residue each time, and closing a position that looks
+    ///      break-even.
+    ///
+    ///      Valued at the reference TWAP, never at spot: spot would let anyone
+    ///      who can nudge a pool under-report the residue and shrink the fee
+    ///      the final close charges.
+    function _settleSwitchResidue(SwitchResidue memory r) internal returns (uint128 newBasis, uint128 newCarry) {
+        uint256 residualUsd6 = _valueInUsd6(r.token0, r.residual0) + _valueInUsd6(r.token1, r.residual1);
+
+        if (residualUsd6 >= uint256(r.basis)) {
+            newBasis = 0;
+            newCarry = (uint256(r.carry) + (residualUsd6 - uint256(r.basis))).toUint128();
+        } else {
+            newBasis = r.basis - residualUsd6.toUint128();
+            newCarry = r.carry;
+        }
+
+        emit SwitchResidueSettled(
+            r.onBehalfOf,
+            r.protocol,
+            r.newTokenId,
+            r.residual0,
+            r.residual1,
+            residualUsd6.toUint128(),
+            newBasis,
+            newCarry
+        );
+    }
+
+    /// @dev USDC value of a token amount at the reference TWAP. USDC is its own
+    ///      unit, and nothing is valued when there is nothing to value — a
+    ///      switch that redeploys cleanly needs no price at all.
+    function _valueInUsd6(address token, uint256 amount) internal view returns (uint256) {
+        if (amount == 0) return 0;
+        if (token == address(USDC)) return amount;
+        TwapConfig memory cfg = _yieldStorage().twapConfigOf[token];
+        if (cfg.pool == address(0)) revert TwapOracle.TwapNotConfigured(token);
+        return TwapOracle.quote(cfg, token, address(USDC), amount);
     }
 
     /// @dev Full in-kind withdrawal of the old position via its pinned
@@ -512,6 +615,13 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
 
     function isPoolParamAllowed(uint8 protocol, bytes calldata poolParam) external view returns (bool) {
         return _yieldStorage().allowedPoolKey[protocol][keccak256(poolParam)];
+    }
+
+    /// @notice Profit an in-kind switch already handed back to the Safe that
+    ///         this position still owes a performance fee on. Charged by
+    ///         `closeLp`, prorated with `exitBps`.
+    function carryProfitUsd6Of(uint8 protocol, uint256 tokenId) external view returns (uint128) {
+        return _yieldStorage().carryProfitUsd6Of[protocol][tokenId];
     }
 
     /// @notice Price reference configured for `token`, or an all-zero config.

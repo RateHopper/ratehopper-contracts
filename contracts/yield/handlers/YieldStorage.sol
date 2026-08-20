@@ -51,6 +51,16 @@ abstract contract YieldStorage {
         ///      floored by the same Uniswap V3 observation history. Native ETH
         ///      is configured under its WETH address.
         mapping(address token => TwapConfig) twapConfigOf;
+        /// @dev Profit already taken OUT of a position but not yet charged a
+        ///      performance fee, in USDC 6dp. An in-kind switch redeploys only
+        ///      what the destination range can consume; the rest lands on the
+        ///      Safe. That residue first repays cost basis, and anything beyond
+        ///      the basis is realized profit the eventual `closeLp` would
+        ///      otherwise never see — measured at 2.75%-9.55% of the token0
+        ///      side on Base, so it is not roundable away. Carried onto the
+        ///      replacement position and prorated on partial exits exactly
+        ///      like the basis it mirrors.
+        mapping(uint8 protocolId => mapping(uint256 tokenId => uint128)) carryProfitUsd6Of;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ratehopper.storage.yield")) - 1)) & ~bytes32(uint256(0xff))
@@ -88,6 +98,10 @@ abstract contract YieldStorage {
         uint128 used0,
         uint128 used1
     );
+    /// @dev `carryForExitUsd6` is the share of previously-withdrawn switch
+    ///      residue this exit accounts for. The fee is charged on
+    ///      `currentValueUsd6 + carryForExitUsd6 - basisUsd6`, so without this
+    ///      field the emitted numbers would not explain the emitted fee.
     event PositionClosed(
         address indexed onBehalfOf,
         uint8 indexed protocol,
@@ -95,7 +109,8 @@ abstract contract YieldStorage {
         uint128 basisUsd6,
         uint128 currentValueUsd6,
         uint128 feeUsd6,
-        uint16 exitBps
+        uint16 exitBps,
+        uint128 carryForExitUsd6
     );
     event FeesCollected(
         address indexed onBehalfOf,
@@ -129,12 +144,28 @@ abstract contract YieldStorage {
         uint256 attemptedFee
     );
     event TwapConfigUpdated(address indexed token, address indexed pool, uint32 window, uint16 minCardinality);
+    /// @notice Residue an in-kind switch left on the Safe, valued at the
+    ///         reference TWAP, and the basis/carry it produced.
+    event SwitchResidueSettled(
+        address indexed onBehalfOf,
+        uint8 indexed protocol,
+        uint256 indexed newTokenId,
+        uint256 residual0,
+        uint256 residual1,
+        uint128 residualUsd6,
+        uint128 newBasisUsd6,
+        uint128 newCarryUsd6
+    );
     /// @notice An in-kind exit: liquidity out, no swap, no oracle, no fee.
+    /// @dev    `releasedCarryUsd6` is switch residue that would have been
+    ///         charged a fee by `closeLp` and is not charged here. Reported so
+    ///         a fee-free exit is visible rather than silent.
     event PositionWithdrawn(
         address indexed onBehalfOf,
         uint8 indexed protocol,
         uint256 indexed tokenId,
         uint128 releasedBasisUsd6,
+        uint128 releasedCarryUsd6,
         uint256 amount0,
         uint256 amount1
     );

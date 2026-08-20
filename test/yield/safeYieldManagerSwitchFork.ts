@@ -231,6 +231,31 @@ async function lastSwitched(manager: any, safeAddress: string) {
     return events[events.length - 1];
 }
 
+/**
+ * M-02 on real numbers. A concentrated-liquidity mint consumes the two sides
+ * only in the ratio its range demands, so a real in-kind switch always leaves
+ * one side behind — 4.8%-5.3% of the position's basis in these fixtures, which
+ * is money, not dust. The invariant that has to hold is conservation: what the
+ * replacement position still owes plus what the Safe was handed back equals
+ * what the original position owed.
+ */
+async function expectResidueConserved(manager: any, safeAddress: string, previousBasis: bigint) {
+    const events = await manager.queryFilter(manager.filters.SwitchResidueSettled(safeAddress), -5);
+    const settled = events[events.length - 1];
+    const { residualUsd6, newBasisUsd6, newCarryUsd6 } = settled.args;
+
+    if (residualUsd6 <= previousBasis) {
+        expect(newBasisUsd6 + residualUsd6).to.equal(previousBasis);
+        expect(newCarryUsd6).to.equal(0n);
+    } else {
+        // Residue beyond the basis is profit already withdrawn; it must survive
+        // as carry so the eventual close still charges a fee on it.
+        expect(newBasisUsd6).to.equal(0n);
+        expect(newCarryUsd6).to.equal(residualUsd6 - previousBasis);
+    }
+    return newBasisUsd6 as bigint;
+}
+
 describe("SafeYieldManager switchLp - integration (Base fork)", function () {
     this.timeout(300_000);
 
@@ -302,9 +327,10 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
 
         const switched = await lastSwitched(manager, safeAddress);
         const newTokenId = switched.args.newTokenId;
-        // In kind: the basis rides along unchanged, and every withdrawn token
-        // either entered the new LP or stayed in the Safe as residue.
-        expect(switched.args.carriedBasisUsd6).to.equal(initialBasis);
+        // In kind: every withdrawn token either entered the new LP or stayed in
+        // the Safe as residue. The basis rides along MINUS that residue —
+        // `expectResidueConserved` below pins the exact split.
+        expect(switched.args.carriedBasisUsd6).to.be.lessThanOrEqual(initialBasis);
         expect(switched.args.withdrawn0).to.be.greaterThan(0);
         expect(switched.args.withdrawn1).to.be.greaterThan(0);
         expect(switched.args.used0).to.be.lessThanOrEqual(switched.args.withdrawn0);
@@ -322,7 +348,8 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(await aeroNpm.ownerOf(newTokenId)).to.equal(safeAddress);
 
         expect(await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(AERODROME, newTokenId)).to.equal(initialBasis);
+        const basisAfterSwitch = await expectResidueConserved(manager, safeAddress, initialBasis);
+        expect(await manager.residualBasisUsd6Of(AERODROME, newTokenId)).to.equal(basisAfterSwitch);
         expect(await manager.positionHandlerOf(AERODROME, newTokenId)).to.equal(await aeroHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
 
@@ -346,11 +373,12 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
 
         const reverse = await lastSwitched(manager, safeAddress);
         const reverseTokenId = reverse.args.newTokenId;
-        expect(reverse.args.carriedBasisUsd6).to.equal(initialBasis);
+        expect(reverse.args.carriedBasisUsd6).to.be.lessThanOrEqual(initialBasis);
         await expect(aeroNpm.ownerOf(newTokenId)).to.be.reverted;
         expect(await uniNpm.ownerOf(reverseTokenId)).to.equal(safeAddress);
         expect(await manager.residualBasisUsd6Of(AERODROME, newTokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, reverseTokenId)).to.equal(initialBasis);
+        const basisAfterReverse = await expectResidueConserved(manager, safeAddress, basisAfterSwitch);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, reverseTokenId)).to.equal(basisAfterReverse);
         expect(await manager.positionHandlerOf(UNISWAP_V3, reverseTokenId)).to.equal(await uniHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
     });
@@ -408,7 +436,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(newTokenId).to.not.equal(oldTokenId);
         expect(switched.args.fromProtocol).to.equal(UNISWAP_V3);
         expect(switched.args.toProtocol).to.equal(UNISWAP_V3);
-        expect(switched.args.carriedBasisUsd6).to.equal(initialBasis);
+        expect(switched.args.carriedBasisUsd6).to.be.lessThanOrEqual(initialBasis);
 
         const uniNpm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, ethers.provider);
         await expect(uniNpm.ownerOf(oldTokenId)).to.be.reverted;
@@ -425,7 +453,8 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(position[4]).to.equal(FEE_TIER);
 
         expect(await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, newTokenId)).to.equal(initialBasis);
+        const basisAfterSwitch = await expectResidueConserved(manager, safeAddress, initialBasis);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, newTokenId)).to.equal(basisAfterSwitch);
         expect(await manager.positionHandlerOf(UNISWAP_V3, newTokenId)).to.equal(await uniHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
     });
@@ -482,7 +511,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
 
         const switched = await lastSwitched(manager, safeAddress);
         const v4TokenId = switched.args.newTokenId;
-        expect(switched.args.carriedBasisUsd6).to.equal(initialBasis);
+        expect(switched.args.carriedBasisUsd6).to.be.lessThanOrEqual(initialBasis);
 
         const uniNpm = new ethers.Contract(UNISWAP_V3_NPM_ADDRESS, NPM_ABI, ethers.provider);
         const v4Pm = new ethers.Contract(UNISWAP_V4_POSITION_MANAGER_ADDRESS, V4_PM_ABI, ethers.provider);
@@ -490,7 +519,8 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(await v4Pm.ownerOf(v4TokenId)).to.equal(safeAddress);
         expect(await v4Pm.getPositionLiquidity(v4TokenId)).to.be.greaterThan(0);
         expect(await manager.residualBasisUsd6Of(UNISWAP_V3, oldTokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(initialBasis);
+        const basisAfterSwitch = await expectResidueConserved(manager, safeAddress, initialBasis);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(basisAfterSwitch);
         expect(await manager.positionHandlerOf(UNISWAP_V4, v4TokenId)).to.equal(await v4Handler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
 
@@ -516,11 +546,12 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         const backTokenId = back.args.newTokenId;
         expect(back.args.fromProtocol).to.equal(UNISWAP_V4);
         expect(back.args.toProtocol).to.equal(UNISWAP_V3);
-        expect(back.args.carriedBasisUsd6).to.equal(initialBasis);
+        expect(back.args.carriedBasisUsd6).to.be.lessThanOrEqual(initialBasis);
         await expect(v4Pm.ownerOf(v4TokenId)).to.be.reverted;
         expect(await uniNpm.ownerOf(backTokenId)).to.equal(safeAddress);
         expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, backTokenId)).to.equal(initialBasis);
+        const basisAfterBack = await expectResidueConserved(manager, safeAddress, basisAfterSwitch);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V3, backTokenId)).to.equal(basisAfterBack);
         expect(await manager.positionHandlerOf(UNISWAP_V3, backTokenId)).to.equal(await uniHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
     });
@@ -585,7 +616,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
 
         const switched = await lastSwitched(manager, safeAddress);
         const v4TokenId = switched.args.newTokenId;
-        expect(switched.args.carriedBasisUsd6).to.equal(initialBasis);
+        expect(switched.args.carriedBasisUsd6).to.be.lessThanOrEqual(initialBasis);
 
         const aeroNpm = new ethers.Contract(AERODROME_SLIPSTREAM_NPM_ADDRESS, NPM_ABI, ethers.provider);
         const v4Pm = new ethers.Contract(UNISWAP_V4_POSITION_MANAGER_ADDRESS, V4_PM_ABI, ethers.provider);
@@ -593,7 +624,8 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(await v4Pm.ownerOf(v4TokenId)).to.equal(safeAddress);
         expect(await v4Pm.getPositionLiquidity(v4TokenId)).to.be.greaterThan(0);
         expect(await manager.residualBasisUsd6Of(AERODROME, oldTokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(initialBasis);
+        const basisAfterSwitch = await expectResidueConserved(manager, safeAddress, initialBasis);
+        expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(basisAfterSwitch);
         expect(await manager.positionHandlerOf(UNISWAP_V4, v4TokenId)).to.equal(await v4Handler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
 
@@ -618,11 +650,12 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         const backTokenId = back.args.newTokenId;
         expect(back.args.fromProtocol).to.equal(UNISWAP_V4);
         expect(back.args.toProtocol).to.equal(AERODROME);
-        expect(back.args.carriedBasisUsd6).to.equal(initialBasis);
+        expect(back.args.carriedBasisUsd6).to.be.lessThanOrEqual(initialBasis);
         await expect(v4Pm.ownerOf(v4TokenId)).to.be.reverted;
         expect(await aeroNpm.ownerOf(backTokenId)).to.equal(safeAddress);
         expect(await manager.residualBasisUsd6Of(UNISWAP_V4, v4TokenId)).to.equal(0);
-        expect(await manager.residualBasisUsd6Of(AERODROME, backTokenId)).to.equal(initialBasis);
+        const basisAfterBack = await expectResidueConserved(manager, safeAddress, basisAfterSwitch);
+        expect(await manager.residualBasisUsd6Of(AERODROME, backTokenId)).to.equal(basisAfterBack);
         expect(await manager.positionHandlerOf(AERODROME, backTokenId)).to.equal(await aeroHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
     });

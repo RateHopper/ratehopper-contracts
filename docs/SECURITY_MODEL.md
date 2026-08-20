@@ -138,6 +138,50 @@ the pool's own two tokens, no router, no price read — and is gated only by
 measure. That does hand users a fee-free exit, which changes nothing
 economically given I-01 above.
 
+## M-02 — Switch residue is valued and carried, not forgotten
+
+A concentrated-liquidity mint consumes its two sides only in the ratio the
+range demands, so it stops at whichever side runs out. An in-kind `switchLp`
+therefore always hands some of the withdrawal back to the Safe. Measured on a
+Base fork, that residue is **4.8%–5.3% of the position's basis** (9.55% of the
+token0 side across protocols, 2.75% when the range is carried over) — money,
+not dust.
+
+Left unaccounted, it is a fee leak with a repeatable exploit: switch, take
+profit out as residue, switch again, and close a position that looks
+break-even. So the residue is treated as a withdrawal:
+
+```
+U        = TWAP value of the residue, in USDC 6dp
+newBasis = max(basis - U, 0)
+newCarry = carry + max(U - basis, 0)
+close    : profit = max(currentValue + carryForExit - basisForExit, 0)
+```
+
+Basis is repaid first; only what exceeds it is profit, and that is carried onto
+the replacement position in `carryProfitUsd6Of`. Partial closes prorate carry by
+`exitBps` exactly as they prorate basis. The invariant the fork tests assert is
+conservation — `newBasis + U == previousBasis` whenever the residue is smaller
+than the basis.
+
+The valuation uses the H-01 reference TWAP, never spot: spot would let anyone
+able to nudge a pool under-report the residue and shrink the fee the eventual
+close charges. A switch that redeploys everything reads no price at all, and a
+switch that cannot price its residue reverts rather than guessing.
+
+`withdrawLp` releases any carry without charging it, and says so in
+`PositionWithdrawn.releasedCarryUsd6`. That is the same fee-free-exit property
+as I-01, made visible rather than silent.
+
+## M-01 — No router call is left without a floor
+
+M-01 named the collect fee swap, which shipped `amountOutMin: 1` because the
+amount collected is unknowable before the collect runs. H-01's derived floor
+removes the whole category: `_swapViaSafe` and `_swapV4ViaSafe` are the only
+two places in the handlers that reach a router, both compute the minimum from
+the amount actually being swapped, and a caller passing 1 — or 0 — simply gets
+the floor.
+
 ## I-03 — The pauser can disable exits, but cannot trap funds
 
 The pauser is a single address, set by `DEFAULT_ADMIN_ROLE` via `setPauser`. It
