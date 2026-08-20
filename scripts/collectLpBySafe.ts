@@ -64,7 +64,7 @@ const MANAGER_ADDRESS_OVERRIDE = "";
 const DRY_RUN = true;
 // ─────────────────────────────────────────────────────────────────────────
 
-const ZERO_LEG = { amountOutMin: 0n, expectedOut: 0n, poolParam: "0x" };
+const ZERO_LEG = { amountOutMin: 0n, poolParam: "0x" };
 
 async function main() {
     const OWNER_KEY = resolveOwnerKey();
@@ -119,11 +119,12 @@ async function main() {
     const block = await provider.getBlock("latest");
     const deadline = BigInt(block!.timestamp) + 1_200n;
 
-    // Build the AERO -> USDC reward-swap leg from the gauge's currently-earned
-    // AERO priced at the AERO/USDC pool spot. The handler swaps only the newly
-    // claimed delta, which is >= `earned` now (it keeps accruing until exec),
-    // so an amountOutMin derived from `earned` stays a safe floor.
-    let rewardLeg = ZERO_LEG as { amountOutMin: bigint; expectedOut: bigint; poolParam: string };
+    // The reward-swap leg carries a route, not a price. How much AERO the
+    // gauge will actually pay is only known when the collect executes, so the
+    // handler derives the min-out itself from the reference TWAP and the amount
+    // it really claimed. `earned` is read here purely to fail early and to log
+    // the floor that will apply.
+    let rewardLeg = ZERO_LEG as { amountOutMin: bigint; poolParam: string };
     if (SWAP_REWARD_TO_USDC) {
         if (PROTOCOL_NAME !== "aerodrome") throw new Error("swapRewardToUsdc is only meaningful for staked Aerodrome");
         const [aeroT0, aeroT1] =
@@ -154,32 +155,23 @@ async function main() {
         const earnedAero: bigint = await gauge.earned(SAFE_ADDRESS, TOKEN_ID);
         if (earnedAero === 0n) throw new Error("No AERO earned yet — nothing to swap");
 
-        const aeroUsdcPool = await clFactory.getPool(aeroT0, aeroT1, REWARD_TICK_SPACING);
-        const pool = new ethers.Contract(
-            aeroUsdcPool,
-            ["function slot0() view returns (uint160,int24,uint16,uint16,uint16,bool)"],
-            provider,
-        );
-        const [sqrtP] = await pool.slot0();
-        const sp = BigInt(sqrtP);
-        // token0 = USDC (6dp), token1 = AERO (18dp): AERO(token1) -> USDC(token0)
-        // out ≈ amountIn * 2^192 / sqrtP^2.
-        const expectedUsdcOut = (earnedAero * (1n << 192n)) / (sp * sp);
-        if (expectedUsdcOut === 0n) throw new Error("Earned AERO too small: USDC swap output rounds to zero");
-        const rewardAmountOutMin = (expectedUsdcOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
-        rewardLeg = {
-            amountOutMin: rewardAmountOutMin === 0n ? 1n : rewardAmountOutMin,
-            expectedOut: expectedUsdcOut,
-            poolParam: rewardPoolParam,
-        };
+        // The manager reverts here if AERO has no reference configured, which
+        // is the same revert the collect itself would hit — better to learn it
+        // now than mid-transaction.
+        const twapUsdcOut: bigint = await manager.twapQuote(AERO_ADDRESS, USDC_ADDRESS, earnedAero);
+        rewardLeg = { amountOutMin: 0n, poolParam: rewardPoolParam };
         console.log("- earned AERO (wei):", earnedAero.toString());
-        console.log("- reward expectedUsdcOut (6dp):", expectedUsdcOut.toString());
-        console.log("- reward amountOutMin (6dp):", rewardLeg.amountOutMin.toString());
+        console.log("- reward TWAP value (6dp):", twapUsdcOut.toString());
+        console.log(
+            "- reward floor at exec (6dp, on the amount actually claimed):",
+            ((twapUsdcOut * (10_000n - SLIPPAGE_BPS)) / 10_000n).toString(),
+        );
     }
 
-    // Fee amounts are unknown until the collect executes, so the fee swap legs
-    // carry the minimal validated floors (expectedOut/amountOutMin = 1).
-    const feeLeg = { amountOutMin: 1n, expectedOut: 1n, poolParam };
+    // Fee amounts are unknown until the collect executes, so this leg supplies
+    // only the route: the handler prices whatever it collected against the
+    // reference TWAP and floors the swap at that, less slippageBps.
+    const feeLeg = { amountOutMin: 0n, poolParam };
     const collectParams = {
         onBehalfOf: SAFE_ADDRESS,
         tokenId: TOKEN_ID,

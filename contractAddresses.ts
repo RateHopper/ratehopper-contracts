@@ -33,6 +33,16 @@ export const UNISWAP_V3_SWAP_ROUTER_ADDRESS = "0x2626664c2603336E57B271c5C0b26F4
 // canonical contracts and live WETH/USDC spacing-100 pool are also
 // exercised by test/yield/safeYieldManagerAerodromeFork.ts on a pinned Base fork.
 export const AERODROME_CL_FACTORY_ADDRESS = "0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A";
+
+// Uniswap V3 price references for SafeYieldManager's swap floor (H-01).
+// Chosen for observation history, not for where a swap executes: both carry
+// observationCardinality 2000, while other Base pools on the same pairs sit at
+// cardinality 1 and answer a 30-minute query with nothing but live spot.
+export const TWAP_REF_WETH_USDC_POOL = "0xb4CB800910B228ED3d0834cF79D697127BBB00e5"; // 0.01% fee
+export const TWAP_REF_AERO_USDC_POOL = "0xE5B5f522E98B5a2baAe212d4dA66b865B781DB97"; // 0.05% fee
+export const TWAP_WINDOW = 1800;
+export const TWAP_CARDINALITY = 60;
+
 export const AERODROME_SLIPSTREAM_NPM_ADDRESS = "0x827922686190790b37229fd06084350E74485b72";
 export const AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS = "0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5";
 // Aerodrome Voter — canonical pool -> stake pool registry. AerodromeYieldHandler

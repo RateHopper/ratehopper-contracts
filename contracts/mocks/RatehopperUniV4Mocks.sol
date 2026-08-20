@@ -318,6 +318,10 @@ contract MockUniversalRouter {
     uint256 public output;
     mapping(address => uint256) public outputFor;
     bool public enforceMinOut;
+    /// @dev Last min-out the plan actually carried — what a TWAP-floored
+    ///      handler is supposed to have raised it to.
+    uint256 public lastAmountOutMinimum;
+    uint256 public lastAmountIn;
 
     constructor(MockPermit2 _permit2) {
         PERMIT2 = _permit2;
@@ -361,6 +365,8 @@ contract MockUniversalRouter {
             PERMIT2.transferFrom(msg.sender, address(this), uint160(uint256(swap.amountIn)), tokenIn);
         }
 
+        lastAmountOutMinimum = swap.amountOutMinimum;
+        lastAmountIn = swap.amountIn;
         uint256 amountOut = outputFor[tokenOut] != 0 ? outputFor[tokenOut] : output;
         if (enforceMinOut) {
             require(amountOut >= takeMin && amountOut >= swap.amountOutMinimum, "ur: too little received");

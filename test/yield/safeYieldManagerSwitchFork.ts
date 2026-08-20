@@ -14,6 +14,9 @@ import {
     UNIVERSAL_ROUTER_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
+    TWAP_REF_WETH_USDC_POOL,
+    TWAP_WINDOW,
+    TWAP_CARDINALITY,
 } from "../../contractAddresses";
 import { encodeAerodromePoolParam, encodeUniV3PoolParam, encodeUniV4PoolParam } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
@@ -147,6 +150,8 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
         pauser.address,
     );
     await manager.waitForDeployment();
+    // Price reference for the swap floor (H-01).
+    await (await manager.setTwapConfig(WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)).wait();
 
     await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
@@ -209,7 +214,7 @@ async function openUniV3(
             tickUpper,
             mintAmount0Min: 0,
             mintAmount1Min: 0,
-            swap0: leg((openExpectedOut * 9_700n) / 10_000n, openExpectedOut, poolParam),
+            swap0: leg((openExpectedOut * 9_700n) / 10_000n, poolParam),
             swap1: ZERO_LEG,
             slippageBps: 300,
             deadline,
@@ -546,7 +551,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 tickUpper: aeroAlignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                swap0: leg((openExpectedOut * 9_700n) / 10_000n, openExpectedOut, AERO_POOL_PARAM),
+                swap0: leg((openExpectedOut * 9_700n) / 10_000n, AERO_POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 deadline,

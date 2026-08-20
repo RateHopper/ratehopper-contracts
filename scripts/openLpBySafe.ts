@@ -184,8 +184,8 @@ async function main() {
         mintAmount0Min: mint.amount0Min,
         mintAmount1Min: mint.amount1Min,
         // WETH is token0 on Base; the USDC side needs no swap leg.
-        swap0: { amountOutMin: swapAmountOutMin, expectedOut: expectedSwapOut, poolParam },
-        swap1: { amountOutMin: 0, expectedOut: 0, poolParam: "0x" },
+        swap0: { amountOutMin: swapAmountOutMin, poolParam },
+        swap1: { amountOutMin: 0, poolParam: "0x" },
         slippageBps: SLIPPAGE_BPS,
         deadline,
         lpPoolParam: poolParam,

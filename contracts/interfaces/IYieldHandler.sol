@@ -6,9 +6,13 @@ pragma solidity ^0.8.28;
 ///         it also pins the pair being traded). A leg whose pool token IS
 ///         USDC needs no swap and is ignored entirely — leave its fields
 ///         zero/empty.
+/// @dev There is deliberately no caller-supplied "expected output" here. A
+///      floor that a caller certifies against its own expectation is not a
+///      floor: passing 1 and 1 satisfies any ratio between them. `amountOutMin`
+///      is checked against a reference TWAP the contract reads itself — see
+///      TwapOracle — so this struct carries only what the contract cannot know.
 struct SwapLeg {
     uint256 amountOutMin;
-    uint256 expectedOut;
     bytes poolParam;
 }
 

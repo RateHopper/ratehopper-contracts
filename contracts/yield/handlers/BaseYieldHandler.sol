@@ -11,6 +11,7 @@ import {ISafe} from "../../interfaces/safe/ISafe.sol";
 import {INonfungiblePositionManager} from "../../interfaces/uniswapV3/INonfungiblePositionManager.sol";
 import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, WithdrawLpParams, OpenLpInKindParams, SwapLeg} from "../../interfaces/IYieldHandler.sol";
 import {TokenReturnLib} from "../libraries/TokenReturnLib.sol";
+import {TwapOracle} from "../libraries/TwapOracle.sol";
 import {YieldStorage} from "./YieldStorage.sol";
 import "../../common/Types.sol";
 
@@ -364,8 +365,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         }
 
         // Swap the non-USDC legs this close produced back to USDC.
-        _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, 26, 10, 27);
-        _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, 34, 35, 36);
+        _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, p.slippageBps, 26, 10, 27);
+        _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, p.slippageBps, 34, 35, 36);
 
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
         // Caller's final-value guard on gross realized USDC.
@@ -476,7 +477,17 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             if (p.swapRewardToUsdc) {
                 if (block.timestamp > p.deadline) revert DeadlineExpired();
                 _validateSwapLeg(rewardToken, p.rewardSwap, p.slippageBps);
-                _swapDeltaToUsdc(p.onBehalfOf, rewardToken, rewardBefore, p.rewardSwap, p.deadline, 38, 39, 40);
+                _swapDeltaToUsdc(
+                    p.onBehalfOf,
+                    rewardToken,
+                    rewardBefore,
+                    p.rewardSwap,
+                    p.deadline,
+                    p.slippageBps,
+                    38,
+                    39,
+                    40
+                );
             }
             return;
         }
@@ -498,8 +509,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
         _collectLpFees(p.onBehalfOf, p.tokenId, token0, token1);
         if (p.swapFeesToUsdc) {
-            _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, 26, 10, 27);
-            _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, 34, 35, 36);
+            _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, p.slippageBps, 26, 10, 27);
+            _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, p.slippageBps, 34, 35, 36);
         }
     }
 
@@ -532,6 +543,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             halfUsdc,
             leg.amountOutMin,
             p.deadline,
+            p.slippageBps,
             approveStep,
             execStep,
             resetStep
@@ -635,10 +647,14 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         uint256 amountIn,
         uint256 amountOutMin,
         uint256 deadline,
+        uint16 slippageBps,
         uint8 approveStep,
         uint8 execStep,
         uint8 resetStep
     ) internal {
+        // Every router call in this handler funnels through here, so the floor
+        // is enforced structurally rather than by remembering to call it.
+        amountOutMin = _twapMinOut(tokenIn, tokenOut, amountIn, amountOutMin, slippageBps);
         bytes memory swapData = _buildSwapCalldata(
             tokenIn,
             tokenOut,
@@ -662,6 +678,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         uint256 balanceBefore,
         SwapLeg calldata leg,
         uint256 deadline,
+        uint16 slippageBps,
         uint8 approveStep,
         uint8 execStep,
         uint8 resetStep
@@ -677,6 +694,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
                 delta,
                 leg.amountOutMin,
                 deadline,
+                slippageBps,
                 approveStep,
                 execStep,
                 resetStep
@@ -684,23 +702,48 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         }
     }
 
-    /// @dev Ties `slippageBps` to the caller's quoter-derived min-out, checks
-    ///      the leg's pool param against the allow-list, and pins the leg's
-    ///      pool to the {token, USDC} pair so swaps can only route through a
-    ///      pool that actually trades the leg's token against USDC. The USDC
+    /// @dev Route checks only: the leg's pool param must be allow-listed and
+    ///      must resolve to a pool that actually trades {token, USDC}. The USDC
     ///      side of a pair has no swap, so its (ignored) leg is not validated.
+    ///      The PRICE check is not here — it needs the input amount, which is
+    ///      only known at the swap itself, so it lives in `_swapViaSafe`.
     function _validateSwapLeg(address token, SwapLeg calldata leg, uint16 slippageBps) internal view {
         if (token == address(USDC)) return;
         if (slippageBps == 0) revert SlippageTooLow();
         if (slippageBps > _yieldStorage().maxSlippageBps) revert SlippageAboveMax();
         _validatePoolParamAllowed(leg.poolParam);
-        if (leg.amountOutMin == 0) revert InvalidSwapAmountOutMin();
-        if (leg.expectedOut == 0) revert InvalidExpectedSwapOut();
-        if (leg.amountOutMin < (leg.expectedOut * (10_000 - slippageBps)) / 10_000) {
-            revert SwapMinBelowSlippageFloor();
-        }
         (address expect0, address expect1) = token < address(USDC) ? (token, address(USDC)) : (address(USDC), token);
         _validatePool(_getPool(leg.poolParam), expect0, expect1);
+    }
+
+    /// @dev Min-out actually handed to the router: what the reference TWAP says
+    ///      `amountIn` is worth, less `slippageBps`, and never less than what
+    ///      the caller asked for. The caller may TIGHTEN the bound; it can no
+    ///      longer loosen it, which is the whole point — the previous floor was
+    ///      checked against a number the same caller supplied.
+    ///
+    ///      Deriving rather than merely validating also fixes the case that has
+    ///      no honest answer otherwise: `collectLp` swaps fees whose size is
+    ///      unknown until the collect executes, so no caller-supplied absolute
+    ///      minimum can be right. Such callers pass 0 and get the floor.
+    ///
+    ///      Reverts when the token has no reference configured — swapping a
+    ///      token nobody has priced is exactly the case that must not proceed,
+    ///      and `withdrawLp` still exits such a position in kind.
+    function _twapMinOut(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 callerMinOut,
+        uint16 slippageBps
+    ) internal view returns (uint256) {
+        address token = tokenIn == address(USDC) ? tokenOut : tokenIn;
+        TwapConfig memory cfg = _yieldStorage().twapConfigOf[token];
+        if (cfg.pool == address(0)) revert TwapOracle.TwapNotConfigured(token);
+        uint256 floor = (TwapOracle.quote(cfg, tokenIn, tokenOut, amountIn) * (10_000 - slippageBps)) / 10_000;
+        // A swap with no effective floor on either side must not proceed.
+        if (floor == 0 && callerMinOut == 0) revert InvalidSwapAmountOutMin();
+        return callerMinOut > floor ? callerMinOut : floor;
     }
 
     function _validatePoolParamAllowed(bytes memory poolParam) internal view {

@@ -30,6 +30,8 @@ const PERF_FEE_BPS = 1000n; // 10%
 const COLLECT_FEE_BPS = 250n; // 2.5%
 const MAX_FEE_BPS = 2000;
 const Q96 = 1n << 96n;
+const TWAP_WINDOW = 1800;
+const TWAP_CARDINALITY = 60;
 
 function timelockCall(timelock: any, manager: any, functionName: string, args: any[]) {
     return timelock.execute(manager.target, manager.interface.encodeFunctionData(functionName, args));
@@ -61,7 +63,7 @@ function openParams(safeAddr: string, poolParam: string, overrides: Record<strin
         tickUpper: 100,
         mintAmount0Min: 0,
         mintAmount1Min: 0,
-        swap0: leg(WETH_OUT, WETH_OUT, poolParam),
+        swap0: leg(WETH_OUT, poolParam),
         swap1: ZERO_LEG,
         slippageBps: SLIP,
         deadline: DEADLINE,
@@ -81,7 +83,7 @@ function closeParams(
         onBehalfOf: safeAddr,
         tokenId,
         exitBps: 10_000,
-        swap0: leg(CLOSE_OUT, CLOSE_OUT, poolParam),
+        swap0: leg(CLOSE_OUT, poolParam),
         swap1: ZERO_LEG,
         slippageBps: SLIP,
         decreaseAmount0Min: 0,
@@ -102,7 +104,7 @@ function collectParams(
         onBehalfOf: safeAddr,
         tokenId,
         swapFeesToUsdc: false,
-        swap0: leg(CLOSE_OUT, CLOSE_OUT, poolParam),
+        swap0: leg(CLOSE_OUT, poolParam),
         swap1: ZERO_LEG,
         swapRewardToUsdc: false,
         rewardSwap: ZERO_LEG,
@@ -279,6 +281,15 @@ async function deployUniV4Harness() {
     await (await uniRouter.setOutput(WETH_OUT)).wait();
     await (await clRouter.setOutput(WETH_OUT)).wait();
     await (await universalRouter.setOutput(WETH_OUT)).wait();
+
+    // Price references. Native ETH has no address of its own, so a native V4
+    // pool's non-USDC side is priced under WETH.
+    const [c0, c1] =
+        tokenCAddr.toLowerCase() < usdcAddr.toLowerCase() ? [tokenCAddr, usdcAddr] : [usdcAddr, tokenCAddr];
+    const tokenCRef = await UniPool.deploy(c0, c1, Q96, 10n ** 18n);
+    await tokenCRef.waitForDeployment();
+    await (await manager.setTwapConfig(wethAddr, await uniPool.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY)).wait();
+    await (await manager.setTwapConfig(tokenCAddr, await tokenCRef.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY)).wait();
 
     return {
         deployer,
@@ -506,10 +517,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .openLp(
-                        UNISWAP_V4,
-                        openParams(safeAddr, V4_KEY, { swap0: leg(WETH_OUT, WETH_OUT, V4_WRONG1_KEY) }),
-                    ),
+                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(WETH_OUT, V4_WRONG1_KEY) })),
             ).to.be.revertedWithCustomError(v4Handler, "WrongTokenPair");
         });
 
@@ -530,36 +538,38 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             ).to.be.revertedWithCustomError(v4Handler, "LpNotOnSafe");
         });
 
-        it("validates the swap leg: slippage bounds and quoter tie-in", async function () {
+        it("validates the swap leg: slippage bounds and route", async function () {
             const { manager, operatorEOA, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
             const open = (overrides: Record<string, any>) =>
                 manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, overrides));
 
             await expect(open({ slippageBps: 0 })).to.be.revertedWithCustomError(v4Handler, "SlippageTooLow");
             await expect(open({ slippageBps: 301 })).to.be.revertedWithCustomError(v4Handler, "SlippageAboveMax");
-            await expect(open({ swap0: leg(0n, WETH_OUT, V4_KEY) })).to.be.revertedWithCustomError(
-                v4Handler,
-                "InvalidSwapAmountOutMin",
-            );
-            await expect(open({ swap0: leg(WETH_OUT, 0n, V4_KEY) })).to.be.revertedWithCustomError(
-                v4Handler,
-                "InvalidExpectedSwapOut",
-            );
-            // amountOutMin further below expectedOut than slippageBps allows.
-            await expect(open({ swap0: leg(1_000_000n, WETH_OUT, V4_KEY) })).to.be.revertedWithCustomError(
-                v4Handler,
-                "SwapMinBelowSlippageFloor",
-            );
             // Leg pool must trade the {token, USDC} pair — the native pool does not.
-            await expect(open({ swap0: leg(WETH_OUT, WETH_OUT, V4_NATIVE_KEY) })).to.be.revertedWithCustomError(
+            await expect(open({ swap0: leg(WETH_OUT, V4_NATIVE_KEY) })).to.be.revertedWithCustomError(
                 v4Handler,
                 "WrongTokenPair",
             );
             // Leg pool param must itself be allow-listed.
-            await expect(open({ swap0: leg(WETH_OUT, WETH_OUT, V4_BAD_KEY) })).to.be.revertedWithCustomError(
+            await expect(open({ swap0: leg(WETH_OUT, V4_BAD_KEY) })).to.be.revertedWithCustomError(
                 v4Handler,
                 "PoolParamNotAllowed",
             );
+        });
+
+        it("floors the UniversalRouter minimum at the V3 reference TWAP", async function () {
+            const { manager, operatorEOA, safeAddr, universalRouter } = await loadFixture(deployUniV4Harness);
+            // A V4 swap priced off Uniswap V3 history: the reference follows the
+            // token, not the venue it trades on.
+            const halfUsdc = USDC_AMOUNT / 2n;
+            const floor = (halfUsdc * (10_000n - BigInt(SLIP))) / 10_000n;
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) }))
+            ).wait();
+            expect(await universalRouter.lastAmountIn()).to.equal(halfUsdc);
+            expect(await universalRouter.lastAmountOutMinimum()).to.equal(floor);
         });
 
         it("maps module-call failures to their step codes", async function () {
@@ -884,7 +894,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         function usdc0Open(safeAddr: string, overrides: Record<string, any> = {}) {
             return openParams(safeAddr, V4_USDC0_KEY, {
                 swap0: ZERO_LEG,
-                swap1: leg(WETH_OUT, WETH_OUT, V4_USDC0_KEY),
+                swap1: leg(WETH_OUT, V4_USDC0_KEY),
                 ...overrides,
             });
         }
@@ -908,7 +918,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                     collectParams(safeAddr, 1, V4_USDC0_KEY, {
                         swapFeesToUsdc: true,
                         swap0: ZERO_LEG,
-                        swap1: leg(CLOSE_OUT, CLOSE_OUT, V4_USDC0_KEY),
+                        swap1: leg(CLOSE_OUT, V4_USDC0_KEY),
                     }),
                 ),
             )
@@ -922,7 +932,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                     UNISWAP_V4,
                     closeParams(safeAddr, 1, V4_USDC0_KEY, {
                         swap0: ZERO_LEG,
-                        swap1: leg(CLOSE_OUT, CLOSE_OUT, V4_USDC0_KEY),
+                        swap1: leg(CLOSE_OUT, V4_USDC0_KEY),
                     }),
                 ),
             ).to.emit(manager, "PositionClosed");

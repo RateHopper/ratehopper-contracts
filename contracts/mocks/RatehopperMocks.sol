@@ -206,6 +206,10 @@ contract MockSwapRouter {
     mapping(address => uint256) public outputFor;
     address public callbackTarget;
     bytes public callbackData;
+    /// @dev Last min-out the caller actually handed the router — the value a
+    ///      TWAP-floored handler is supposed to have raised.
+    uint256 public lastAmountOutMinimum;
+    uint256 public lastAmountIn;
 
     function setOutput(uint256 newOutput) external {
         output = newOutput;
@@ -221,6 +225,8 @@ contract MockSwapRouter {
     }
 
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
+        lastAmountOutMinimum = params.amountOutMinimum;
+        lastAmountIn = params.amountIn;
         if (callbackTarget != address(0)) {
             (bool success, bytes memory ret) = callbackTarget.call(callbackData);
             if (!success) {
@@ -246,6 +252,18 @@ contract MockUniswapV3Pool {
     uint160 public sqrtPriceX96;
     uint128 public liquidity;
 
+    // Oracle surface. Defaults describe a deep, actively-observed pool whose
+    // average equals its spot tick, so a fixture that sets a realistic
+    // `sqrtPriceX96` gets a realistic TWAP without extra wiring. Each
+    // degradation the real world produces is separately settable.
+    int24 public twapTick;
+    int56 public cumulativeDelta;
+    bool public useCumulativeDelta;
+    uint16 public observationIndex;
+    uint16 public observationCardinality = 3000;
+    uint32 public observationAge;
+    bool public observeReverts;
+
     constructor(address _token0, address _token1, uint160 _sqrtPriceX96, uint128 _liquidity) {
         token0 = _token0;
         token1 = _token1;
@@ -253,8 +271,49 @@ contract MockUniswapV3Pool {
         liquidity = _liquidity;
     }
 
+    function setTwapTick(int24 newTick) external {
+        twapTick = newTick;
+        useCumulativeDelta = false;
+    }
+
+    /// @dev Drive `observe` by raw cumulative delta so a test can produce a
+    ///      non-integer mean and exercise the rounding direction.
+    function setCumulativeDelta(int56 newDelta) external {
+        cumulativeDelta = newDelta;
+        useCumulativeDelta = true;
+    }
+
+    function setObservationCardinality(uint16 newCardinality) external {
+        observationCardinality = newCardinality;
+    }
+
+    /// @dev Seconds by which the newest observation trails now.
+    function setObservationAge(uint32 newAge) external {
+        observationAge = newAge;
+    }
+
+    function setObserveReverts(bool newValue) external {
+        observeReverts = newValue;
+    }
+
     function slot0() external view returns (uint160, int24, uint16, uint16, uint16, uint8, bool) {
-        return (sqrtPriceX96, 0, 0, 0, 0, 0, true);
+        return (sqrtPriceX96, twapTick, observationIndex, observationCardinality, observationCardinality, 0, true);
+    }
+
+    function observations(uint256) external view returns (uint32, int56, uint160, bool) {
+        return (uint32(block.timestamp) - observationAge, 0, 0, true);
+    }
+
+    function observe(
+        uint32[] calldata secondsAgos
+    ) external view returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidity) {
+        // The real pool reverts `OLD` when the window predates its oldest
+        // observation. Nothing catches this — that is the point.
+        require(!observeReverts, "OLD");
+        tickCumulatives = new int56[](2);
+        secondsPerLiquidity = new uint160[](2);
+        tickCumulatives[0] = 0;
+        tickCumulatives[1] = useCumulativeDelta ? cumulativeDelta : int56(twapTick) * int56(uint56(secondsAgos[0]));
     }
 }
 

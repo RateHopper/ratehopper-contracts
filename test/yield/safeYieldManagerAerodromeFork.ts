@@ -8,9 +8,13 @@ import {
     AERODROME_VOTER_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
+    TWAP_REF_WETH_USDC_POOL,
+    TWAP_REF_AERO_USDC_POOL,
+    TWAP_WINDOW,
+    TWAP_CARDINALITY,
 } from "../../contractAddresses";
 import { encodeAerodromePoolParam } from "../../contractAddresses";
-import { ZERO_LEG, leg } from "../helpers/utils";
+import { ZERO_LEG, leg, pokeTwapPool } from "../helpers/utils";
 import { deployRealSafe, enableModuleOnSafe } from "../helpers/deployRealSafe";
 
 const AERODROME = 1;
@@ -82,6 +86,9 @@ async function deployAeroStack() {
         pauser.address,
     );
     await manager.waitForDeployment();
+    // Price reference for the swap floor (H-01).
+    await (await manager.setTwapConfig(WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)).wait();
+    await (await manager.setTwapConfig(AERO_ADDRESS, TWAP_REF_AERO_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)).wait();
 
     await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
@@ -245,7 +252,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             tickUpper: alignedTick + 1_000,
             mintAmount0Min: 0,
             mintAmount1Min: 0,
-            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
+            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, POOL_PARAM),
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
@@ -256,7 +263,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         await expect(
             manager.connect(operator).openLp(AERODROME, {
                 ...openParams,
-                swap0: leg((expectedSwapOut * 2n * 9_900n) / 10_000n, expectedSwapOut * 2n, POOL_PARAM),
+                swap0: leg((expectedSwapOut * 2n * 9_900n) / 10_000n, POOL_PARAM),
             }),
         ).to.be.revertedWith("Too little received");
 
@@ -295,7 +302,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps,
-                swap0: leg((expectedOut * 9_700n) / 10_000n, expectedOut, POOL_PARAM),
+                swap0: leg((expectedOut * 9_700n) / 10_000n, POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 decreaseAmount0Min: 0,
@@ -344,7 +351,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             tickUpper: alignedTick + 1_000,
             mintAmount0Min: 0,
             mintAmount1Min: 0,
-            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
+            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, POOL_PARAM),
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
@@ -370,7 +377,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             onBehalfOf: safeAddress,
             tokenId,
             exitBps: 10_000,
-            swap0: leg((expectedOut * 9_700n) / 10_000n, expectedOut, POOL_PARAM),
+            swap0: leg((expectedOut * 9_700n) / 10_000n, POOL_PARAM),
             swap1: ZERO_LEG,
             slippageBps: 300,
             decreaseAmount0Min: 0,
@@ -428,7 +435,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 tickUpper: alignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
+                swap0: leg((expectedSwapOut * 9_900n) / 10_000n, POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 100,
                 deadline,
@@ -463,6 +470,10 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const warp = async () => {
             await network.provider.send("evm_increaseTime", [warpStep]);
             await network.provider.send("evm_mine");
+            // A live chain trades while time passes; a warped fork does not, so
+            // the references would look abandoned to the oracle.
+            await pokeTwapPool(TWAP_REF_WETH_USDC_POOL);
+            await pokeTwapPool(TWAP_REF_AERO_USDC_POOL);
         };
 
         const npmOwner = new ethers.Contract(AERODROME_SLIPSTREAM_NPM_ADDRESS, NPM_ABI, ethers.provider);
@@ -492,7 +503,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps: 5_000,
-                swap0: leg((halfOut * 9_700n) / 10_000n, halfOut, POOL_PARAM),
+                swap0: leg((halfOut * 9_700n) / 10_000n, POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 decreaseAmount0Min: 0,
@@ -510,7 +521,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps: 10_000,
-                swap0: leg((restOut * 9_700n) / 10_000n, restOut, POOL_PARAM),
+                swap0: leg((restOut * 9_700n) / 10_000n, POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 decreaseAmount0Min: 0,
@@ -547,7 +558,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 tickUpper: alignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
+                swap0: leg((expectedSwapOut * 9_900n) / 10_000n, POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 100,
                 deadline,
@@ -577,7 +588,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps: 5_000,
-                swap0: leg((halfWethOut * 9_700n) / 10_000n, halfWethOut, POOL_PARAM),
+                swap0: leg((halfWethOut * 9_700n) / 10_000n, POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 decreaseAmount0Min: 0,
@@ -598,6 +609,8 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         // partial close had left the position on the Safe.
         await network.provider.send("evm_increaseTime", [5 * 86_400]);
         await network.provider.send("evm_mine");
+        await pokeTwapPool(TWAP_REF_WETH_USDC_POOL);
+        await pokeTwapPool(TWAP_REF_AERO_USDC_POOL);
         const stakePool = new ethers.Contract(
             stakePoolAddress,
             ["function earned(address,uint256) view returns (uint256)"],
@@ -629,7 +642,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 tickUpper: alignedTick + 1_000,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
+                swap0: leg((expectedSwapOut * 9_900n) / 10_000n, POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 100,
                 deadline,
@@ -671,6 +684,8 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         // USDC through the allowed live USDC/AERO CL pool.
         await network.provider.send("evm_increaseTime", [5 * 86_400]);
         await network.provider.send("evm_mine");
+        await pokeTwapPool(TWAP_REF_WETH_USDC_POOL);
+        await pokeTwapPool(TWAP_REF_AERO_USDC_POOL);
 
         const stakePool = new ethers.Contract(
             stakePoolAddress,
@@ -709,7 +724,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 swap0: ZERO_LEG,
                 swap1: ZERO_LEG,
                 swapRewardToUsdc: true,
-                rewardSwap: leg((expectedUsdcOut * 9_700n) / 10_000n, expectedUsdcOut, AERO_PARAM),
+                rewardSwap: leg((expectedUsdcOut * 9_700n) / 10_000n, AERO_PARAM),
                 slippageBps: 300,
                 deadline: deadline2,
             }),
@@ -732,7 +747,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps: 10_000,
-                swap0: leg((expectedOut * 9_700n) / 10_000n, expectedOut, POOL_PARAM),
+                swap0: leg((expectedOut * 9_700n) / 10_000n, POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 decreaseAmount0Min: 0,
@@ -780,7 +795,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             mintAmount1Min: 0,
             // USDC is token0: the funding half stays put, swap1 acquires AERO.
             swap0: ZERO_LEG,
-            swap1: leg((expectedSwapOut * 9_700n) / 10_000n, expectedSwapOut, AERO_POOL_PARAM),
+            swap1: leg((expectedSwapOut * 9_700n) / 10_000n, AERO_POOL_PARAM),
             slippageBps: 300,
             deadline,
             lpPoolParam: AERO_POOL_PARAM,
@@ -823,7 +838,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 tokenId,
                 exitBps,
                 swap0: ZERO_LEG,
-                swap1: leg((expectedOut * 9_700n) / 10_000n, expectedOut, AERO_POOL_PARAM),
+                swap1: leg((expectedOut * 9_700n) / 10_000n, AERO_POOL_PARAM),
                 slippageBps: 300,
                 decreaseAmount0Min: 0,
                 decreaseAmount1Min: 0,
@@ -873,7 +888,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 tickUpper: alignedTick + 2 * TICK_SPACING,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                swap0: leg((expectedSwapOut * 9_700n) / 10_000n, expectedSwapOut, POOL_PARAM),
+                swap0: leg((expectedSwapOut * 9_700n) / 10_000n, POOL_PARAM),
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 deadline,
@@ -899,8 +914,8 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 onBehalfOf: safeAddress,
                 tokenId,
                 swapFeesToUsdc: true,
-                swap0: leg(1n, 1n, POOL_PARAM),
-                swap1: leg(1n, 1n, POOL_PARAM),
+                swap0: leg(1n, POOL_PARAM),
+                swap1: leg(1n, POOL_PARAM),
                 swapRewardToUsdc: false,
                 rewardSwap: ZERO_LEG,
                 slippageBps: 300,
@@ -960,7 +975,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
                 swap0: ZERO_LEG,
-                swap1: leg((expectedSwapOut * 9_700n) / 10_000n, expectedSwapOut, AERO_POOL_PARAM),
+                swap1: leg((expectedSwapOut * 9_700n) / 10_000n, AERO_POOL_PARAM),
                 slippageBps: 300,
                 deadline,
                 lpPoolParam: AERO_POOL_PARAM,
@@ -994,7 +1009,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 tokenId,
                 exitBps: 10_000,
                 swap0: ZERO_LEG,
-                swap1: leg((expectedOut * 9_700n) / 10_000n, expectedOut, AERO_POOL_PARAM),
+                swap1: leg((expectedOut * 9_700n) / 10_000n, AERO_POOL_PARAM),
                 slippageBps: 300,
                 decreaseAmount0Min: 0,
                 decreaseAmount1Min: 0,

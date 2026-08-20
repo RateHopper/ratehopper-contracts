@@ -26,6 +26,7 @@ const GATED = [
     "contracts/yield/handlers/AerodromeYieldHandler.sol",
     "contracts/yield/handlers/UniV4YieldHandler.sol",
     "contracts/yield/handlers/YieldStorage.sol",
+    "contracts/yield/libraries/TwapOracle.sol",
 ];
 
 function isGated(key) {

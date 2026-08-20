@@ -161,8 +161,77 @@ export const eip1193Provider: Eip1193Provider = {
  * SafeYieldManager SwapLeg builders — one shape for every yield test so a
  * struct change is a single edit here, not one per test file.
  */
-export function leg(amountOutMin: bigint | number, expectedOut: bigint | number, poolParam: string) {
-    return { amountOutMin, expectedOut, poolParam };
+export function leg(amountOutMin: bigint | number, poolParam: string) {
+    return { amountOutMin, poolParam };
 }
 
-export const ZERO_LEG = { amountOutMin: 0, expectedOut: 0, poolParam: "0x" } as const;
+export const ZERO_LEG = { amountOutMin: 0, poolParam: "0x" } as const;
+
+/**
+ * Write a fresh observation into a Uniswap V3 TWAP reference pool.
+ *
+ * A live chain keeps writing observations as time passes, because the pool
+ * keeps being traded. A forked chain that only advances its clock does not, so
+ * after a multi-day `evm_increaseTime` the reference looks abandoned and the
+ * oracle correctly refuses it.
+ *
+ * The swap has to be big enough to MOVE THE TICK: Uniswap V3 writes an
+ * observation only when `state.tick != slot0Start.tick`, so a dust trade
+ * changes nothing. It does not disturb the reported average, because the
+ * observation it writes carries the PRE-swap tick and the extrapolated tail is
+ * zero in that same block.
+ */
+export async function pokeTwapPool(poolAddress: string) {
+    const { ethers, network } = require("hardhat");
+    const erc20 = [
+        "function transfer(address,uint256) returns (bool)",
+        "function approve(address,uint256) returns (bool)",
+        "function balanceOf(address) view returns (uint256)",
+    ];
+    const poolAbi = [
+        "function token0() view returns (address)",
+        "function token1() view returns (address)",
+        "function fee() view returns (uint24)",
+        "function slot0() view returns (uint160,int24,uint16 observationIndex,uint16,uint16,uint8,bool)",
+        "function observations(uint256) view returns (uint32 blockTimestamp,int56,uint160,bool)",
+    ];
+    const pool = new ethers.Contract(poolAddress, poolAbi, ethers.provider);
+    const [token0, token1, fee] = await Promise.all([pool.token0(), pool.token1(), pool.fee()]);
+    const before = (await pool.observations((await pool.slot0()).observationIndex)).blockTimestamp;
+
+    const [funder] = await ethers.getSigners();
+    // The pool is a deterministic holder of its own token0 on the fork; the
+    // swap hands it straight back.
+    await network.provider.send("hardhat_setBalance", [poolAddress, "0x8AC7230489E80000"]);
+    const poolSigner = await ethers.getImpersonatedSigner(poolAddress);
+    const poolToken0 = new ethers.Contract(token0, erc20, poolSigner);
+    const amountIn = (await poolToken0.balanceOf(poolAddress)) / 50n;
+    await (await poolToken0.transfer(funder.address, amountIn)).wait();
+    await network.provider.send("hardhat_stopImpersonatingAccount", [poolAddress]);
+
+    const routerAddress = "0x2626664c2603336E57B271c5C0b26F421741e481";
+    await (await new ethers.Contract(token0, erc20, funder).approve(routerAddress, amountIn)).wait();
+    const router = new ethers.Contract(
+        routerAddress,
+        [
+            "function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256)",
+        ],
+        funder,
+    );
+    await (
+        await router.exactInputSingle({
+            tokenIn: token0,
+            tokenOut: token1,
+            fee,
+            recipient: funder.address,
+            amountIn,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0,
+        })
+    ).wait();
+
+    const after = (await pool.observations((await pool.slot0()).observationIndex)).blockTimestamp;
+    if (after === before) {
+        throw new Error(`pokeTwapPool(${poolAddress}) did not move the tick, so no observation was written`);
+    }
+}

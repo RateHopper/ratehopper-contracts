@@ -18,6 +18,7 @@ import {V4Actions, V4Commands} from "../../interfaces/uniswapV4/V4Constants.sol"
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {TokenReturnLib} from "../libraries/TokenReturnLib.sol";
+import {TwapOracle} from "../libraries/TwapOracle.sol";
 import {YieldStorage} from "./YieldStorage.sol";
 import "../../common/Types.sol";
 
@@ -98,6 +99,17 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         uint256 deadline;
     }
 
+    /// @dev The five module-call step codes a Permit2 swap reports failures
+    ///      under. Grouped for the same reason as `MintArgs`: passing them flat
+    ///      alongside the swap's own arguments overruns the stack under viaIR.
+    struct SwapSteps {
+        uint8 approveStep;
+        uint8 permit2Step;
+        uint8 execStep;
+        uint8 permit2ResetStep;
+        uint8 resetStep;
+    }
+
     modifier onlyDelegatecall() {
         if (address(this) == __self) revert OnlyDelegatecall();
         _;
@@ -147,8 +159,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         uint256 half0 = p.usdcAmount / 2;
         uint256 half1 = p.usdcAmount - half0;
 
-        uint256 desired0 = _acquireSide(p, key.currency0, half0, p.swap0, 41, 42, 43, 44, 45);
-        uint256 desired1 = _acquireSide(p, key.currency1, half1, p.swap1, 46, 47, 48, 49, 50);
+        uint256 desired0 = _acquireSide(p, key.currency0, half0, p.swap0, SwapSteps(41, 42, 43, 44, 45));
+        uint256 desired1 = _acquireSide(p, key.currency1, half1, p.swap1, SwapSteps(46, 47, 48, 49, 50));
 
         // The leg swaps above moved the pool price, so the mint must price
         // against a FRESH read — not the one `_validatePoolReady` returned.
@@ -240,8 +252,24 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         }
 
         // Swap the non-USDC legs this close produced back to USDC.
-        _swapDeltaToUsdc(p.onBehalfOf, key.currency0, t0Before, p.swap0, p.deadline, 63, 64, 65, 66, 67);
-        _swapDeltaToUsdc(p.onBehalfOf, key.currency1, t1Before, p.swap1, p.deadline, 68, 69, 70, 71, 72);
+        _swapDeltaToUsdc(
+            p.onBehalfOf,
+            key.currency0,
+            t0Before,
+            p.swap0,
+            p.deadline,
+            p.slippageBps,
+            SwapSteps(63, 64, 65, 66, 67)
+        );
+        _swapDeltaToUsdc(
+            p.onBehalfOf,
+            key.currency1,
+            t1Before,
+            p.swap1,
+            p.deadline,
+            p.slippageBps,
+            SwapSteps(68, 69, 70, 71, 72)
+        );
 
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
         // Caller's final-value guard on gross realized USDC.
@@ -401,8 +429,24 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
 
         _collectV4Fees(p.onBehalfOf, p.tokenId, key);
         if (p.swapFeesToUsdc) {
-            _swapDeltaToUsdc(p.onBehalfOf, key.currency0, t0Before, p.swap0, p.deadline, 63, 64, 65, 66, 67);
-            _swapDeltaToUsdc(p.onBehalfOf, key.currency1, t1Before, p.swap1, p.deadline, 68, 69, 70, 71, 72);
+            _swapDeltaToUsdc(
+                p.onBehalfOf,
+                key.currency0,
+                t0Before,
+                p.swap0,
+                p.deadline,
+                p.slippageBps,
+                SwapSteps(63, 64, 65, 66, 67)
+            );
+            _swapDeltaToUsdc(
+                p.onBehalfOf,
+                key.currency1,
+                t1Before,
+                p.swap1,
+                p.deadline,
+                p.slippageBps,
+                SwapSteps(68, 69, 70, 71, 72)
+            );
         }
     }
 
@@ -418,11 +462,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         address currency,
         uint256 halfUsdc,
         SwapLeg calldata leg,
-        uint8 approveStep,
-        uint8 permit2Step,
-        uint8 execStep,
-        uint8 permit2ResetStep,
-        uint8 resetStep
+        SwapSteps memory steps
     ) internal returns (uint256 received) {
         if (currency == address(USDC)) return halfUsdc;
 
@@ -437,11 +477,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             halfUsdc,
             leg.amountOutMin,
             p.deadline,
-            approveStep,
-            permit2Step,
-            execStep,
-            permit2ResetStep,
-            resetStep
+            p.slippageBps,
+            steps
         );
         received = _balanceOf(currency, p.onBehalfOf) - balanceBefore;
         // Avoid accidental one-sided mints after a zero-output swap.
@@ -589,12 +626,11 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         uint256 amountIn,
         uint256 amountOutMin,
         uint256 deadline,
-        uint8 approveStep,
-        uint8 permit2Step,
-        uint8 execStep,
-        uint8 permit2ResetStep,
-        uint8 resetStep
+        uint16 slippageBps,
+        SwapSteps memory steps
     ) internal {
+        // Single funnel for every UniversalRouter call in this handler.
+        amountOutMin = _twapMinOut(currencyIn, currencyOut, amountIn, amountOutMin, slippageBps);
         PoolKey memory key = _decodePoolParam(poolParam);
 
         bytes[] memory params = new bytes[](3);
@@ -621,13 +657,13 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         );
 
         if (currencyIn == NATIVE) {
-            _safeExecValue(_onBehalfOf, UNIVERSAL_ROUTER, amountIn, execData, execStep);
+            _safeExecValue(_onBehalfOf, UNIVERSAL_ROUTER, amountIn, execData, steps.execStep);
         } else {
-            _safeApprove(_onBehalfOf, currencyIn, address(PERMIT2), amountIn, approveStep);
-            _permit2Approve(_onBehalfOf, currencyIn, UNIVERSAL_ROUTER, amountIn, deadline, permit2Step);
-            _safeExecValue(_onBehalfOf, UNIVERSAL_ROUTER, 0, execData, execStep);
-            _permit2Approve(_onBehalfOf, currencyIn, UNIVERSAL_ROUTER, 0, 0, permit2ResetStep);
-            _safeApprove(_onBehalfOf, currencyIn, address(PERMIT2), 0, resetStep);
+            _safeApprove(_onBehalfOf, currencyIn, address(PERMIT2), amountIn, steps.approveStep);
+            _permit2Approve(_onBehalfOf, currencyIn, UNIVERSAL_ROUTER, amountIn, deadline, steps.permit2Step);
+            _safeExecValue(_onBehalfOf, UNIVERSAL_ROUTER, 0, execData, steps.execStep);
+            _permit2Approve(_onBehalfOf, currencyIn, UNIVERSAL_ROUTER, 0, 0, steps.permit2ResetStep);
+            _safeApprove(_onBehalfOf, currencyIn, address(PERMIT2), 0, steps.resetStep);
         }
     }
 
@@ -640,11 +676,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         uint256 balanceBefore,
         SwapLeg calldata leg,
         uint256 deadline,
-        uint8 approveStep,
-        uint8 permit2Step,
-        uint8 execStep,
-        uint8 permit2ResetStep,
-        uint8 resetStep
+        uint16 slippageBps,
+        SwapSteps memory steps
     ) internal {
         if (currency == address(USDC)) return;
         uint256 delta = _balanceOf(currency, _onBehalfOf) - balanceBefore;
@@ -657,11 +690,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
                 delta,
                 leg.amountOutMin,
                 deadline,
-                approveStep,
-                permit2Step,
-                execStep,
-                permit2ResetStep,
-                resetStep
+                slippageBps,
+                steps
             );
         }
     }
@@ -692,27 +722,43 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         if (floor > 0 && STATE_VIEW.getLiquidity(poolId) < floor) revert PoolTooThin();
     }
 
-    /// @dev Ties `slippageBps` to the caller's quoter-derived min-out, checks
-    ///      the leg's pool param against the allow-list, and pins the leg's
-    ///      pool to the {currency, USDC} pair so swaps can only route through
-    ///      a pool that actually trades the leg's currency against USDC
-    ///      (native ETH sorts first: address(0) < any token). The USDC side
-    ///      of a pair has no swap, so its (ignored) leg is not validated.
+    /// @dev Route checks only: allow-listed pool param, resolving to a pool
+    ///      that actually trades {currency, USDC} (native ETH sorts first:
+    ///      address(0) < any token). The USDC side of a pair has no swap, so
+    ///      its (ignored) leg is not validated. The PRICE check needs the input
+    ///      amount and so lives in `_swapV4ViaSafe`.
     function _validateSwapLeg(address currency, SwapLeg calldata leg, uint16 slippageBps) internal view {
         if (currency == address(USDC)) return;
         if (slippageBps == 0) revert SlippageTooLow();
         if (slippageBps > _yieldStorage().maxSlippageBps) revert SlippageAboveMax();
         _validatePoolParamAllowed(leg.poolParam);
-        if (leg.amountOutMin == 0) revert InvalidSwapAmountOutMin();
-        if (leg.expectedOut == 0) revert InvalidExpectedSwapOut();
-        if (leg.amountOutMin < (leg.expectedOut * (10_000 - slippageBps)) / 10_000) {
-            revert SwapMinBelowSlippageFloor();
-        }
         (address expect0, address expect1) = currency < address(USDC)
             ? (currency, address(USDC))
             : (address(USDC), currency);
         (PoolKey memory key, ) = _validatePoolReady(leg.poolParam);
         if (key.currency0 != expect0 || key.currency1 != expect1) revert WrongTokenPair();
+    }
+
+    /// @dev Min-out for a UniversalRouter call, read from the SAME Uniswap V3
+    ///      reference history the V3 and Aerodrome handlers use — the reference
+    ///      prices a token, not a venue. Native ETH has no address to key on,
+    ///      so it is priced under WETH. Caller may tighten, never loosen.
+    function _twapMinOut(
+        address currencyIn,
+        address currencyOut,
+        uint256 amountIn,
+        uint256 callerMinOut,
+        uint16 slippageBps
+    ) internal view returns (uint256) {
+        address currency = currencyIn == address(USDC) ? currencyOut : currencyIn;
+        address token = currency == NATIVE ? address(WETH) : currency;
+        TwapConfig memory cfg = _yieldStorage().twapConfigOf[token];
+        if (cfg.pool == address(0)) revert TwapOracle.TwapNotConfigured(token);
+        address tokenIn = currencyIn == NATIVE ? address(WETH) : currencyIn;
+        address tokenOut = currencyOut == NATIVE ? address(WETH) : currencyOut;
+        uint256 floor = (TwapOracle.quote(cfg, tokenIn, tokenOut, amountIn) * (10_000 - slippageBps)) / 10_000;
+        if (floor == 0 && callerMinOut == 0) revert InvalidSwapAmountOutMin();
+        return callerMinOut > floor ? callerMinOut : floor;
     }
 
     // ─────────────────────────────────────────────────────────────────────

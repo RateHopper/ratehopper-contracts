@@ -32,3 +32,21 @@ struct ParaswapParams {
     uint256 srcAmount;
     bytes swapData;
 }
+
+/// @notice Reference price source for valuing one token against USDC.
+/// @dev    Deliberately decoupled from the pool a swap EXECUTES in: the
+///         reference is chosen for depth and observation history, while
+///         execution may route through a thinner pool or another protocol
+///         entirely (Aerodrome, Uniswap V4). One trusted price per token,
+///         regardless of venue. Packs into a single slot.
+struct TwapConfig {
+    /// @dev Uniswap V3 pool trading {token, USDC}. Zero means unconfigured,
+    ///      which is a hard failure rather than a fallback to spot.
+    address pool;
+    /// @dev Averaging window in seconds.
+    uint32 window;
+    /// @dev Required `observationCardinality`. A pool below this cannot
+    ///      retain `window` of history; see TwapOracle for why a bare
+    ///      `observe()` call is not enough to detect that.
+    uint16 minCardinality;
+}

@@ -9,6 +9,9 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
     encodeUniV4PoolParam,
+    TWAP_REF_WETH_USDC_POOL,
+    TWAP_WINDOW,
+    TWAP_CARDINALITY,
 } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
 import { deployRealSafe, enableModuleOnSafe } from "../helpers/deployRealSafe";
@@ -122,6 +125,10 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             pauser.address,
         );
         await manager.waitForDeployment();
+        // Price reference for the swap floor (H-01).
+        await (
+            await manager.setTwapConfig(WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)
+        ).wait();
 
         await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
@@ -158,7 +165,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             tickUpper: alignedTick + 1_000,
             mintAmount0Min: 0,
             mintAmount1Min: 0,
-            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
+            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, POOL_PARAM),
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
@@ -170,7 +177,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         await expect(
             manager.connect(operator).openLp(UNISWAP_V4, {
                 ...openParams,
-                swap0: leg((expectedSwapOut * 2n * 9_900n) / 10_000n, expectedSwapOut * 2n, POOL_PARAM),
+                swap0: leg((expectedSwapOut * 2n * 9_900n) / 10_000n, POOL_PARAM),
             }),
         ).to.be.reverted;
 
@@ -222,7 +229,6 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
                 exitBps,
                 swap0: {
                     amountOutMin: (expectedOut * 9_700n) / 10_000n,
-                    expectedOut,
                     poolParam: POOL_PARAM,
                 },
                 swap1: ZERO_LEG,
@@ -298,6 +304,10 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             pauser.address,
         );
         await manager.waitForDeployment();
+        // Price reference for the swap floor (H-01).
+        await (
+            await manager.setTwapConfig(WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)
+        ).wait();
 
         await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
@@ -337,7 +347,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             mintAmount0Min: 0,
             mintAmount1Min: 0,
             // USDC -> WETH (currency0) leg; the USDC side (currency1) needs none.
-            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, WETH_POOL_PARAM),
+            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, WETH_POOL_PARAM),
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
@@ -406,7 +416,6 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
                 exitBps,
                 swap0: {
                     amountOutMin: (expectedOut * 9_700n) / 10_000n,
-                    expectedOut,
                     poolParam: WETH_POOL_PARAM,
                 },
                 swap1: ZERO_LEG,

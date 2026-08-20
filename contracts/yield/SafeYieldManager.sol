@@ -14,6 +14,8 @@ import {ISafe} from "../interfaces/safe/ISafe.sol";
 import {IProtocolRegistry} from "../interfaces/IProtocolRegistry.sol";
 import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, WithdrawLpParams, OpenLpInKindParams} from "../interfaces/IYieldHandler.sol";
 import {TokenReturnLib} from "./libraries/TokenReturnLib.sol";
+import {TwapOracle} from "./libraries/TwapOracle.sol";
+import {IUniswapV3Pool} from "../interfaces/uniswapV3/IUniswapV3Pool.sol";
 import {YieldStorage} from "./handlers/YieldStorage.sol";
 import "../common/Types.sol";
 
@@ -71,6 +73,16 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
 
     /// @notice Absolute ceiling on what the admin can set `maxSlippageBps` to.
     uint16 public constant MAX_SETTABLE_SLIPPAGE_BPS = 1000;
+
+    /// @notice Floors on the price reference that no role can lower. They are
+    ///         what makes `setTwapConfig` safe to leave un-timelocked: the
+    ///         admin picks WHICH pool, never how weak the guarantee is.
+    /// @dev    30 minutes at Base's ~2s blocks is ~900 blocks an attacker must
+    ///         hold an off-market price against arbitrage.
+    uint32 public constant MIN_TWAP_WINDOW = 1800;
+    /// @dev A pool needs stored observations to have any history at all; the
+    ///      cardinality-1 pools measured on Base answer queries with live spot.
+    uint16 public constant MIN_TWAP_CARDINALITY = 60;
 
     address public pauser;
     mapping(uint8 => address) public yieldHandlers;
@@ -289,6 +301,42 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         );
     }
 
+    /// @notice Fully exit a position IN KIND: liquidity and fees come out as
+    ///         the pool's own two tokens and stay on the Safe. No swap, so no
+    ///         router and no price reference are involved.
+    /// @dev    This is the exit that must keep working when nothing else does.
+    ///         `closeLp` sells the position to USDC, which means it depends on
+    ///         the TWAP floor and therefore on a reference pool that could lose
+    ///         depth, lose observation history, or simply be unconfigured for a
+    ///         newly listed token. Without an oracle-free path, any of those
+    ///         would strand a position — so this function deliberately reads
+    ///         NO price, and its only gate is the same `protocolEnabledForClose`
+    ///         switch that guards every other exit.
+    ///
+    ///         No performance fee is charged, for the same reason `switchLp`
+    ///         charges none: nothing is realized in USDC, so there is no profit
+    ///         to measure. The basis is released rather than carried, because
+    ///         the position ceases to exist. This does hand users a fee-free
+    ///         way out, which changes nothing economically — a Safe owner can
+    ///         already exit around the module entirely (see docs/SECURITY_MODEL.md).
+    function withdrawLp(
+        uint8 protocol,
+        WithdrawLpParams calldata params
+    ) external nonReentrant onlyOperatorOrSafe(params.onBehalfOf) returns (uint256 amount0, uint256 amount1) {
+        if (block.timestamp > params.deadline) revert DeadlineExpired();
+        if (!protocolEnabledForClose[protocol]) revert ProtocolDisabled();
+
+        YieldLayout storage $ = _yieldStorage();
+        (uint128 residualBasis, address handler) = _pinnedPosition($, protocol, params.tokenId);
+        delete $.residualBasisUsd6Of[protocol][params.tokenId];
+        delete $.positionHandlerOf[protocol][params.tokenId];
+
+        bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.withdrawLp, (params)));
+        (, , amount0, amount1) = abi.decode(ret, (address, address, uint256, uint256));
+
+        emit PositionWithdrawn(params.onBehalfOf, protocol, params.tokenId, residualBasis, amount0, amount1);
+    }
+
     /// @notice Atomically move a full position to another pool of the SAME
     ///         token pair — a different protocol, a different fee tier / tick
     ///         spacing, or any mix. The withdraw leg takes the position out
@@ -466,6 +514,24 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         return _yieldStorage().allowedPoolKey[protocol][keccak256(poolParam)];
     }
 
+    /// @notice Price reference configured for `token`, or an all-zero config.
+    function twapConfigOf(address token) external view returns (TwapConfig memory) {
+        return _yieldStorage().twapConfigOf[token];
+    }
+
+    /// @notice What the reference TWAP says `amountIn` of `tokenIn` is worth in
+    ///         `tokenOut`, using the non-USDC side's configured pool.
+    /// @dev    Exposed so operators can size `amountOutMin` against the very
+    ///         value the contract will check it against, instead of against a
+    ///         quote the contract has no way to verify. Reverts exactly where
+    ///         the swap-time check would.
+    function twapQuote(address tokenIn, address tokenOut, uint256 amountIn) external view returns (uint256) {
+        address token = tokenIn == address(USDC) ? tokenOut : tokenIn;
+        TwapConfig memory cfg = _yieldStorage().twapConfigOf[token];
+        if (cfg.pool == address(0)) revert TwapOracle.TwapNotConfigured(token);
+        return TwapOracle.quote(cfg, tokenIn, tokenOut, amountIn);
+    }
+
     function treasury() external view returns (address) {
         return _yieldStorage().treasury;
     }
@@ -564,6 +630,55 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         bytes32 key = keccak256(poolParam);
         emit PoolParamAllowedUpdated(protocol, poolParam, $.allowedPoolKey[protocol][key], allowed);
         $.allowedPoolKey[protocol][key] = allowed;
+    }
+
+    /// @notice Point `token`'s price reference at a Uniswap V3 pool. This is
+    ///         the floor under every router call that trades `token`, so an
+    ///         unconfigured token cannot be swapped at all.
+    /// @dev    Admin-settable rather than timelocked, because a reference that
+    ///         degrades (a pool losing depth or observation history) must be
+    ///         repointable immediately — a stale oracle blocks `closeLp`. The
+    ///         dangerous direction is closed off by construction instead: the
+    ///         floors below cannot be lowered by any role, and the pair is
+    ///         verified against the pool's own immutable tokens, so the worst
+    ///         an admin can do is choose a different pool that genuinely trades
+    ///         {token, USDC} with a real window behind it. `withdrawLp` remains
+    ///         available regardless of what is configured here.
+    /// @param pool Set to zero to clear the reference, which disables swaps for
+    ///        `token` without touching in-kind exits.
+    function setTwapConfig(
+        address token,
+        address pool,
+        uint32 window,
+        uint16 minCardinality
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (token == address(0)) revert ZeroAddress();
+        YieldLayout storage $ = _yieldStorage();
+
+        if (pool == address(0)) {
+            delete $.twapConfigOf[token];
+            emit TwapConfigUpdated(token, address(0), 0, 0);
+            return;
+        }
+
+        if (window < MIN_TWAP_WINDOW) revert TwapWindowTooShort();
+        if (minCardinality < MIN_TWAP_CARDINALITY) revert TwapCardinalityBelowFloor();
+
+        // Reference validation: the pool must actually trade this pair. Both
+        // tokens are immutable on a V3 pool, so checking once here is binding
+        // forever and keeps the per-swap read cheap.
+        (address expect0, address expect1) = token < address(USDC) ? (token, address(USDC)) : (address(USDC), token);
+        IUniswapV3Pool v3Pool = IUniswapV3Pool(pool);
+        if (v3Pool.token0() != expect0 || v3Pool.token1() != expect1) revert TwapPoolPairMismatch();
+
+        TwapConfig memory cfg = TwapConfig({pool: pool, window: window, minCardinality: minCardinality});
+        // Prove the reference answers TODAY rather than discovering at the
+        // first exit that it never could. Reverts on low cardinality, a stale
+        // newest observation, or a window the pool cannot cover.
+        TwapOracle.meanTick(cfg);
+
+        $.twapConfigOf[token] = cfg;
+        emit TwapConfigUpdated(token, pool, window, minCardinality);
     }
 
     function setMinPoolLiquidity(uint8 protocol, uint128 newValue) external onlyRole(DEFAULT_ADMIN_ROLE) {

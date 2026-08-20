@@ -4,7 +4,7 @@ RateHopper's managers are Safe **modules**, not custodians. Every position and
 every token belongs to the user's Safe; the module is an executor the Safe has
 chosen to authorize. Most of what follows is a consequence of that one fact.
 
-This document records three accepted properties of that design (audit items
+This document records the accepted properties of that design (audit items H-01,
 I-01, I-02 and I-03) and the decisions behind them.
 
 ## I-01 — The performance fee is cooperative, by construction
@@ -69,13 +69,82 @@ ceilings:
 `test/debt/debtSwapBySafe.ts` asserts this in `afterEach` for every case in the
 suite, across all five protocols.
 
+## H-01 — Swap floors come from a reference TWAP, never from the caller
+
+`SwapLeg` used to carry an `expectedOut` that the handler checked
+`amountOutMin` against. That is not a floor: the same caller supplies both, and
+`{amountOutMin: 1, expectedOut: 1}` satisfies it — which is exactly what
+`scripts/collectLpBySafe.ts` was doing, because the fee amounts a collect swaps
+are not known until it executes.
+
+The handlers now derive the router minimum themselves:
+
+```
+minOut = max(caller's amountOutMin, twapQuote(amountIn) * (10_000 - slippageBps) / 10_000)
+```
+
+A caller may tighten the bound and can no longer loosen it, and a swap whose
+size is only known at execution time simply passes 0. The check sits in
+`_swapViaSafe` / `_swapV4ViaSafe`, the single funnel each handler routes every
+call through, so it holds structurally rather than by convention.
+
+### The reference is a pool, chosen for history rather than venue
+
+`TwapConfig` maps a token to a Uniswap V3 pool, a window, and a required
+`observationCardinality`. It is deliberately NOT the pool a swap executes in:
+one reference prices a token everywhere, so an Aerodrome or Uniswap V4 swap is
+floored by the same Uniswap V3 observation history. Native ETH is priced under
+WETH.
+
+`TwapOracle` fails closed on every degradation and never falls back to spot — a
+fallback IS the attack, since anyone able to degrade the oracle would choose the
+degraded path. Three things are checked:
+
+1. **`observationCardinality >= minCardinality`.**
+2. **The window is backed by history** — the pool's own `OLD` revert propagates.
+3. **The newest observation is recent** (within `window / 4`).
+
+Check 3 is the one that is easy to omit and cannot be replaced by "did
+`observe()` revert". A pool with cardinality 1 that has been idle longer than
+the window answers happily, because every point in the window resolves after
+its single stored observation — so the returned "average" is exactly the live
+tick. Measured on Base at block 50197687, four pools behave this way: the
+Aerodrome WETH/USDC tickSpacing-200 pool and three Uniswap V3 AERO pools, one
+of which holds no liquidity at all.
+
+What check 3 defends is **staleness, not manipulation**. Moving a pool's tick
+writes an observation carrying the pre-move tick, so an attacker's own trade
+contributes nothing to the average in that block. An abandoned reference is the
+real hazard: stuck below the true price, it lets a swap clear a floor beneath
+what the input is worth.
+
+### Why `setTwapConfig` is admin-settable rather than timelocked
+
+A reference that degrades must be repointable immediately, because a stale
+oracle blocks `closeLp`. The dangerous direction is closed off by construction
+instead: `MIN_TWAP_WINDOW` (1800s) and `MIN_TWAP_CARDINALITY` (60) are constants
+no role can lower, the pair is verified against the pool's immutable `token0` /
+`token1`, and the setter calls the oracle so a reference that cannot answer
+today is rejected at configuration time. The worst an admin can do is pick a
+different pool that genuinely trades the pair with real history behind it.
+
+### `withdrawLp`: the exit that reads no price
+
+Flooring `closeLp` on an oracle would otherwise mean a broken reference strands
+a position. `withdrawLp` takes a position out in kind — liquidity and fees as
+the pool's own two tokens, no router, no price read — and is gated only by
+`protocolEnabledForClose`. It charges no performance fee, for the same reason
+`switchLp` charges none: nothing is realized in USDC, so there is no profit to
+measure. That does hand users a fee-free exit, which changes nothing
+economically given I-01 above.
+
 ## I-03 — The pauser can disable exits, but cannot trap funds
 
 The pauser is a single address, set by `DEFAULT_ADMIN_ROLE` via `setPauser`. It
 holds `pause`/`unpause` and the two per-protocol switches.
 
-Pausing is deliberately **exit-only**, not a freeze. `closeLp` and `collectLp`
-carry no `whenNotPaused` modifier and do not consult the current
+Pausing is deliberately **exit-only**, not a freeze. `closeLp`, `withdrawLp` and
+`collectLp` carry no `whenNotPaused` modifier and do not consult the current
 `yieldHandlers` registration — they run through the handler pinned at open
 time, so a paused or re-registered protocol still lets positions out.
 

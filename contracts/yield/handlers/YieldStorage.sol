@@ -45,6 +45,12 @@ abstract contract YieldStorage {
         ///      Voter mapping is governance-controlled and may rotate later;
         ///      exits must use the pool that actually owns the NFT.
         mapping(uint8 protocolId => mapping(uint256 tokenId => address)) stakePoolOf;
+        /// @dev Reference price source per token, keyed by the NON-USDC side of
+        ///      the pair. Not keyed by protocol: the reference is the token's
+        ///      price, not a venue, so an Aerodrome or Uniswap V4 swap is
+        ///      floored by the same Uniswap V3 observation history. Native ETH
+        ///      is configured under its WETH address.
+        mapping(address token => TwapConfig) twapConfigOf;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ratehopper.storage.yield")) - 1)) & ~bytes32(uint256(0xff))
@@ -122,6 +128,16 @@ abstract contract YieldStorage {
         address indexed token,
         uint256 attemptedFee
     );
+    event TwapConfigUpdated(address indexed token, address indexed pool, uint32 window, uint16 minCardinality);
+    /// @notice An in-kind exit: liquidity out, no swap, no oracle, no fee.
+    event PositionWithdrawn(
+        address indexed onBehalfOf,
+        uint8 indexed protocol,
+        uint256 indexed tokenId,
+        uint128 releasedBasisUsd6,
+        uint256 amount0,
+        uint256 amount1
+    );
 
     // ─────────────────────────────────────────────────────────────────────
     //  Shared errors
@@ -149,6 +165,10 @@ abstract contract YieldStorage {
     error InvalidSwapAmountOutMin();
     error OnlyTimelock();
     error PositionLiquidityTooLow();
-    error SwapMinBelowSlippageFloor();
-    error InvalidExpectedSwapOut();
+    /// @dev `amountOutMin` sits below what the reference TWAP says the input is
+    ///      worth, less the configured slippage allowance.
+    error SwapMinBelowTwapFloor(address token, uint256 amountOutMin, uint256 floor);
+    error TwapWindowTooShort();
+    error TwapCardinalityBelowFloor();
+    error TwapPoolPairMismatch();
 }

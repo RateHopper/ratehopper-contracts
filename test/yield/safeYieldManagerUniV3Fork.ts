@@ -6,6 +6,9 @@ import {
     UNISWAP_V3_SWAP_ROUTER_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
+    TWAP_REF_WETH_USDC_POOL,
+    TWAP_WINDOW,
+    TWAP_CARDINALITY,
 } from "../../contractAddresses";
 import { encodeUniV3PoolParam } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
@@ -90,6 +93,10 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             pauser.address,
         );
         await manager.waitForDeployment();
+        // Price reference for the swap floor (H-01).
+        await (
+            await manager.setTwapConfig(WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)
+        ).wait();
 
         await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
@@ -125,7 +132,7 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             tickUpper: alignedTick + 1_000,
             mintAmount0Min: 0,
             mintAmount1Min: 0,
-            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, expectedSwapOut, POOL_PARAM),
+            swap0: leg((expectedSwapOut * 9_900n) / 10_000n, POOL_PARAM),
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
@@ -136,7 +143,7 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
         await expect(
             manager.connect(operator).openLp(UNISWAP_V3, {
                 ...openParams,
-                swap0: leg((expectedSwapOut * 2n * 9_900n) / 10_000n, expectedSwapOut * 2n, POOL_PARAM),
+                swap0: leg((expectedSwapOut * 2n * 9_900n) / 10_000n, POOL_PARAM),
             }),
         ).to.be.revertedWith("Too little received");
 
@@ -177,7 +184,6 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
                 exitBps,
                 swap0: {
                     amountOutMin: (expectedOut * 9_700n) / 10_000n,
-                    expectedOut,
                     poolParam: POOL_PARAM,
                 },
                 swap1: ZERO_LEG,
