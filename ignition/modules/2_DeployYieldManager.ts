@@ -19,9 +19,6 @@ import {
     encodeAerodromePoolParam,
     encodeUniV3PoolParam,
     encodeUniV4PoolParam,
-    TWAP_REF_WETH_USDC_POOL,
-    TWAP_WINDOW,
-    TWAP_CARDINALITY,
 } from "../../contractAddresses";
 import { envBigInt, envNumber, envString, makeRequireAddress } from "./deployHelpers";
 
@@ -38,6 +35,14 @@ const NATIVE = "0x0000000000000000000000000000000000000000";
 // Uniswap V3 fee tiers {100, 500, 3000} (10000 deliberately excluded — thin
 // pool, cheap slot0 manipulation); Aerodrome Slipstream tick spacings
 // {100, 200}; the canonical hookless native ETH/USDC 0.05% Uniswap V4 pool.
+// POST-DEPLOY, BEFORE FIRST USE: `setTwapConfig(token, refPool, window,
+// cardinality)` for every non-USDC token that will be swapped — WETH always,
+// plus AERO if staked Aerodrome rewards are sold. Without it openLp/closeLp/
+// collectLp revert `TwapNotConfigured`, which fails closed but is a liveness
+// gap. It is NOT done here because DEFAULT_ADMIN_ROLE goes to `initialAdmin`
+// in the constructor, not to the deploying key, so ignition cannot make the
+// call. Reference pools: TWAP_REF_* in contractAddresses.ts.
+//
 // Additional pairs are allow-listed post-deploy via setPoolParamAllowed —
 // hooked V4 pools ONLY after the hook is audited (the allow-list is the sole
 // gate; the handler itself accepts any allow-listed PoolKey).
@@ -110,15 +115,6 @@ export default buildModule("DeployYieldManager", (m) => {
     const treasury = m.getParameter<string>("treasury", treasuryAddr);
     const initialAdmin = m.getParameter<string>("initialAdmin", initialAdminAddr);
     const pauser = m.getParameter<string>("pauser", pauserAddr);
-    const twapRefPool = m.getParameter<string>(
-        "twapRefPool",
-        envString(TWAP_REF_WETH_USDC_POOL, "SYM_TWAP_REF_WETH_USDC_POOL"),
-    );
-    const twapWindow = m.getParameter<number>("twapWindow", envNumber(TWAP_WINDOW, "SYM_TWAP_WINDOW"));
-    const twapCardinality = m.getParameter<number>(
-        "twapCardinality",
-        envNumber(TWAP_CARDINALITY, "SYM_TWAP_CARDINALITY"),
-    );
     const performanceFeeBps = m.getParameter<number>(
         "performanceFeeBps",
         envNumber(1000, "SYM_PERFORMANCE_FEE_BPS", "PERFORMANCE_FEE_BPS"),
@@ -213,14 +209,6 @@ export default buildModule("DeployYieldManager", (m) => {
         ],
         timelock ? { after: [timelock] } : undefined,
     );
-
-    // Without a price reference a token cannot be swapped at all, so WETH is
-    // configured as part of the deploy rather than left as a follow-up step.
-    // The reference is chosen for observation history, not for where swaps
-    // execute — the Aerodrome and Uniswap V4 handlers are floored by this same
-    // Uniswap V3 pool. Any further token (a new pair, or AERO for reward
-    // swaps) needs its own setTwapConfig before it can trade.
-    m.call(safeYieldManager, "setTwapConfig", [WETH_ADDRESS, twapRefPool, twapWindow, twapCardinality]);
 
     return {
         uniV3YieldHandler,

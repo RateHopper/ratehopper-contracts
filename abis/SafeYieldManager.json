@@ -296,27 +296,6 @@
         "internalType": "address",
         "name": "token",
         "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "amountOutMin",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "floor",
-        "type": "uint256"
-      }
-    ],
-    "name": "SwapMinBelowTwapFloor",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "token",
-        "type": "address"
       }
     ],
     "name": "TokenNotWhitelisted",

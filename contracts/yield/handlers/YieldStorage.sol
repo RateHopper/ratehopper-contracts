@@ -156,10 +156,12 @@ abstract contract YieldStorage {
         uint128 newBasisUsd6,
         uint128 newCarryUsd6
     );
-    /// @notice An in-kind exit: liquidity out, no swap, no oracle, no fee.
-    /// @dev    `releasedCarryUsd6` is switch residue that would have been
-    ///         charged a fee by `closeLp` and is not charged here. Reported so
-    ///         a fee-free exit is visible rather than silent.
+    /// @notice An in-kind exit: liquidity out, no swap, no price reference.
+    /// @dev    No PERFORMANCE fee is taken — `feeCollectBps` still applies to
+    ///         the fees harvested on the way out, exactly as it does on every
+    ///         other harvest. `releasedCarryUsd6` is switch residue `closeLp`
+    ///         would have charged a performance fee on and this path does not,
+    ///         reported so that waiver is visible rather than silent.
     event PositionWithdrawn(
         address indexed onBehalfOf,
         uint8 indexed protocol,
@@ -196,9 +198,6 @@ abstract contract YieldStorage {
     error InvalidSwapAmountOutMin();
     error OnlyTimelock();
     error PositionLiquidityTooLow();
-    /// @dev `amountOutMin` sits below what the reference TWAP says the input is
-    ///      worth, less the configured slippage allowance.
-    error SwapMinBelowTwapFloor(address token, uint256 amountOutMin, uint256 floor);
     error TwapWindowTooShort();
     error TwapCardinalityBelowFloor();
     error TwapPoolPairMismatch();

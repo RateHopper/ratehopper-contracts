@@ -325,12 +325,14 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         NO price, and its only gate is the same `protocolEnabledForClose`
     ///         switch that guards every other exit.
     ///
-    ///         No performance fee is charged, for the same reason `switchLp`
+    ///         No PERFORMANCE fee is charged, for the same reason `switchLp`
     ///         charges none: nothing is realized in USDC, so there is no profit
-    ///         to measure. The basis is released rather than carried, because
-    ///         the position ceases to exist. This does hand users a fee-free
-    ///         way out, which changes nothing economically — a Safe owner can
-    ///         already exit around the module entirely (see docs/SECURITY_MODEL.md).
+    ///         to measure. `feeCollectBps` is unaffected and still applies to
+    ///         the fees harvested on the way out. Basis and carry are released
+    ///         rather than carried, because the position ceases to exist. That
+    ///         does hand users a performance-fee-free way out, which changes
+    ///         nothing economically — a Safe owner can already exit around the
+    ///         module entirely (see docs/SECURITY_MODEL.md).
     function withdrawLp(
         uint8 protocol,
         WithdrawLpParams calldata params

@@ -3055,6 +3055,61 @@ describe("SafeYieldManager", function () {
             );
         });
 
+        // The emergency exit has to work for the position type that is hardest
+        // to get out of: one the stakePool owns rather than the Safe.
+        it("unstakes a staked position and clears its pin", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, voter } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }))
+            ).wait();
+            expect(await clNpm.ownerOf(1)).to.equal(stakePoolAddr);
+            expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(stakePoolAddr);
+
+            await expect(manager.connect(operatorEOA).withdrawLp(AERODROME, withdrawParams(safeAddr, 1))).to.emit(
+                manager,
+                "PositionWithdrawn",
+            );
+
+            expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(ethers.ZeroAddress);
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(0);
+        });
+
+        it("reports the carried profit it releases without charging it", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, usdc, clNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await clNpm.setMintUsageBps(5_000)).wait();
+            await (
+                await manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, {
+                    onBehalfOf: safeAddr,
+                    tokenId: 1,
+                    decreaseAmount0Min: 0,
+                    decreaseAmount1Min: 0,
+                    tickLower: -100,
+                    tickUpper: 100,
+                    mintAmount0Min: 0,
+                    mintAmount1Min: 0,
+                    lpPoolParam: TICK_SPACING,
+                    deadline: DEADLINE,
+                })
+            ).wait();
+            const carry = await manager.carryProfitUsd6Of(AERODROME, 1);
+            expect(carry).to.be.greaterThan(0);
+
+            const treasuryBefore = await usdc.balanceOf(treasury.address);
+            await expect(manager.connect(operatorEOA).withdrawLp(AERODROME, withdrawParams(safeAddr, 1)))
+                .to.emit(manager, "PositionWithdrawn")
+                .withArgs(safeAddr, AERODROME, 1n, 0n, carry, anyValue, anyValue);
+
+            // Waived, not collected — and the waiver is on the record.
+            expect(await usdc.balanceOf(treasury.address)).to.equal(treasuryBefore);
+            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(0);
+        });
+
         it("honours the same gates as every other exit", async function () {
             const { manager, operatorEOA, pauser, stranger, safeAddr } = await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
