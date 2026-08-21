@@ -59,6 +59,9 @@ const V4_PM_ABI = [
     "function ownerOf(uint256) view returns (address)",
     "function getPositionLiquidity(uint256) view returns (uint128)",
 ];
+const AERO_ROUTER_ABI = [
+    "function exactInputSingle((address,address,int24,address,uint256,uint256,uint256,uint160)) payable returns (uint256)",
+];
 
 const spotUsdcToWeth = (amount: bigint, sqrtP: bigint) => (amount << 192n) / (sqrtP * sqrtP);
 
@@ -136,6 +139,7 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
     const manager = await Manager.deploy(
         await registry.getAddress(),
         USDC_ADDRESS,
+        WETH_ADDRESS,
         [UNISWAP_V3, AERODROME, UNISWAP_V4],
         [await uniHandler.getAddress(), await aeroHandler.getAddress(), await v4Handler.getAddress()],
         [uniPoolParams, aeroPoolParams, [UNIV4_POOL_PARAM]],
@@ -151,7 +155,17 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
     );
     await manager.waitForDeployment();
     // Price reference for the swap floor (H-01).
-    await (await manager.setTwapConfig(WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)).wait();
+    await (
+        await timelock.execute(
+            await manager.getAddress(),
+            manager.interface.encodeFunctionData("setTwapConfig", [
+                WETH_ADDRESS,
+                TWAP_REF_WETH_USDC_POOL,
+                TWAP_WINDOW,
+                TWAP_CARDINALITY,
+            ]),
+        )
+    ).wait();
 
     await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
@@ -191,6 +205,32 @@ async function fundSafeUsdcFromPool(poolAddress: string, safeAddress: string, am
     const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, ethers.provider);
     await (await (usdc.connect(poolSigner) as any).transfer(safeAddress, amount)).wait();
     await network.provider.send("hardhat_stopImpersonatingAccount", [poolAddress]);
+    return usdc;
+}
+
+async function pushAeroSpotUp(fundingPool: string, usdcIn: bigint) {
+    const trader = (await ethers.getSigners())[4];
+    const usdc = await fundSafeUsdcFromPool(fundingPool, trader.address, usdcIn);
+    const usdcWithApprove = new ethers.Contract(
+        USDC_ADDRESS,
+        [...ERC20_ABI, "function approve(address,uint256) returns (bool)"],
+        trader,
+    );
+    await (await usdcWithApprove.approve(AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS, usdcIn)).wait();
+    const router = new ethers.Contract(AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS, AERO_ROUTER_ABI, trader);
+    const block = await ethers.provider.getBlock("latest");
+    await (
+        await router.exactInputSingle([
+            USDC_ADDRESS,
+            WETH_ADDRESS,
+            AERO_TICK_SPACING,
+            trader.address,
+            BigInt(block!.timestamp + 600),
+            usdcIn,
+            0n,
+            0n,
+        ])
+    ).wait();
     return usdc;
 }
 
@@ -352,6 +392,54 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         expect(await manager.residualBasisUsd6Of(AERODROME, newTokenId)).to.equal(basisAfterSwitch);
         expect(await manager.positionHandlerOf(AERODROME, newTokenId)).to.equal(await aeroHandler.getAddress());
         expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+
+        // Make the replacement genuinely profitable, then prove the final
+        // close charges the lifecycle profit (switch residue + final value -
+        // original basis). Snapshot/revert keeps the reverse-switch coverage
+        // below independent from this economic assertion.
+        const profitableCloseSnapshot = await network.provider.send("evm_snapshot");
+        const residueEvents = await manager.queryFilter(manager.filters.SwitchResidueSettled(safeAddress), -5);
+        const firstResidue = residueEvents[residueEvents.length - 1];
+        const aeroBefore = await readAeroPool();
+        await pushAeroSpotUp(uniPoolAddress, ethers.parseUnits("1000000", 6));
+        const aeroAfter = await readAeroPool();
+        expect(aeroAfter.tick).to.be.greaterThan(aeroBefore.tick + 100);
+
+        const treasuryBeforeClose: bigint = await usdc.balanceOf(treasury.address);
+        const closeReceipt = await (
+            await manager.connect(operator).closeLp(AERODROME, {
+                onBehalfOf: safeAddress,
+                tokenId: newTokenId,
+                exitBps: 10_000,
+                swap0: leg(0, AERO_POOL_PARAM),
+                swap1: ZERO_LEG,
+                slippageBps: 300,
+                decreaseAmount0Min: 0,
+                decreaseAmount1Min: 0,
+                deadline,
+                minUsdcOut: 0,
+            })
+        ).wait();
+        const parsedCloseLogs = closeReceipt!.logs.map((log: any) => {
+            try {
+                return manager.interface.parseLog(log);
+            } catch {
+                return null;
+            }
+        });
+        const closed = parsedCloseLogs.find((event: any) => event?.name === "PositionClosed")!;
+        const collected = parsedCloseLogs.find((event: any) => event?.name === "FeesCollected")!;
+        const lifecycleProfit = closed.args.currentValueUsd6 + firstResidue.args.residualUsd6 - initialBasis;
+        const expectedPerformanceFee = (lifecycleProfit * 1_000n) / 10_000n;
+        expect(lifecycleProfit).to.be.greaterThan(0n);
+        expect(closed.args.feeUsd6).to.equal(expectedPerformanceFee);
+        const usdcCollectFee = collected.args.token0.toLowerCase() === USDC_ADDRESS.toLowerCase()
+            ? collected.args.fee0
+            : collected.args.fee1;
+        expect((await usdc.balanceOf(treasury.address)) - treasuryBeforeClose).to.equal(
+            expectedPerformanceFee + usdcCollectFee,
+        );
+        expect(await network.provider.send("evm_revert", [profitableCloseSnapshot])).to.equal(true);
 
         // Reverse composition: Aerodrome withdraw followed by Uniswap V3 open.
         await expect(

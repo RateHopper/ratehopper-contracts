@@ -65,6 +65,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
 
     IProtocolRegistry public immutable REGISTRY;
     IERC20 public immutable USDC;
+    /// @notice Wrapped native token used to validate and quote the
+    ///         `address(0)` Uniswap V4 native-currency reference key.
+    IERC20 public immutable WETH;
     /// @notice Immutable TimelockController address. Critical setters
     ///         require `msg.sender == timelock` so a DEFAULT_ADMIN_ROLE
     ///         holder cannot self-grant CRITICAL_ROLE and bypass the delay.
@@ -74,9 +77,8 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     /// @notice Absolute ceiling on what the admin can set `maxSlippageBps` to.
     uint16 public constant MAX_SETTABLE_SLIPPAGE_BPS = 1000;
 
-    /// @notice Floors on the price reference that no role can lower. They are
-    ///         what makes `setTwapConfig` safe to leave un-timelocked: the
-    ///         admin picks WHICH pool, never how weak the guarantee is.
+    /// @notice Floors on the price reference that no role can lower. Reference
+    ///         changes are additionally restricted to the critical timelock.
     /// @dev    30 minutes at Base's ~2s blocks is ~900 blocks an attacker must
     ///         hold an off-market price against arbitrage.
     uint32 public constant MIN_TWAP_WINDOW = 1800;
@@ -132,6 +134,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     constructor(
         IProtocolRegistry _registry,
         IERC20 _usdc,
+        IERC20 _weth,
         uint8[] memory _protocols,
         address[] memory _handlers,
         bytes[][] memory _allowedPoolParams,
@@ -147,6 +150,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ) {
         if (address(_registry) == address(0)) revert ZeroAddress();
         if (address(_usdc) == address(0)) revert ZeroAddress();
+        if (address(_weth) == address(0) || address(_weth) == address(_usdc)) revert ZeroAddress();
         if (_initialAdmin == address(0)) revert ZeroAddress();
         if (_timelock == address(0)) revert ZeroAddress();
         if (_timelock.code.length == 0) revert InvalidTimelock();
@@ -169,6 +173,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
 
         REGISTRY = _registry;
         USDC = _usdc;
+        WETH = _weth;
         timelock = _timelock;
         MAX_FEE_BPS = _maxFeeBps;
         pauser = _pauser;
@@ -194,8 +199,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             emit MinPositionLiquidityUpdated(_protocols[i], 0, _minPositionLiquidity[i]);
 
             for (uint256 j = 0; j < _allowedPoolParams[i].length; j++) {
-                $.allowedPoolKey[_protocols[i]][keccak256(_allowedPoolParams[i][j])] = true;
-                emit PoolParamAllowedUpdated(_protocols[i], _allowedPoolParams[i][j], false, true);
+                _storePoolParamAllowed($, _protocols[i], _allowedPoolParams[i][j], true);
             }
         }
 
@@ -368,12 +372,12 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         redeploys those exact token amounts through the target
     ///         protocol's current handler (no swaps). Amounts the destination
     ///         mint cannot consume stay in the Safe.
-    /// @dev    An in-kind switch realizes nothing — there is no USDC moment
-    ///         to re-measure the position against — so the original basis is
-    ///         carried onto the replacement position UNCHANGED and NO
-    ///         performance fee is taken: realized profit is charged only at
-    ///         the real exit via closeLp. Withdrawn residue left in the Safe
-    ///         only under-states later realized profit, never inflates it.
+    /// @dev    An in-kind switch charges NO performance fee. Amounts the new
+    ///         position cannot consume are nevertheless value already returned
+    ///         to the Safe, so they repay basis first and any excess is carried
+    ///         as realized profit to the replacement position. The final
+    ///         `closeLp` settles that carry together with the replacement's
+    ///         realized USDC value.
     ///         A switch opens new exposure, hence `whenNotPaused` (unlike
     ///         exits) plus BOTH per-protocol switches:
     ///         `protocolEnabledForClose[from]` and `protocolEnabledForOpen[to]`.
@@ -566,6 +570,15 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///      ascending). Applies to openLp and the switchLp open leg only;
     ///      exits must never brick on a later de-listing.
     function _requireWhitelistedPoolTokens(address handler, bytes calldata lpPoolParam) internal view {
+        (address token0, address token1) = _decodePoolTokens(handler, lpPoolParam);
+        if (token0 != address(0) && !REGISTRY.whitelistedTokens(token0)) revert TokenNotWhitelisted(token0);
+        if (!REGISTRY.whitelistedTokens(token1)) revert TokenNotWhitelisted(token1);
+    }
+
+    function _decodePoolTokens(
+        address handler,
+        bytes memory lpPoolParam
+    ) internal view returns (address token0, address token1) {
         // Same revert convention as _delegateToHandler: bubble reasoned
         // reverts (e.g. a malformed pool param failing the handler's decode),
         // wrap empty ones in HandlerCallFailed.
@@ -574,9 +587,34 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             if (ret.length > 0) Address.verifyCallResult(ok, ret);
             revert HandlerCallFailed();
         }
-        (address token0, address token1) = abi.decode(ret, (address, address));
-        if (token0 != address(0) && !REGISTRY.whitelistedTokens(token0)) revert TokenNotWhitelisted(token0);
-        if (!REGISTRY.whitelistedTokens(token1)) revert TokenNotWhitelisted(token1);
+        return abi.decode(ret, (address, address));
+    }
+
+    function _requirePoolParamTwapReferences(
+        YieldLayout storage $,
+        address handler,
+        bytes memory poolParam
+    ) internal view {
+        (address token0, address token1) = _decodePoolTokens(handler, poolParam);
+        _requireTwapReference($, token0);
+        if (token1 != token0) _requireTwapReference($, token1);
+    }
+
+    function _requireTwapReference(YieldLayout storage $, address token) internal view {
+        if (token == address(USDC)) return;
+        TwapConfig memory cfg = $.twapConfigOf[token];
+        if (cfg.pool == address(0)) revert TwapOracle.TwapNotConfigured(token);
+        TwapOracle.meanTick(cfg);
+    }
+
+    function _requireProtocolTwapReferences(uint8 protocol) internal view {
+        YieldLayout storage $ = _yieldStorage();
+        address handler = yieldHandlers[protocol];
+        if (handler == address(0)) revert HandlerNotSet();
+        bytes[] storage poolParams = $.allowedPoolParams[protocol];
+        for (uint256 i = 0; i < poolParams.length; i++) {
+            _requirePoolParamTwapReferences($, handler, poolParams[i]);
+        }
     }
 
     /// @notice Harvest accrued LP fees of a position opened through this
@@ -619,6 +657,14 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         return _yieldStorage().allowedPoolKey[protocol][keccak256(poolParam)];
     }
 
+    function allowedPoolParamCount(uint8 protocol) external view returns (uint256) {
+        return _yieldStorage().allowedPoolParams[protocol].length;
+    }
+
+    function allowedPoolParamAt(uint8 protocol, uint256 index) external view returns (bytes memory) {
+        return _yieldStorage().allowedPoolParams[protocol][index];
+    }
+
     /// @notice Profit an in-kind switch already handed back to the Safe that
     ///         this position still owes a performance fee on. Charged by
     ///         `closeLp`, prorated with `exitBps`.
@@ -638,10 +684,30 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         quote the contract has no way to verify. Reverts exactly where
     ///         the swap-time check would.
     function twapQuote(address tokenIn, address tokenOut, uint256 amountIn) external view returns (uint256) {
+        return _twapQuote(tokenIn, tokenOut, amountIn);
+    }
+
+    /// @notice Effective independent minimum before applying a tighter caller
+    ///         minimum. Native ETH is represented by `address(0)` and quoted
+    ///         through WETH while retaining its own reference key.
+    function twapMinimumOut(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint16 slippageBps
+    ) external view returns (uint256) {
+        if (slippageBps == 0) revert SlippageTooLow();
+        if (slippageBps > _yieldStorage().maxSlippageBps) revert SlippageAboveMax();
+        return Math.mulDiv(_twapQuote(tokenIn, tokenOut, amountIn), 10_000 - slippageBps, 10_000);
+    }
+
+    function _twapQuote(address tokenIn, address tokenOut, uint256 amountIn) internal view returns (uint256) {
         address token = tokenIn == address(USDC) ? tokenOut : tokenIn;
         TwapConfig memory cfg = _yieldStorage().twapConfigOf[token];
         if (cfg.pool == address(0)) revert TwapOracle.TwapNotConfigured(token);
-        return TwapOracle.quote(cfg, tokenIn, tokenOut, amountIn);
+        address quoteTokenIn = tokenIn == address(0) ? address(WETH) : tokenIn;
+        address quoteTokenOut = tokenOut == address(0) ? address(WETH) : tokenOut;
+        return TwapOracle.quote(cfg, quoteTokenIn, quoteTokenOut, amountIn);
     }
 
     function treasury() external view returns (address) {
@@ -739,49 +805,81 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         bool allowed
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         YieldLayout storage $ = _yieldStorage();
+        if (allowed) {
+            address handler = yieldHandlers[protocol];
+            if (handler == address(0)) revert HandlerNotSet();
+            _requirePoolParamTwapReferences($, handler, poolParam);
+        }
+        _storePoolParamAllowed($, protocol, poolParam, allowed);
+    }
+
+    function _storePoolParamAllowed(
+        YieldLayout storage $,
+        uint8 protocol,
+        bytes memory poolParam,
+        bool allowed
+    ) internal {
         bytes32 key = keccak256(poolParam);
-        emit PoolParamAllowedUpdated(protocol, poolParam, $.allowedPoolKey[protocol][key], allowed);
+        bool previousAllowed = $.allowedPoolKey[protocol][key];
+        emit PoolParamAllowedUpdated(protocol, poolParam, previousAllowed, allowed);
+        if (previousAllowed == allowed) return;
+
         $.allowedPoolKey[protocol][key] = allowed;
+        if (allowed) {
+            $.allowedPoolParams[protocol].push(poolParam);
+            $.allowedPoolParamIndexPlusOne[protocol][key] = $.allowedPoolParams[protocol].length;
+            return;
+        }
+
+        uint256 index = $.allowedPoolParamIndexPlusOne[protocol][key] - 1;
+        uint256 lastIndex = $.allowedPoolParams[protocol].length - 1;
+        if (index != lastIndex) {
+            bytes memory lastParam = $.allowedPoolParams[protocol][lastIndex];
+            $.allowedPoolParams[protocol][index] = lastParam;
+            $.allowedPoolParamIndexPlusOne[protocol][keccak256(lastParam)] = index + 1;
+        }
+        $.allowedPoolParams[protocol].pop();
+        delete $.allowedPoolParamIndexPlusOne[protocol][key];
     }
 
     /// @notice Point `token`'s price reference at a Uniswap V3 pool. This is
     ///         the floor under every router call that trades `token`, so an
     ///         unconfigured token cannot be swapped at all.
-    /// @dev    Admin-settable rather than timelocked, because a reference that
-    ///         degrades (a pool losing depth or observation history) must be
-    ///         repointable immediately — a stale oracle blocks `closeLp`. The
-    ///         dangerous direction is closed off by construction instead: the
-    ///         floors below cannot be lowered by any role, and the pair is
-    ///         verified against the pool's own immutable tokens, so the worst
-    ///         an admin can do is choose a different pool that genuinely trades
-    ///         {token, USDC} with a real window behind it. `withdrawLp` remains
-    ///         available regardless of what is configured here.
-    /// @param pool Set to zero to clear the reference, which disables swaps for
-    ///        `token` without touching in-kind exits.
+    /// @dev    Restricted to the configured timelock holding CRITICAL_ROLE.
+    ///         A DEFAULT_ADMIN_ROLE holder cannot repoint or clear a reference
+    ///         directly. `withdrawLp` remains available regardless of what is
+    ///         configured here.
+    /// @param token ERC20 reference key, or address(0) for native ETH. The
+    ///        native key must point to a WETH/USDC reference pool.
+    /// @param pool A validated replacement pool. An active reference cannot be
+    ///        cleared; replacement must be atomic.
     function setTwapConfig(
         address token,
         address pool,
         uint32 window,
         uint16 minCardinality
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (token == address(0)) revert ZeroAddress();
+    ) external onlyTimelockCriticalRole {
         YieldLayout storage $ = _yieldStorage();
 
         if (pool == address(0)) {
-            delete $.twapConfigOf[token];
-            emit TwapConfigUpdated(token, address(0), 0, 0);
-            return;
+            revert TwapReferenceRemovalNotAllowed(token);
         }
 
         if (window < MIN_TWAP_WINDOW) revert TwapWindowTooShort();
         if (minCardinality < MIN_TWAP_CARDINALITY) revert TwapCardinalityBelowFloor();
+        if (pool.code.length == 0) revert InvalidTwapReferencePool(pool);
 
         // Reference validation: the pool must actually trade this pair. Both
         // tokens are immutable on a V3 pool, so checking once here is binding
         // forever and keeps the per-swap read cheap.
-        (address expect0, address expect1) = token < address(USDC) ? (token, address(USDC)) : (address(USDC), token);
+        address referenceToken = token == address(0) ? address(WETH) : token;
+        (address expect0, address expect1) = referenceToken < address(USDC)
+            ? (referenceToken, address(USDC))
+            : (address(USDC), referenceToken);
         IUniswapV3Pool v3Pool = IUniswapV3Pool(pool);
         if (v3Pool.token0() != expect0 || v3Pool.token1() != expect1) revert TwapPoolPairMismatch();
+        (uint160 sqrtPriceX96, , , , , , ) = v3Pool.slot0();
+        if (sqrtPriceX96 == 0) revert PoolNotInitialized();
 
         TwapConfig memory cfg = TwapConfig({pool: pool, window: window, minCardinality: minCardinality});
         // Prove the reference answers TODAY rather than discovering at the
@@ -836,6 +934,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         exits.
     function setProtocolEnabledForOpen(uint8 protocol, bool enabled) external onlyPauser {
         if (yieldHandlers[protocol] == address(0)) revert HandlerNotSet();
+        if (enabled) _requireProtocolTwapReferences(protocol);
         protocolEnabledForOpen[protocol] = enabled;
         emit ProtocolStatusChanged(protocol, true, enabled);
     }

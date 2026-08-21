@@ -322,6 +322,7 @@ contract MockUniversalRouter {
     ///      handler is supposed to have raised it to.
     uint256 public lastAmountOutMinimum;
     uint256 public lastAmountIn;
+    uint256 public callCount;
 
     constructor(MockPermit2 _permit2) {
         PERMIT2 = _permit2;
@@ -342,6 +343,7 @@ contract MockUniversalRouter {
     }
 
     function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable {
+        callCount++;
         require(block.timestamp <= deadline, "ur: deadline");
         require(commands.length == 1 && uint8(commands[0]) == 0x10, "ur: not V4_SWAP");
         (bytes memory actions, bytes[] memory params) = abi.decode(inputs[0], (bytes, bytes[]));

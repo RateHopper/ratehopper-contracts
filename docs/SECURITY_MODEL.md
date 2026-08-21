@@ -93,8 +93,9 @@ call through, so it holds structurally rather than by convention.
 `TwapConfig` maps a token to a Uniswap V3 pool, a window, and a required
 `observationCardinality`. It is deliberately NOT the pool a swap executes in:
 one reference prices a token everywhere, so an Aerodrome or Uniswap V4 swap is
-floored by the same Uniswap V3 observation history. Native ETH is priced under
-WETH.
+floored by the same Uniswap V3 observation history. Native ETH has its own
+`address(0)` configuration key, whose pool is required to trade WETH/USDC;
+quote orientation substitutes WETH before tick math sees the pair.
 
 `TwapOracle` fails closed on every degradation and never falls back to spot — a
 fallback IS the attack, since anyone able to degrade the oracle would choose the
@@ -118,15 +119,24 @@ contributes nothing to the average in that block. An abandoned reference is the
 real hazard: stuck below the true price, it lets a swap clear a floor beneath
 what the input is worth.
 
-### Why `setTwapConfig` is admin-settable rather than timelocked
+### Why `setTwapConfig` is timelock-critical
 
-A reference that degrades must be repointable immediately, because a stale
-oracle blocks `closeLp`. The dangerous direction is closed off by construction
-instead: `MIN_TWAP_WINDOW` (1800s) and `MIN_TWAP_CARDINALITY` (60) are constants
-no role can lower, the pair is verified against the pool's immutable `token0` /
-`token1`, and the setter calls the oracle so a reference that cannot answer
-today is rejected at configuration time. The worst an admin can do is pick a
-different pool that genuinely trades the pair with real history behind it.
+Repointing a reference changes the price boundary for every managed Safe, so
+`setTwapConfig` requires both `msg.sender == timelock` and
+`CRITICAL_ROLE`. A `DEFAULT_ADMIN_ROLE` holder cannot make the change directly.
+The delay gives operators and Safe owners time to inspect a proposed reference,
+while `MIN_TWAP_WINDOW` (1800s), `MIN_TWAP_CARDINALITY` (60), immutable-pair
+validation, and a live oracle read prevent the timelock from installing a weak
+or unusable configuration. An active key can never be cleared to zero; a new
+validated pool replaces it atomically. New pool parameters cannot be
+allow-listed, and a protocol's open side cannot be re-enabled, unless every
+non-USDC currency decoded by its registered handler has a live reference.
+Native ETH checks the `address(0)` key. The close-side emergency switch remains
+oracle-independent so it can re-enable `withdrawLp`; close/collect swap paths
+still fail closed inside the handlers. If an active reference fails before a
+replacement is executed, `withdrawLp` remains available. `twapMinimumOut`
+exposes the exact contract-derived floor for operations and deployment
+verification.
 
 ### `withdrawLp`: the exit that reads no price
 

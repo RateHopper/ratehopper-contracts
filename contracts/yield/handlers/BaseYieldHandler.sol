@@ -365,8 +365,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         }
 
         // Swap the non-USDC legs this close produced back to USDC.
-        _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, p.slippageBps, 26, 10, 27);
-        _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, p.slippageBps, 34, 35, 36);
+        _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, p.slippageBps, 26, 10, 27, false);
+        _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, p.slippageBps, 34, 35, 36, false);
 
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
         // Caller's final-value guard on gross realized USDC.
@@ -486,7 +486,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
                     p.slippageBps,
                     38,
                     39,
-                    40
+                    40,
+                    true
                 );
             }
             return;
@@ -509,8 +510,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
         _collectLpFees(p.onBehalfOf, p.tokenId, token0, token1);
         if (p.swapFeesToUsdc) {
-            _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, p.slippageBps, 26, 10, 27);
-            _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, p.slippageBps, 34, 35, 36);
+            _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, p.slippageBps, 26, 10, 27, true);
+            _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, p.slippageBps, 34, 35, 36, true);
         }
     }
 
@@ -546,7 +547,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             p.slippageBps,
             approveStep,
             execStep,
-            resetStep
+            resetStep,
+            false
         );
         received = IERC20(token).balanceOf(p.onBehalfOf) - balanceBefore;
         // Avoid accidental one-sided mints after a zero-output swap.
@@ -650,11 +652,21 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         uint16 slippageBps,
         uint8 approveStep,
         uint8 execStep,
-        uint8 resetStep
+        uint8 resetStep,
+        bool leaveZeroFloorInKind
     ) internal {
         // Every router call in this handler funnels through here, so the floor
         // is enforced structurally rather than by remembering to call it.
         amountOutMin = _twapMinOut(tokenIn, tokenOut, amountIn, amountOutMin, slippageBps);
+        // Dynamic harvest/reward deltas can be non-zero while their quoted
+        // output rounds to zero in raw token units. There is no enforceable
+        // price boundary in that case, so keep the dust on the Safe instead of
+        // either making an unprotected router call or reverting the harvest.
+        // Known-input swaps (open legs) pass false and remain fail-closed.
+        if (amountOutMin == 0) {
+            if (leaveZeroFloorInKind) return;
+            revert InvalidSwapAmountOutMin();
+        }
         bytes memory swapData = _buildSwapCalldata(
             tokenIn,
             tokenOut,
@@ -681,7 +693,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         uint16 slippageBps,
         uint8 approveStep,
         uint8 execStep,
-        uint8 resetStep
+        uint8 resetStep,
+        bool leaveZeroFloorInKind
     ) internal {
         if (token == address(USDC)) return;
         uint256 delta = IERC20(token).balanceOf(_onBehalfOf) - balanceBefore;
@@ -697,7 +710,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
                 slippageBps,
                 approveStep,
                 execStep,
-                resetStep
+                resetStep,
+                leaveZeroFloorInKind
             );
         }
     }
@@ -740,9 +754,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         address token = tokenIn == address(USDC) ? tokenOut : tokenIn;
         TwapConfig memory cfg = _yieldStorage().twapConfigOf[token];
         if (cfg.pool == address(0)) revert TwapOracle.TwapNotConfigured(token);
-        uint256 floor = (TwapOracle.quote(cfg, tokenIn, tokenOut, amountIn) * (10_000 - slippageBps)) / 10_000;
-        // A swap with no effective floor on either side must not proceed.
-        if (floor == 0 && callerMinOut == 0) revert InvalidSwapAmountOutMin();
+        uint256 floor = Math.mulDiv(TwapOracle.quote(cfg, tokenIn, tokenOut, amountIn), 10_000 - slippageBps, 10_000);
         return callerMinOut > floor ? callerMinOut : floor;
     }
 

@@ -29,6 +29,10 @@ import { deployedManagerAddress } from "./lpSafeShared";
  * token0/currency0 must be the lower-sorted address (native ETH = address(0)
  * always sorts first).
  *
+ * Enabling fails closed unless every non-USDC side already has a live TWAP
+ * reference. Native ETH uses the address(0) reference key; configure it to a
+ * WETH/USDC reference pool through the critical timelock first.
+ *
  * Configure the constants below (or override via the noted env vars), then:
  *   IGNITION_DEPLOYMENT_ID=yield-v2 npx hardhat run scripts/setPoolParamAllowed.ts --network base
  */
@@ -91,6 +95,7 @@ async function main() {
         [
             "function setPoolParamAllowed(uint8,bytes,bool) external",
             "function isPoolParamAllowed(uint8,bytes) view returns (bool)",
+            "function twapConfigOf(address) view returns ((address pool,uint32 window,uint16 minCardinality))",
             "function hasRole(bytes32,address) view returns (bool)",
             "function DEFAULT_ADMIN_ROLE() view returns (bytes32)",
         ],
@@ -112,6 +117,18 @@ async function main() {
     console.log("- Signer:", admin.address, "| has DEFAULT_ADMIN_ROLE:", signerIsAdmin);
 
     if (!signerIsAdmin) throw new Error(`Signer ${admin.address} lacks DEFAULT_ADMIN_ROLE — the call would revert`);
+    if (ALLOWED) {
+        for (const token of [t0, t1]) {
+            if (token.toLowerCase() === USDC_ADDRESS.toLowerCase()) continue;
+            const config = await manager.twapConfigOf(token);
+            if (config.pool === ethers.ZeroAddress) {
+                throw new Error(
+                    `Missing TWAP reference for ${token} — schedule setTwapConfig through the critical timelock first`,
+                );
+            }
+            console.log(`- TWAP reference for ${token}:`, config.pool, `(window ${config.window})`);
+        }
+    }
     if (already === ALLOWED) {
         console.log(`\nNo-op: allow-list is already ${ALLOWED}.`);
         return;

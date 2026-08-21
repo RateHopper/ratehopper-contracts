@@ -62,6 +62,24 @@ const PM_ABI = [
     "function getPositionLiquidity(uint256) view returns (uint128)",
 ];
 const PERMIT2_ABI = ["function allowance(address,address,address) view returns (uint160,uint48,uint48)"];
+const UNIVERSAL_ROUTER_ABI = ["function execute(bytes,bytes[],uint256) payable"];
+
+async function pushV4NativeSpotDown(ethIn: bigint) {
+    const trader = (await ethers.getSigners())[4];
+    const coder = ethers.AbiCoder.defaultAbiCoder();
+    const swap = coder.encode(
+        [
+            "tuple(tuple(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) poolKey,bool zeroForOne,uint128 amountIn,uint128 amountOutMinimum,bytes hookData)",
+        ],
+        [[[NATIVE, USDC_ADDRESS, FEE_TIER, TICK_SPACING, ethers.ZeroAddress], true, ethIn, 0n, "0x"]],
+    );
+    const settle = coder.encode(["address", "uint256"], [NATIVE, ethIn]);
+    const take = coder.encode(["address", "uint256"], [USDC_ADDRESS, 0n]);
+    const input = coder.encode(["bytes", "bytes[]"], ["0x060c0f", [swap, settle, take]]);
+    const router = new ethers.Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, trader);
+    const block = await ethers.provider.getBlock("latest");
+    await (await router.execute("0x10", [input], block!.timestamp + 600, { value: ethIn })).wait();
+}
 
 describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () {
     this.timeout(300_000);
@@ -111,6 +129,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         const manager = await Manager.deploy(
             await registry.getAddress(),
             USDC_ADDRESS,
+            WETH_ADDRESS,
             [UNISWAP_V4],
             [await handler.getAddress()],
             [[POOL_PARAM]],
@@ -127,7 +146,15 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         await manager.waitForDeployment();
         // Price reference for the swap floor (H-01).
         await (
-            await manager.setTwapConfig(WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)
+            await timelock.execute(
+                await manager.getAddress(),
+                manager.interface.encodeFunctionData("setTwapConfig", [
+                    ethers.ZeroAddress,
+                    TWAP_REF_WETH_USDC_POOL,
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ]),
+            )
         ).wait();
 
         await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
@@ -240,6 +267,21 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             };
         };
 
+        const manipulationSnapshot = await network.provider.send("evm_snapshot");
+        const tickBeforeManipulation = Number((await stateView.getSlot0(POOL_ID))[1]);
+        await pushV4NativeSpotDown(ethers.parseEther("1000"));
+        const tickAfterManipulation = Number((await stateView.getSlot0(POOL_ID))[1]);
+        expect(tickAfterManipulation).to.be.lessThan(tickBeforeManipulation - 300);
+        await expect(
+            manager.connect(operator).closeLp(UNISWAP_V4, {
+                ...closeParams(10_000, 10_000n),
+                swap0: leg(0, POOL_PARAM),
+                minUsdcOut: 0,
+            }),
+        ).to.be.reverted;
+        expect(await pm.ownerOf(tokenId)).to.equal(safeAddress);
+        expect(await network.provider.send("evm_revert", [manipulationSnapshot])).to.equal(true);
+
         await expect(manager.connect(operator).closeLp(UNISWAP_V4, closeParams(5_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",
@@ -290,6 +332,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         const manager = await Manager.deploy(
             await registry.getAddress(),
             USDC_ADDRESS,
+            WETH_ADDRESS,
             [UNISWAP_V4],
             [await handler.getAddress()],
             [[WETH_POOL_PARAM]],
@@ -306,7 +349,15 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         await manager.waitForDeployment();
         // Price reference for the swap floor (H-01).
         await (
-            await manager.setTwapConfig(WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)
+            await timelock.execute(
+                await manager.getAddress(),
+                manager.interface.encodeFunctionData("setTwapConfig", [
+                    WETH_ADDRESS,
+                    TWAP_REF_WETH_USDC_POOL,
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ]),
+            )
         ).wait();
 
         await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());

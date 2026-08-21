@@ -36,16 +36,18 @@ const NATIVE = "0x0000000000000000000000000000000000000000";
 // pool, cheap slot0 manipulation); Aerodrome Slipstream tick spacings
 // {100, 200}; the canonical hookless native ETH/USDC 0.05% Uniswap V4 pool.
 // POST-DEPLOY, BEFORE FIRST USE: `setTwapConfig(token, refPool, window,
-// cardinality)` for every non-USDC token that will be swapped — WETH always,
+// cardinality)` for every non-USDC token that will be swapped — WETH and the
+// native `address(0)` key (both may use the same WETH/USDC reference pool),
 // plus AERO if staked Aerodrome rewards are sold. Without it openLp/closeLp/
 // collectLp revert `TwapNotConfigured`, which fails closed but is a liveness
-// gap. It is NOT done here because DEFAULT_ADMIN_ROLE goes to `initialAdmin`
-// in the constructor, not to the deploying key, so ignition cannot make the
-// call. Reference pools: TWAP_REF_* in contractAddresses.ts.
+// gap. The setter is timelock-critical, so post-deploy configuration must be
+// scheduled and executed by the configured timelock (which holds
+// CRITICAL_ROLE); neither the deployer nor `initialAdmin` can call it directly.
+// Reference pools: TWAP_REF_* in contractAddresses.ts.
 //
-// Additional pairs are allow-listed post-deploy via setPoolParamAllowed —
-// hooked V4 pools ONLY after the hook is audited (the allow-list is the sole
-// gate; the handler itself accepts any allow-listed PoolKey).
+// Additional pairs are allow-listed post-deploy via setPoolParamAllowed only
+// after every non-USDC side has a live TWAP reference. Hooked V4 pools remain
+// restricted to audited hooks (the allow-list is the sole hook gate).
 const UNIV3_POOL_PARAMS = [100, 500, 3000].map((feeTier) => encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, feeTier));
 const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) =>
     encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, tickSpacing),
@@ -194,6 +196,7 @@ export default buildModule("DeployYieldManager", (m) => {
         [
             registry,
             USDC_ADDRESS,
+            WETH_ADDRESS,
             [UNISWAP_V3, AERODROME, UNISWAP_V4],
             [uniV3YieldHandler, aerodromeYieldHandler, uniV4YieldHandler],
             [UNIV3_POOL_PARAMS, AERODROME_POOL_PARAMS, UNIV4_POOL_PARAMS],

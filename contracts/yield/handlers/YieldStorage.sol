@@ -49,7 +49,7 @@ abstract contract YieldStorage {
         ///      the pair. Not keyed by protocol: the reference is the token's
         ///      price, not a venue, so an Aerodrome or Uniswap V4 swap is
         ///      floored by the same Uniswap V3 observation history. Native ETH
-        ///      is configured under its WETH address.
+        ///      is keyed by address(0), with a WETH/USDC reference pool.
         mapping(address token => TwapConfig) twapConfigOf;
         /// @dev Profit already taken OUT of a position but not yet charged a
         ///      performance fee, in USDC 6dp. An in-kind switch redeploys only
@@ -61,6 +61,13 @@ abstract contract YieldStorage {
         ///      replacement position and prorated on partial exits exactly
         ///      like the basis it mirrors.
         mapping(uint8 protocolId => mapping(uint256 tokenId => uint128)) carryProfitUsd6Of;
+        /// @dev Enumerable copy of the active allow-list. Appended after all
+        ///      pre-existing fields to preserve the namespaced storage layout.
+        ///      The manager uses it when a pauser re-enables a protocol to
+        ///      prove every pool pair still has a live price reference.
+        mapping(uint8 protocolId => bytes[]) allowedPoolParams;
+        /// @dev One-based index into `allowedPoolParams`; zero means absent.
+        mapping(uint8 protocolId => mapping(bytes32 poolKey => uint256)) allowedPoolParamIndexPlusOne;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ratehopper.storage.yield")) - 1)) & ~bytes32(uint256(0xff))
@@ -201,4 +208,6 @@ abstract contract YieldStorage {
     error TwapWindowTooShort();
     error TwapCardinalityBelowFloor();
     error TwapPoolPairMismatch();
+    error InvalidTwapReferencePool(address pool);
+    error TwapReferenceRemovalNotAllowed(address token);
 }

@@ -40,6 +40,8 @@ contract MockSlipstreamSwapRouter {
 
     uint256 public output;
     mapping(address => uint256) public outputFor;
+    bool public enforceMinOut;
+    uint256 public callCount;
 
     function setOutput(uint256 newOutput) external {
         output = newOutput;
@@ -49,11 +51,17 @@ contract MockSlipstreamSwapRouter {
         outputFor[tokenOut] = newOutput;
     }
 
+    function setEnforceMinOut(bool value) external {
+        enforceMinOut = value;
+    }
+
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
+        callCount++;
         if (params.amountIn > 0) {
             IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
         }
         amountOut = outputFor[params.tokenOut] != 0 ? outputFor[params.tokenOut] : output;
+        if (enforceMinOut) require(amountOut >= params.amountOutMinimum, "router: too little received");
         if (amountOut > 0) {
             IERC20(params.tokenOut).transfer(params.recipient, amountOut);
         }
@@ -173,6 +181,11 @@ contract MockCLNonfungiblePositionManager {
     function setOwed(uint256 tokenId, uint128 owed0, uint128 owed1) external {
         positionsData[tokenId].owed0 = owed0;
         positionsData[tokenId].owed1 = owed1;
+    }
+
+    function setPrincipal(uint256 tokenId, uint128 principal0, uint128 principal1) external {
+        positionsData[tokenId].principal0 = principal0;
+        positionsData[tokenId].principal1 = principal1;
     }
 
     function setTokens(uint256 tokenId, address token0, address token1) external {

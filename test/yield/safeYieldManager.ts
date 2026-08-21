@@ -205,6 +205,7 @@ async function deployYieldManagerHarness() {
     const manager = await Manager.deploy(
         await reg.getAddress(),
         usdcAddr,
+        wethAddr,
         [UNISWAP_V3, AERODROME],
         [await uniHandler.getAddress(), await aeroHandler.getAddress()],
         [[FEE_TIER], [TICK_SPACING]],
@@ -230,7 +231,14 @@ async function deployYieldManagerHarness() {
 
     // Price reference for the non-USDC side. One Uniswap V3 pool serves every
     // venue, so the Aerodrome legs below are floored by this same history.
-    await (await manager.setTwapConfig(wethAddr, await uniPool.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY)).wait();
+    await (
+        await timelockCall(timelock, manager, "setTwapConfig", [
+            wethAddr,
+            await uniPool.getAddress(),
+            TWAP_WINDOW,
+            TWAP_CARDINALITY,
+        ])
+    ).wait();
 
     return {
         deployer,
@@ -282,13 +290,14 @@ describe("SafeYieldManager", function () {
         });
 
         it("reverts on constructor array length mismatch", async function () {
-            const { manager, reg, usdcAddr, uniHandler, treasury, deployer, pauser, timelock } =
+            const { manager, reg, usdcAddr, wethAddr, uniHandler, treasury, deployer, pauser, timelock } =
                 await loadFixture(deployYieldManagerHarness);
             const Manager = await ethers.getContractFactory("SafeYieldManager");
             await expect(
                 Manager.deploy(
                     await reg.getAddress(),
                     usdcAddr,
+                    wethAddr,
                     [UNISWAP_V3, AERODROME],
                     [await uniHandler.getAddress()],
                     [[FEE_TIER], [TICK_SPACING]],
@@ -306,7 +315,7 @@ describe("SafeYieldManager", function () {
         });
 
         it("rejects mismatched and non-contract handlers in the constructor", async function () {
-            const { manager, reg, usdcAddr, uniHandler, treasury, deployer, pauser, stranger, timelock } =
+            const { manager, reg, usdcAddr, wethAddr, uniHandler, treasury, deployer, pauser, stranger, timelock } =
                 await loadFixture(deployYieldManagerHarness);
             const Manager = await ethers.getContractFactory("SafeYieldManager");
             const registryAddress = await reg.getAddress();
@@ -315,6 +324,7 @@ describe("SafeYieldManager", function () {
                 Manager.deploy(
                     registryAddress,
                     usdcAddr,
+                    wethAddr,
                     [AERODROME],
                     [handler],
                     [[TICK_SPACING]],
@@ -493,6 +503,49 @@ describe("SafeYieldManager", function () {
             expect(await uniRouter.lastAmountOutMinimum()).to.equal(tighter);
         });
 
+        it("reverts one unit below the effective floor and succeeds exactly at it", async function () {
+            const { manager, operatorEOA, safeAddr, uniRouter } = await loadFixture(deployYieldManagerHarness);
+            await (await uniRouter.setEnforceMinOut(true)).wait();
+            await (await uniRouter.setOutput(TWAP_FLOOR - 1n)).wait();
+
+            await expect(
+                manager.connect(operatorEOA).openLp(
+                    UNISWAP_V3,
+                    openParams(safeAddr, FEE_TIER, { swap0: leg(1, FEE_TIER) }),
+                ),
+            ).to.be.revertedWith("router: too little received");
+
+            await (await uniRouter.setOutput(TWAP_FLOOR)).wait();
+            await expect(
+                manager.connect(operatorEOA).openLp(
+                    UNISWAP_V3,
+                    openParams(safeAddr, FEE_TIER, { swap0: leg(1, FEE_TIER) }),
+                ),
+            ).to.emit(manager, "PositionOpened");
+            expect(await uniRouter.lastAmountOutMinimum()).to.equal(TWAP_FLOOR);
+        });
+
+        it("enforces the same router boundary through the Aerodrome handler", async function () {
+            const { manager, operatorEOA, safeAddr, clRouter } = await loadFixture(deployYieldManagerHarness);
+            await (await clRouter.setEnforceMinOut(true)).wait();
+            await (await clRouter.setOutput(TWAP_FLOOR - 1n)).wait();
+
+            await expect(
+                manager.connect(operatorEOA).openLp(
+                    AERODROME,
+                    openParams(safeAddr, TICK_SPACING, { swap0: leg(1, TICK_SPACING) }),
+                ),
+            ).to.be.revertedWith("router: too little received");
+
+            await (await clRouter.setOutput(TWAP_FLOOR)).wait();
+            await expect(
+                manager.connect(operatorEOA).openLp(
+                    AERODROME,
+                    openParams(safeAddr, TICK_SPACING, { swap0: leg(1, TICK_SPACING) }),
+                ),
+            ).to.emit(manager, "PositionOpened");
+        });
+
         it("scales the floor with slippageBps", async function () {
             const { manager, operatorEOA, safeAddr, uniRouter } = await loadFixture(deployYieldManagerHarness);
             await (
@@ -508,11 +561,11 @@ describe("SafeYieldManager", function () {
         });
 
         it("refuses to swap a token with no price reference", async function () {
-            const { manager, deployer, operatorEOA, safeAddr, wethAddr } = await loadFixture(deployYieldManagerHarness);
-            await (await manager.connect(deployer).setTwapConfig(wethAddr, ethers.ZeroAddress, 0, 0)).wait();
+            const { manager, operatorEOA, safeAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
+            await (await uniPool.setObserveReverts(true)).wait();
             await expect(
                 manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER)),
-            ).to.be.revertedWithCustomError(manager, "TwapNotConfigured");
+            ).to.be.revertedWith("OLD");
         });
 
         it("reverts SwapFailed when the swap produces no WETH", async function () {
@@ -768,6 +821,28 @@ describe("SafeYieldManager", function () {
             const netHarvest = owed0 - (owed0 * COLLECT_FEE_BPS) / 10_000n;
             expect(await uniRouter.lastAmountIn()).to.equal(netHarvest);
             expect(await uniRouter.lastAmountOutMinimum()).to.equal((netHarvest * (10_000n - BigInt(SLIP))) / 10_000n);
+        });
+
+        it("leaves a dynamic fee delta in kind when its independent floor rounds to zero", async function () {
+            const { manager, operatorEOA, safeAddr, weth, uniNpm, uniRouter } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniNpm.setOwed(1, 1n, 0)).wait();
+            const callsBefore = await uniRouter.callCount();
+            const wethBefore = await weth.balanceOf(safeAddr);
+
+            await expect(
+                manager.connect(operatorEOA).collectLp(
+                    UNISWAP_V3,
+                    collectParams(safeAddr, 1, FEE_TIER, {
+                        swapFeesToUsdc: true,
+                        swap0: leg(0, FEE_TIER),
+                    }),
+                ),
+            ).to.emit(manager, "FeesCollected");
+
+            expect(await uniRouter.callCount()).to.equal(callsBefore);
+            expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore + 1n);
         });
 
         it("rejects tokenIds without a stored basis", async function () {
@@ -1232,6 +1307,7 @@ describe("SafeYieldManager", function () {
             const {
                 manager,
                 deployer,
+                timelock,
                 operatorEOA,
                 safeAddr,
                 treasury,
@@ -1262,17 +1338,20 @@ describe("SafeYieldManager", function () {
             const aeroPool = await CLPool.deploy(r0, r1, Q96, 10n ** 18n);
             await aeroPool.waitForDeployment();
             await (await clFactory.setPoolFor(r0, r1, 50, aeroPool)).wait();
-            await (await manager.connect(deployer).setPoolParamAllowed(AERODROME, AERO_PARAM, true)).wait();
             // The reward swap executes on Aerodrome but is priced off a Uniswap
             // V3 reference — one price per token, independent of venue.
             const UniPoolFactory = await ethers.getContractFactory("MockUniswapV3Pool");
             const aeroRef = await UniPoolFactory.deploy(r0, r1, Q96, 10n ** 18n);
             await aeroRef.waitForDeployment();
             await (
-                await manager
-                    .connect(deployer)
-                    .setTwapConfig(aeroAddr, await aeroRef.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY)
+                await timelockCall(timelock, manager, "setTwapConfig", [
+                    aeroAddr,
+                    await aeroRef.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ])
             ).wait();
+            await (await manager.connect(deployer).setPoolParamAllowed(AERODROME, AERO_PARAM, true)).wait();
             await (await clRouter.setOutputFor(usdcAddr, 123_456n)).wait();
 
             await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
@@ -1485,7 +1564,7 @@ describe("SafeYieldManager", function () {
             const REWARD_FEE = (REWARD * COLLECT_FEE_BPS) / 10_000n;
 
             /// Stake a position and arm its gauge with `rewardToken`/`REWARD`.
-            async function stakeWithReward(f: any, rewardToken?: any) {
+            async function stakeWithReward(f: any, rewardToken?: any, rewardAmount = REWARD) {
                 const { manager, operatorEOA, safeAddr, clNpm, clPool, voter } = f;
                 const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
                 let reward = rewardToken;
@@ -1496,12 +1575,35 @@ describe("SafeYieldManager", function () {
                 }
                 const rewardAddr = await reward.getAddress();
                 await (await reward.mint(stakePoolAddr, 10n ** 24n)).wait();
-                await (await stakePool.setReward(rewardAddr, REWARD)).wait();
+                await (await stakePool.setReward(rewardAddr, rewardAmount)).wait();
                 await manager
                     .connect(operatorEOA)
                     .openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
                 return { stakePool, stakePoolAddr, reward, rewardAddr };
             }
+
+            it("leaves a one-unit claimed reward in kind when its TWAP floor rounds to zero", async function () {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, operatorEOA, safeAddr, weth, clRouter } = f;
+                await stakeWithReward(f, weth, 1n);
+                const callsBefore = await clRouter.callCount();
+                const wethBefore = await weth.balanceOf(safeAddr);
+
+                await expect(
+                    manager.connect(operatorEOA).collectLp(
+                        AERODROME,
+                        collectParams(safeAddr, 1, TICK_SPACING, {
+                            swapRewardToUsdc: true,
+                            rewardSwap: leg(0, TICK_SPACING),
+                        }),
+                    ),
+                )
+                    .to.emit(manager, "StakedRewardCollected")
+                    .withArgs(safeAddr, AERODROME, 1n, await weth.getAddress(), 1n, 0n);
+
+                expect(await clRouter.callCount()).to.equal(callsBefore);
+                expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore + 1n);
+            });
 
             it("charges the collect fee on a claim even when the reward is not swapped", async function () {
                 const f = await loadFixture(deployYieldManagerHarness);
@@ -1691,6 +1793,7 @@ describe("SafeYieldManager", function () {
             return [
                 await f.reg.getAddress(),
                 f.usdcAddr,
+                f.wethAddr,
                 [UNISWAP_V3, AERODROME],
                 [await f.uniHandler.getAddress(), await f.aeroHandler.getAddress()],
                 [[FEE_TIER], [TICK_SPACING]],
@@ -1718,13 +1821,14 @@ describe("SafeYieldManager", function () {
 
             await expect(deployWith(0, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
             await expect(deployWith(1, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
-            await expect(deployWith(11, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
+            await expect(deployWith(2, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
             await expect(deployWith(12, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
             await expect(deployWith(13, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
-            await expect(deployWith(7, ZERO)).to.be.revertedWithCustomError(f.manager, "InvalidTreasury");
-            await expect(deployWith(10, 10_001)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
-            await expect(deployWith(8, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
+            await expect(deployWith(14, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
+            await expect(deployWith(8, ZERO)).to.be.revertedWithCustomError(f.manager, "InvalidTreasury");
+            await expect(deployWith(11, 10_001)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
             await expect(deployWith(9, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
+            await expect(deployWith(10, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
         });
 
         it("rejects every constructor array length mismatch", async function () {
@@ -1737,9 +1841,9 @@ describe("SafeYieldManager", function () {
                 return (Manager as any).deploy(...args);
             };
 
-            await expect(deployWith(4, [[FEE_TIER]])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
-            await expect(deployWith(5, [0])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
+            await expect(deployWith(5, [[FEE_TIER]])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
             await expect(deployWith(6, [0])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
+            await expect(deployWith(7, [0])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
         });
     });
 
@@ -2040,6 +2144,7 @@ describe("SafeYieldManager", function () {
             const manager = await Manager.deploy(
                 await f.reg.getAddress(),
                 f.usdcAddr,
+                f.wethAddr,
                 [UNISWAP_V3],
                 [await f.uniHandler.getAddress()],
                 [[FEE_TIER]],
@@ -2055,7 +2160,12 @@ describe("SafeYieldManager", function () {
             );
             await manager.waitForDeployment();
             await (
-                await manager.setTwapConfig(f.wethAddr, await f.uniPool.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY)
+                await timelockCall(f.timelock, manager, "setTwapConfig", [
+                    f.wethAddr,
+                    await f.uniPool.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ])
             ).wait();
 
             await (await manager.connect(f.operatorEOA).openLp(UNISWAP_V3, openParams(f.safeAddr, FEE_TIER))).wait();
@@ -2165,10 +2275,6 @@ describe("SafeYieldManager", function () {
             await (await harness.uniFactory.setPoolFor(xAddr, yAddr, 500, await lpPool.getAddress())).wait();
             await (await harness.reg.setWhitelisted(xAddr, true)).wait();
             await (await harness.reg.setWhitelisted(yAddr, true)).wait();
-            await (
-                await harness.manager.connect(harness.deployer).setPoolParamAllowed(UNISWAP_V3, LP_PARAM, true)
-            ).wait();
-
             return { tokenX, tokenY, xAddr, yAddr, LP_PARAM, Pool };
         }
 
@@ -2188,7 +2294,18 @@ describe("SafeYieldManager", function () {
 
         it("opens and closes a non-USDC pair position by swapping both legs through USDC", async function () {
             const harness = await loadFixture(deployYieldManagerHarness);
-            const { manager, deployer, operatorEOA, safeAddr, usdc, usdcAddr, uniFactory, uniNpm, uniRouter } = harness;
+            const {
+                manager,
+                deployer,
+                timelock,
+                operatorEOA,
+                safeAddr,
+                usdc,
+                usdcAddr,
+                uniFactory,
+                uniNpm,
+                uniRouter,
+            } = harness;
             const { tokenX, tokenY, xAddr, yAddr, LP_PARAM, Pool } = await deployNonUsdcPair(harness);
 
             const [swapX0, swapX1] =
@@ -2203,18 +2320,21 @@ describe("SafeYieldManager", function () {
             await (await uniFactory.setPoolFor(swapX0, swapX1, 500, await xPool.getAddress())).wait();
             await (await uniFactory.setPoolFor(swapY0, swapY1, 500, await yPool.getAddress())).wait();
 
-            for (const param of [SWAP_X_PARAM, SWAP_Y_PARAM]) {
-                await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, param, true)).wait();
-            }
             for (const [token, pool] of [
                 [xAddr, xPool],
                 [yAddr, yPool],
             ] as const) {
                 await (
-                    await manager
-                        .connect(deployer)
-                        .setTwapConfig(token, await pool.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY)
+                    await timelockCall(timelock, manager, "setTwapConfig", [
+                        token,
+                        await pool.getAddress(),
+                        TWAP_WINDOW,
+                        TWAP_CARDINALITY,
+                    ])
                 ).wait();
+            }
+            for (const param of [LP_PARAM, SWAP_X_PARAM, SWAP_Y_PARAM]) {
+                await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, param, true)).wait();
             }
 
             const X_OUT = 3_000n;
@@ -2262,8 +2382,19 @@ describe("SafeYieldManager", function () {
         });
 
         it("handles a pair where USDC itself is token0 (skips leg0, swaps only leg1)", async function () {
-            const { manager, deployer, operatorEOA, safeAddr, usdc, usdcAddr, uniFactory, uniNpm, uniRouter, reg } =
-                await loadFixture(deployYieldManagerHarness);
+            const {
+                manager,
+                deployer,
+                timelock,
+                operatorEOA,
+                safeAddr,
+                usdc,
+                usdcAddr,
+                uniFactory,
+                uniNpm,
+                uniRouter,
+                reg,
+            } = await loadFixture(deployYieldManagerHarness);
 
             // Mock deploy addresses are nonce-derived and can land anywhere, so
             // place MockERC20 code at usdc + 1 directly — deterministically the
@@ -2277,12 +2408,15 @@ describe("SafeYieldManager", function () {
             const lpPool = await Pool.deploy(usdcAddr, highAddr, Q96, 10n ** 18n);
             await (await uniFactory.setPoolFor(usdcAddr, highAddr, 500, await lpPool.getAddress())).wait();
             await (await reg.setWhitelisted(highAddr, true)).wait();
-            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, LP_PARAM, true)).wait();
             await (
-                await manager
-                    .connect(deployer)
-                    .setTwapConfig(highAddr, await lpPool.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY)
+                await timelockCall(timelock, manager, "setTwapConfig", [
+                    highAddr,
+                    await lpPool.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ])
             ).wait();
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, LP_PARAM, true)).wait();
 
             const HIGH_OUT = 400_000n;
             await (await high.mint(await uniRouter.getAddress(), 10n ** 24n)).wait();
@@ -2336,8 +2470,21 @@ describe("SafeYieldManager", function () {
 
         it("rejects a leg whose swap pool does not contain USDC", async function () {
             const harness = await loadFixture(deployYieldManagerHarness);
-            const { manager, operatorEOA, safeAddr, uniRouter } = harness;
-            const { xAddr, yAddr, LP_PARAM } = await deployNonUsdcPair(harness);
+            const { manager, deployer, timelock, operatorEOA, safeAddr, usdcAddr, uniRouter } = harness;
+            const { xAddr, yAddr, LP_PARAM, Pool } = await deployNonUsdcPair(harness);
+            for (const token of [xAddr, yAddr]) {
+                const [r0, r1] = token.toLowerCase() < usdcAddr.toLowerCase() ? [token, usdcAddr] : [usdcAddr, token];
+                const reference = await Pool.deploy(r0, r1, Q96, 10n ** 18n);
+                await (
+                    await timelockCall(timelock, manager, "setTwapConfig", [
+                        token,
+                        await reference.getAddress(),
+                        TWAP_WINDOW,
+                        TWAP_CARDINALITY,
+                    ])
+                ).wait();
+            }
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, LP_PARAM, true)).wait();
             await (await uniRouter.setOutputFor(xAddr, 1n)).wait();
             await (await uniRouter.setOutputFor(yAddr, 1n)).wait();
 
@@ -2539,6 +2686,165 @@ describe("SafeYieldManager", function () {
             expect(await usdc.balanceOf(treasury.address)).to.equal(0);
         });
 
+        async function runPinnedCarryVector(finalValue: bigint) {
+            const f = await loadFixture(deployYieldManagerHarness);
+            const { manager, operatorEOA, safeAddr, treasury, usdc, uniNpm, clNpm, clRouter } = f;
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+
+            // Audit vector: B=1,000,000; R=2,000,000; D=500,000.
+            // The mock position exits entirely as token0 and the destination
+            // consumes 25%, leaving U=1,500,000 on the Safe.
+            await (await uniNpm.setPrincipal(1, 2_000_000n, 0n)).wait();
+            await (await clNpm.setMintUsageBps(2_500)).wait();
+            const treasuryBeforeSwitch = await usdc.balanceOf(treasury.address);
+            await expect(
+                manager.connect(operatorEOA).switchLp(
+                    UNISWAP_V3,
+                    AERODROME,
+                    switchParams(safeAddr, 1, TICK_SPACING),
+                ),
+            )
+                .to.emit(manager, "SwitchResidueSettled")
+                .withArgs(safeAddr, AERODROME, 1n, 1_500_000n, 0n, 1_500_000n, 0n, 500_000n);
+            expect(await usdc.balanceOf(treasury.address)).to.equal(treasuryBeforeSwitch);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(0n);
+            expect(await manager.carryProfitUsd6Of(UNISWAP_V3, 1)).to.equal(0n);
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(0n);
+            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(500_000n);
+
+            await (await clRouter.setOutput(finalValue)).wait();
+            const treasuryBeforeClose = await usdc.balanceOf(treasury.address);
+            const receipt = await (
+                await manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, { swap0: leg(0, TICK_SPACING) }),
+                )
+            ).wait();
+            const closed = receipt!.logs
+                .map((log: any) => {
+                    try {
+                        return manager.interface.parseLog(log);
+                    } catch {
+                        return null;
+                    }
+                })
+                .find((event: any) => event?.name === "PositionClosed")!;
+            const expectedProfit = finalValue + 500_000n;
+            const expectedFee = (expectedProfit * PERF_FEE_BPS) / 10_000n;
+            expect(closed.args.basisUsd6).to.equal(0n);
+            expect(closed.args.currentValueUsd6).to.equal(finalValue);
+            expect(closed.args.carryForExitUsd6).to.equal(500_000n);
+            expect(closed.args.feeUsd6).to.equal(expectedFee);
+            expect((await usdc.balanceOf(treasury.address)) - treasuryBeforeClose).to.equal(expectedFee);
+            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(0n);
+        }
+
+        it("matches the pinned carry vector when the replacement closes at 500,000", async function () {
+            await runPinnedCarryVector(500_000n);
+        });
+
+        it("reflects replacement loss when the pinned vector closes at 100,000", async function () {
+            await runPinnedCarryVector(100_000n);
+        });
+
+        it("preserves the lifecycle invariant across seeded multi-switch sequences", async function () {
+            // Deterministic generated cases make failures reproducible while
+            // covering different hop counts and integer divisions.
+            let seed = 0x4817n;
+            const next = () => {
+                seed = (seed * 1_103_515_245n + 12_345n) & 0x7fff_ffffn;
+                return seed;
+            };
+
+            for (let caseIndex = 0; caseIndex < 6; caseIndex++) {
+                const f = await loadFixture(deployYieldManagerHarness);
+                const { manager, operatorEOA, safeAddr, treasury, usdc, uniNpm, clNpm, uniRouter, clRouter } = f;
+                await (
+                    await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))
+                ).wait();
+
+                let protocol = UNISWAP_V3;
+                let tokenId = 1n;
+                let basis = USDC_AMOUNT;
+                let carry = 0n;
+                let totalResidue = 0n;
+                const hopCount = 1 + Number(next() % 3n);
+
+                for (let hop = 0; hop < hopCount; hop++) {
+                    const realized = 1_000_000n + (next() % 1_000_001n);
+                    const usageBps = 2_000n + (next() % 7_501n);
+                    const destination = protocol === UNISWAP_V3 ? AERODROME : UNISWAP_V3;
+                    const sourceNpm = protocol === UNISWAP_V3 ? uniNpm : clNpm;
+                    const destinationNpm = destination === UNISWAP_V3 ? uniNpm : clNpm;
+                    await (await sourceNpm.setPrincipal(tokenId, realized, 0n)).wait();
+                    await (await destinationNpm.setMintUsageBps(usageBps)).wait();
+
+                    const destinationParam = destination === UNISWAP_V3 ? FEE_TIER : TICK_SPACING;
+                    const receipt = await (
+                        await manager.connect(operatorEOA).switchLp(
+                            protocol,
+                            destination,
+                            switchParams(safeAddr, tokenId, destinationParam),
+                        )
+                    ).wait();
+                    const switched = receipt!.logs
+                        .map((log: any) => {
+                            try {
+                                return manager.interface.parseLog(log);
+                            } catch {
+                                return null;
+                            }
+                        })
+                        .find((event: any) => event?.name === "PositionSwitched")!;
+                    const deployed = (realized * usageBps) / 10_000n;
+                    const residue = realized - deployed;
+                    totalResidue += residue;
+                    if (residue >= basis) {
+                        carry += residue - basis;
+                        basis = 0n;
+                    } else {
+                        basis -= residue;
+                    }
+
+                    expect(await manager.residualBasisUsd6Of(destination, switched.args.newTokenId)).to.equal(basis);
+                    expect(await manager.carryProfitUsd6Of(destination, switched.args.newTokenId)).to.equal(carry);
+                    expect(await manager.residualBasisUsd6Of(protocol, tokenId)).to.equal(0n);
+                    expect(await manager.carryProfitUsd6Of(protocol, tokenId)).to.equal(0n);
+                    protocol = destination;
+                    tokenId = switched.args.newTokenId;
+                }
+
+                const finalValue = 1_000_000n + (next() % 500_001n);
+                const closeRouter = protocol === UNISWAP_V3 ? uniRouter : clRouter;
+                const closeParam = protocol === UNISWAP_V3 ? FEE_TIER : TICK_SPACING;
+                await (await closeRouter.setOutput(finalValue)).wait();
+                const treasuryBefore = await usdc.balanceOf(treasury.address);
+                const receipt = await (
+                    await manager.connect(operatorEOA).closeLp(
+                        protocol,
+                        closeParams(safeAddr, tokenId, closeParam, { swap0: leg(0, closeParam) }),
+                    )
+                ).wait();
+                const closed = receipt!.logs
+                    .map((log: any) => {
+                        try {
+                            return manager.interface.parseLog(log);
+                        } catch {
+                            return null;
+                        }
+                    })
+                    .find((event: any) => event?.name === "PositionClosed")!;
+                const lifecycleProfit = totalResidue + finalValue > USDC_AMOUNT
+                    ? totalResidue + finalValue - USDC_AMOUNT
+                    : 0n;
+                const expectedFee = (lifecycleProfit * PERF_FEE_BPS) / 10_000n;
+                expect(closed.args.feeUsd6).to.equal(expectedFee);
+                expect((await usdc.balanceOf(treasury.address)) - treasuryBefore).to.equal(expectedFee);
+                expect(await manager.residualBasisUsd6Of(protocol, tokenId)).to.equal(0n);
+                expect(await manager.carryProfitUsd6Of(protocol, tokenId)).to.equal(0n);
+            }
+        });
+
         it("repays basis first when the residue is smaller than it", async function () {
             const { manager, operatorEOA, safeAddr, clNpm } = await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
@@ -2557,9 +2863,9 @@ describe("SafeYieldManager", function () {
         });
 
         it("needs no price at all when the switch redeploys everything", async function () {
-            const { manager, deployer, operatorEOA, safeAddr, wethAddr } = await loadFixture(deployYieldManagerHarness);
+            const { manager, operatorEOA, safeAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
-            await (await manager.connect(deployer).setTwapConfig(wethAddr, ethers.ZeroAddress, 0, 0)).wait();
+            await (await uniPool.setObserveReverts(true)).wait();
 
             await (
                 await manager
@@ -2571,15 +2877,14 @@ describe("SafeYieldManager", function () {
         });
 
         it("refuses to guess at a residue it cannot price", async function () {
-            const { manager, deployer, operatorEOA, safeAddr, wethAddr, clNpm } =
-                await loadFixture(deployYieldManagerHarness);
+            const { manager, operatorEOA, safeAddr, uniPool, clNpm } = await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
             await (await clNpm.setMintUsageBps(5_000)).wait();
-            await (await manager.connect(deployer).setTwapConfig(wethAddr, ethers.ZeroAddress, 0, 0)).wait();
+            await (await uniPool.setObserveReverts(true)).wait();
 
             await expect(
                 manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
-            ).to.be.revertedWithCustomError(manager, "TwapNotConfigured");
+            ).to.be.revertedWith("OLD");
         });
 
         it("charges the carried profit at the eventual close", async function () {
@@ -2918,8 +3223,9 @@ describe("SafeYieldManager", function () {
     });
 
     describe("setTwapConfig", function () {
-        it("stores and clears a reference", async function () {
-            const { manager, deployer, wethAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
+        it("stores and atomically replaces a reference, but never clears it", async function () {
+            const { manager, deployer, timelock, wethAddr, usdcAddr, uniPool } =
+                await loadFixture(deployYieldManagerHarness);
             const poolAddr = await uniPool.getAddress();
 
             const stored = await manager.twapConfigOf(wethAddr);
@@ -2927,70 +3233,199 @@ describe("SafeYieldManager", function () {
             expect(stored.window).to.equal(TWAP_WINDOW);
             expect(stored.minCardinality).to.equal(TWAP_CARDINALITY);
 
-            await expect(manager.connect(deployer).setTwapConfig(wethAddr, ethers.ZeroAddress, 0, 0))
+            await expect(
+                manager.connect(deployer).setTwapConfig(wethAddr, ethers.ZeroAddress, 0, 0),
+            ).to.be.revertedWithCustomError(manager, "OnlyTimelock");
+            await expect(timelockCall(timelock, manager, "setTwapConfig", [wethAddr, ethers.ZeroAddress, 0, 0]))
+                .to.be.revertedWithCustomError(manager, "TwapReferenceRemovalNotAllowed")
+                .withArgs(wethAddr);
+
+            const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
+            const replacement = await Pool.deploy(wethAddr, usdcAddr, Q96, 10n ** 18n);
+            await expect(
+                timelockCall(timelock, manager, "setTwapConfig", [
+                    wethAddr,
+                    await replacement.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ]),
+            )
                 .to.emit(manager, "TwapConfigUpdated")
-                .withArgs(wethAddr, ethers.ZeroAddress, 0, 0);
-            expect((await manager.twapConfigOf(wethAddr)).pool).to.equal(ethers.ZeroAddress);
+                .withArgs(wethAddr, await replacement.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY);
+            expect((await manager.twapConfigOf(wethAddr)).pool).to.equal(await replacement.getAddress());
         });
 
         it("refuses a window or cardinality below the floors no role can lower", async function () {
-            const { manager, deployer, wethAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
+            const { manager, timelock, wethAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
             const poolAddr = await uniPool.getAddress();
             await expect(
-                manager.connect(deployer).setTwapConfig(wethAddr, poolAddr, TWAP_WINDOW - 1, TWAP_CARDINALITY),
+                timelockCall(timelock, manager, "setTwapConfig", [
+                    wethAddr,
+                    poolAddr,
+                    TWAP_WINDOW - 1,
+                    TWAP_CARDINALITY,
+                ]),
             ).to.be.revertedWithCustomError(manager, "TwapWindowTooShort");
             await expect(
-                manager.connect(deployer).setTwapConfig(wethAddr, poolAddr, TWAP_WINDOW, TWAP_CARDINALITY - 1),
+                timelockCall(timelock, manager, "setTwapConfig", [
+                    wethAddr,
+                    poolAddr,
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY - 1,
+                ]),
             ).to.be.revertedWithCustomError(manager, "TwapCardinalityBelowFloor");
         });
 
         it("refuses a pool that does not trade the pair", async function () {
-            const { manager, deployer, wethAddr, usdcAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
+            const { manager, timelock, wethAddr, usdcAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
             const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
             const wrong = await Pool.deploy(wethAddr, wethAddr, Q96, 10n ** 18n);
             await wrong.waitForDeployment();
             await expect(
-                manager
-                    .connect(deployer)
-                    .setTwapConfig(wethAddr, await wrong.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY),
+                timelockCall(timelock, manager, "setTwapConfig", [
+                    wethAddr,
+                    await wrong.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ]),
             ).to.be.revertedWithCustomError(manager, "TwapPoolPairMismatch");
             // Right pool, wrong token to key it under.
             await expect(
-                manager
-                    .connect(deployer)
-                    .setTwapConfig(usdcAddr, await uniPool.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY),
+                timelockCall(timelock, manager, "setTwapConfig", [
+                    usdcAddr,
+                    await uniPool.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ]),
             ).to.be.revertedWithCustomError(manager, "TwapPoolPairMismatch");
         });
 
         it("refuses a reference that cannot answer today", async function () {
-            const { manager, deployer, wethAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
+            const { manager, timelock, wethAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
             await (await uniPool.setObservationCardinality(TWAP_CARDINALITY - 1)).wait();
             await expect(
-                manager
-                    .connect(deployer)
-                    .setTwapConfig(wethAddr, await uniPool.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY),
+                timelockCall(timelock, manager, "setTwapConfig", [
+                    wethAddr,
+                    await uniPool.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ]),
             ).to.be.revertedWithCustomError(manager, "TwapCardinalityTooLow");
         });
 
-        it("rejects a zero token and a non-admin caller", async function () {
-            const { manager, deployer, stranger, wethAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
+        it("uses address(0) as the native key and validates it against WETH", async function () {
+            const { manager, timelock, wethAddr, usdcAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
             const poolAddr = await uniPool.getAddress();
             await expect(
-                manager.connect(deployer).setTwapConfig(ethers.ZeroAddress, poolAddr, TWAP_WINDOW, TWAP_CARDINALITY),
-            ).to.be.revertedWithCustomError(manager, "ZeroAddress");
+                timelockCall(timelock, manager, "setTwapConfig", [
+                    ethers.ZeroAddress,
+                    poolAddr,
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ]),
+            )
+                .to.emit(manager, "TwapConfigUpdated")
+                .withArgs(ethers.ZeroAddress, poolAddr, TWAP_WINDOW, TWAP_CARDINALITY);
+            expect((await manager.twapConfigOf(ethers.ZeroAddress)).pool).to.equal(poolAddr);
+            expect(await manager.twapQuote(ethers.ZeroAddress, usdcAddr, 500_000n)).to.equal(500_000n);
+
+            const ERC = await ethers.getContractFactory("MockERC20");
+            const other = await ERC.deploy("Other", "OTHER", 18);
+            const otherAddr = await other.getAddress();
+            const [p0, p1] =
+                otherAddr.toLowerCase() < usdcAddr.toLowerCase() ? [otherAddr, usdcAddr] : [usdcAddr, otherAddr];
+            const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
+            const wrong = await Pool.deploy(p0, p1, Q96, 10n ** 18n);
             await expect(
-                manager.connect(stranger).setTwapConfig(wethAddr, poolAddr, TWAP_WINDOW, TWAP_CARDINALITY),
-            ).to.be.revertedWithCustomError(manager, "AccessControlUnauthorizedAccount");
+                timelockCall(timelock, manager, "setTwapConfig", [
+                    ethers.ZeroAddress,
+                    await wrong.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ]),
+            ).to.be.revertedWithCustomError(manager, "TwapPoolPairMismatch");
+            expect(await manager.WETH()).to.equal(wethAddr);
         });
 
-        it("quotes through the manager and reverts where a swap would", async function () {
-            const { manager, deployer, wethAddr, usdcAddr } = await loadFixture(deployYieldManagerHarness);
+        it("rejects direct DEFAULT_ADMIN calls, codeless pools, and uninitialized pools", async function () {
+            const { manager, deployer, stranger, timelock, wethAddr, usdcAddr, uniPool } =
+                await loadFixture(deployYieldManagerHarness);
+            const poolAddr = await uniPool.getAddress();
+            for (const caller of [deployer, stranger]) {
+                await expect(
+                    manager.connect(caller).setTwapConfig(wethAddr, poolAddr, TWAP_WINDOW, TWAP_CARDINALITY),
+                ).to.be.revertedWithCustomError(manager, "OnlyTimelock");
+            }
+            await expect(
+                timelockCall(timelock, manager, "setTwapConfig", [
+                    wethAddr,
+                    stranger.address,
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ]),
+            )
+                .to.be.revertedWithCustomError(manager, "InvalidTwapReferencePool")
+                .withArgs(stranger.address);
+
+            const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
+            const uninitialized = await Pool.deploy(wethAddr, usdcAddr, 0, 10n ** 18n);
+            await expect(
+                timelockCall(timelock, manager, "setTwapConfig", [
+                    wethAddr,
+                    await uninitialized.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ]),
+            ).to.be.revertedWithCustomError(manager, "PoolNotInitialized");
+        });
+
+        it("quotes and previews the exact effective floor", async function () {
+            const { manager, wethAddr, usdcAddr } = await loadFixture(deployYieldManagerHarness);
             expect(await manager.twapQuote(usdcAddr, wethAddr, 500_000n)).to.equal(500_000n);
-            await (await manager.connect(deployer).setTwapConfig(wethAddr, ethers.ZeroAddress, 0, 0)).wait();
-            await expect(manager.twapQuote(usdcAddr, wethAddr, 500_000n)).to.be.revertedWithCustomError(
-                manager,
-                "TwapNotConfigured",
-            );
+            expect(await manager.twapMinimumOut(usdcAddr, wethAddr, 500_000n, 100)).to.equal(495_000n);
+        });
+
+        it("guards new allow-list entries and protocol re-enablement with live references", async function () {
+            const { manager, deployer, pauser, timelock, usdcAddr, uniHandler, uniPool } =
+                await loadFixture(deployYieldManagerHarness);
+            const ERC = await ethers.getContractFactory("MockERC20");
+            const token = await ERC.deploy("New Token", "NEW", 18);
+            const tokenAddr = await token.getAddress();
+            const [p0, p1] =
+                tokenAddr.toLowerCase() < usdcAddr.toLowerCase() ? [tokenAddr, usdcAddr] : [usdcAddr, tokenAddr];
+            const param = encodeUniV3PoolParam(p0, p1, 500);
+
+            await expect(manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, param, true))
+                .to.be.revertedWithCustomError(manager, "TwapNotConfigured")
+                .withArgs(tokenAddr);
+
+            const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
+            const reference = await Pool.deploy(p0, p1, Q96, 10n ** 18n);
+            await (
+                await timelockCall(timelock, manager, "setTwapConfig", [
+                    tokenAddr,
+                    await reference.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ])
+            ).wait();
+            await expect(manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, param, true))
+                .to.emit(manager, "PoolParamAllowedUpdated")
+                .withArgs(UNISWAP_V3, param, false, true);
+
+            expect(await manager.allowedPoolParamCount(UNISWAP_V3)).to.equal(2);
+            expect(await manager.allowedPoolParamAt(UNISWAP_V3, 1)).to.equal(param);
+
+            await (await manager.connect(pauser).setProtocolEnabledForOpen(UNISWAP_V3, false)).wait();
+            await (await uniPool.setObserveReverts(true)).wait();
+            await expect(manager.connect(pauser).setProtocolEnabledForOpen(UNISWAP_V3, true)).to.be.revertedWith("OLD");
+            expect(await manager.protocolEnabledForOpen(UNISWAP_V3)).to.equal(false);
+            await (await uniPool.setObserveReverts(false)).wait();
+            await expect(manager.connect(pauser).setProtocolEnabledForOpen(UNISWAP_V3, true))
+                .to.emit(manager, "ProtocolStatusChanged")
+                .withArgs(UNISWAP_V3, true, true);
+
+            expect(await uniHandler.PROTOCOL()).to.equal(UNISWAP_V3);
         });
     });
 
@@ -3032,13 +3467,13 @@ describe("SafeYieldManager", function () {
         // The reason this entry point exists: a position must not depend on a
         // price reference to get out.
         it("still exits when the price reference is gone", async function () {
-            const { manager, deployer, operatorEOA, safeAddr, wethAddr } = await loadFixture(deployYieldManagerHarness);
+            const { manager, operatorEOA, safeAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
-            await (await manager.connect(deployer).setTwapConfig(wethAddr, ethers.ZeroAddress, 0, 0)).wait();
+            await (await uniPool.setObserveReverts(true)).wait();
 
             await expect(
                 manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER)),
-            ).to.be.revertedWithCustomError(manager, "TwapNotConfigured");
+            ).to.be.revertedWith("OLD");
             await expect(manager.connect(operatorEOA).withdrawLp(UNISWAP_V3, withdrawParams(safeAddr, 1))).to.emit(
                 manager,
                 "PositionWithdrawn",

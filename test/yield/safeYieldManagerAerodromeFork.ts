@@ -72,6 +72,7 @@ async function deployAeroStack() {
     const manager = await Manager.deploy(
         await registry.getAddress(),
         USDC_ADDRESS,
+        WETH_ADDRESS,
         [AERODROME],
         [await handler.getAddress()],
         [[POOL_PARAM]],
@@ -87,8 +88,17 @@ async function deployAeroStack() {
     );
     await manager.waitForDeployment();
     // Price reference for the swap floor (H-01).
-    await (await manager.setTwapConfig(WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)).wait();
-    await (await manager.setTwapConfig(AERO_ADDRESS, TWAP_REF_AERO_USDC_POOL, TWAP_WINDOW, TWAP_CARDINALITY)).wait();
+    for (const [token, pool] of [
+        [WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL],
+        [AERO_ADDRESS, TWAP_REF_AERO_USDC_POOL],
+    ]) {
+        await (
+            await timelock.execute(
+                await manager.getAddress(),
+                manager.interface.encodeFunctionData("setTwapConfig", [token, pool, TWAP_WINDOW, TWAP_CARDINALITY]),
+            )
+        ).wait();
+    }
 
     await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
@@ -158,6 +168,27 @@ async function accrueSwapFees(rounds: number, wethPerSwap: bigint) {
             ])
         ).wait();
     }
+}
+
+async function pushAeroSpotDown(wethIn: bigint) {
+    const trader = (await ethers.getSigners())[4];
+    const weth = new ethers.Contract(WETH_ADDRESS, WETH_DEPOSIT_ABI, trader);
+    const router = new ethers.Contract(AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS, ROUTER_ABI, trader);
+    await (await weth.deposit({ value: wethIn })).wait();
+    await (await weth.approve(AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS, wethIn)).wait();
+    const block = await ethers.provider.getBlock("latest");
+    await (
+        await router.exactInputSingle([
+            WETH_ADDRESS,
+            USDC_ADDRESS,
+            TICK_SPACING,
+            trader.address,
+            BigInt(block!.timestamp + 600),
+            wethIn,
+            0n,
+            0n,
+        ])
+    ).wait();
 }
 
 // Same ping-pong, but through the USDC/AERO ts-200 pool, with the trader's
@@ -311,6 +342,21 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 minUsdcOut: ((usdcShare + expectedOut) * 9_500n) / 10_000n,
             };
         };
+
+        const manipulationSnapshot = await network.provider.send("evm_snapshot");
+        const tickBeforeManipulation = Number((await pool.slot0())[1]);
+        await pushAeroSpotDown(ethers.parseEther("1000"));
+        const tickAfterManipulation = Number((await pool.slot0())[1]);
+        expect(tickAfterManipulation).to.be.lessThan(tickBeforeManipulation - 300);
+        await expect(
+            manager.connect(operator).closeLp(AERODROME, {
+                ...closeParams(10_000, 10_000n),
+                swap0: leg(0, POOL_PARAM),
+                minUsdcOut: 0,
+            }),
+        ).to.be.revertedWith("Too little received");
+        expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
+        expect(await network.provider.send("evm_revert", [manipulationSnapshot])).to.equal(true);
 
         await expect(manager.connect(operator).closeLp(AERODROME, closeParams(5_000, 5_000n))).to.emit(
             manager,

@@ -259,7 +259,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             p.swap0,
             p.deadline,
             p.slippageBps,
-            SwapSteps(63, 64, 65, 66, 67)
+            SwapSteps(63, 64, 65, 66, 67),
+            false
         );
         _swapDeltaToUsdc(
             p.onBehalfOf,
@@ -268,7 +269,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             p.swap1,
             p.deadline,
             p.slippageBps,
-            SwapSteps(68, 69, 70, 71, 72)
+            SwapSteps(68, 69, 70, 71, 72),
+            false
         );
 
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
@@ -436,7 +438,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
                 p.swap0,
                 p.deadline,
                 p.slippageBps,
-                SwapSteps(63, 64, 65, 66, 67)
+                SwapSteps(63, 64, 65, 66, 67),
+                true
             );
             _swapDeltaToUsdc(
                 p.onBehalfOf,
@@ -445,7 +448,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
                 p.swap1,
                 p.deadline,
                 p.slippageBps,
-                SwapSteps(68, 69, 70, 71, 72)
+                SwapSteps(68, 69, 70, 71, 72),
+                true
             );
         }
     }
@@ -478,7 +482,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             leg.amountOutMin,
             p.deadline,
             p.slippageBps,
-            steps
+            steps,
+            false
         );
         received = _balanceOf(currency, p.onBehalfOf) - balanceBefore;
         // Avoid accidental one-sided mints after a zero-output swap.
@@ -627,10 +632,15 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         uint256 amountOutMin,
         uint256 deadline,
         uint16 slippageBps,
-        SwapSteps memory steps
+        SwapSteps memory steps,
+        bool leaveZeroFloorInKind
     ) internal {
         // Single funnel for every UniversalRouter call in this handler.
         amountOutMin = _twapMinOut(currencyIn, currencyOut, amountIn, amountOutMin, slippageBps);
+        if (amountOutMin == 0) {
+            if (leaveZeroFloorInKind) return;
+            revert InvalidSwapAmountOutMin();
+        }
         PoolKey memory key = _decodePoolParam(poolParam);
 
         bytes[] memory params = new bytes[](3);
@@ -677,7 +687,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         SwapLeg calldata leg,
         uint256 deadline,
         uint16 slippageBps,
-        SwapSteps memory steps
+        SwapSteps memory steps,
+        bool leaveZeroFloorInKind
     ) internal {
         if (currency == address(USDC)) return;
         uint256 delta = _balanceOf(currency, _onBehalfOf) - balanceBefore;
@@ -691,7 +702,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
                 leg.amountOutMin,
                 deadline,
                 slippageBps,
-                steps
+                steps,
+                leaveZeroFloorInKind
             );
         }
     }
@@ -741,8 +753,9 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
 
     /// @dev Min-out for a UniversalRouter call, read from the SAME Uniswap V3
     ///      reference history the V3 and Aerodrome handlers use — the reference
-    ///      prices a token, not a venue. Native ETH has no address to key on,
-    ///      so it is priced under WETH. Caller may tighten, never loosen.
+    ///      prices a token, not a venue. Native ETH uses the address(0) config
+    ///      key, while quote orientation substitutes WETH so the sentinel is
+    ///      never passed to tick math. Caller may tighten, never loosen.
     function _twapMinOut(
         address currencyIn,
         address currencyOut,
@@ -751,13 +764,11 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         uint16 slippageBps
     ) internal view returns (uint256) {
         address currency = currencyIn == address(USDC) ? currencyOut : currencyIn;
-        address token = currency == NATIVE ? address(WETH) : currency;
-        TwapConfig memory cfg = _yieldStorage().twapConfigOf[token];
-        if (cfg.pool == address(0)) revert TwapOracle.TwapNotConfigured(token);
+        TwapConfig memory cfg = _yieldStorage().twapConfigOf[currency];
+        if (cfg.pool == address(0)) revert TwapOracle.TwapNotConfigured(currency);
         address tokenIn = currencyIn == NATIVE ? address(WETH) : currencyIn;
         address tokenOut = currencyOut == NATIVE ? address(WETH) : currencyOut;
-        uint256 floor = (TwapOracle.quote(cfg, tokenIn, tokenOut, amountIn) * (10_000 - slippageBps)) / 10_000;
-        if (floor == 0 && callerMinOut == 0) revert InvalidSwapAmountOutMin();
+        uint256 floor = Math.mulDiv(TwapOracle.quote(cfg, tokenIn, tokenOut, amountIn), 10_000 - slippageBps, 10_000);
         return callerMinOut > floor ? callerMinOut : floor;
     }
 

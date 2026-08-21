@@ -252,6 +252,7 @@ async function deployUniV4Harness() {
     const manager = await Manager.deploy(
         await reg.getAddress(),
         usdcAddr,
+        wethAddr,
         [UNISWAP_V3, AERODROME, UNISWAP_V4],
         [await uniHandler.getAddress(), await aeroHandler.getAddress(), await v4Handler.getAddress()],
         [[FEE_TIER], [TICK_SPACING], [V4_KEY, V4_NATIVE_KEY, V4_UNINIT_KEY, V4_USDC0_KEY, V4_WRONG1_KEY]],
@@ -288,8 +289,12 @@ async function deployUniV4Harness() {
         tokenCAddr.toLowerCase() < usdcAddr.toLowerCase() ? [tokenCAddr, usdcAddr] : [usdcAddr, tokenCAddr];
     const tokenCRef = await UniPool.deploy(c0, c1, Q96, 10n ** 18n);
     await tokenCRef.waitForDeployment();
-    await (await manager.setTwapConfig(wethAddr, await uniPool.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY)).wait();
-    await (await manager.setTwapConfig(tokenCAddr, await tokenCRef.getAddress(), TWAP_WINDOW, TWAP_CARDINALITY)).wait();
+    for (const token of [wethAddr, ZERO, tokenCAddr]) {
+        const pool = token === tokenCAddr ? await tokenCRef.getAddress() : await uniPool.getAddress();
+        await (
+            await timelockCall(timelock, manager, "setTwapConfig", [token, pool, TWAP_WINDOW, TWAP_CARDINALITY])
+        ).wait();
+    }
 
     return {
         deployer,
@@ -329,8 +334,8 @@ async function deployUniV4Harness() {
 
 describe("SafeYieldManager + UniV4YieldHandler", function () {
     describe("deployment & registration", function () {
-        it("registers the V4 handler under id 2 with its pool params", async function () {
-            const { manager, v4Handler } = await loadFixture(deployUniV4Harness);
+        it("registers the V4 handler with separate ERC20 and native reference keys", async function () {
+            const { manager, v4Handler, uniPool, wethAddr } = await loadFixture(deployUniV4Harness);
 
             expect(await v4Handler.PROTOCOL()).to.equal(UNISWAP_V4);
             expect(await manager.yieldHandlers(UNISWAP_V4)).to.equal(await v4Handler.getAddress());
@@ -339,6 +344,8 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             expect(await manager.isPoolParamAllowed(UNISWAP_V4, V4_KEY)).to.equal(true);
             expect(await manager.isPoolParamAllowed(UNISWAP_V4, V4_NATIVE_KEY)).to.equal(true);
             expect(await manager.isPoolParamAllowed(UNISWAP_V4, V4_BAD_KEY)).to.equal(false);
+            expect((await manager.twapConfigOf(wethAddr)).pool).to.equal(await uniPool.getAddress());
+            expect((await manager.twapConfigOf(ZERO)).pool).to.equal(await uniPool.getAddress());
         });
 
         it("rejects registering the V4 handler under a foreign id", async function () {
@@ -569,6 +576,29 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                     .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) }))
             ).wait();
             expect(await universalRouter.lastAmountIn()).to.equal(halfUsdc);
+            expect(await universalRouter.lastAmountOutMinimum()).to.equal(floor);
+        });
+
+        it("reverts one unit below the V4 effective floor and succeeds exactly at it", async function () {
+            const { manager, operatorEOA, safeAddr, universalRouter } = await loadFixture(deployUniV4Harness);
+            const floor = ((USDC_AMOUNT / 2n) * (10_000n - BigInt(SLIP))) / 10_000n;
+            await (await universalRouter.setEnforceMinOut(true)).wait();
+            await (await universalRouter.setOutput(floor - 1n)).wait();
+
+            await expect(
+                manager.connect(operatorEOA).openLp(
+                    UNISWAP_V4,
+                    openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) }),
+                ),
+            ).to.be.revertedWith("ur: too little received");
+
+            await (await universalRouter.setOutput(floor)).wait();
+            await expect(
+                manager.connect(operatorEOA).openLp(
+                    UNISWAP_V4,
+                    openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) }),
+                ),
+            ).to.emit(manager, "PositionOpened");
             expect(await universalRouter.lastAmountOutMinimum()).to.equal(floor);
         });
 
@@ -829,6 +859,28 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             // 39k net WETH fees swapped for 600k USDC + 19.5k net USDC fees.
             expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore);
             expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore + CLOSE_OUT + 19_500n);
+        });
+
+        it("leaves a dynamic V4 fee delta in kind when its independent floor rounds to zero", async function () {
+            const ctx = await loadFixture(deployUniV4Harness);
+            const { manager, operatorEOA, safeAddr, universalRouter, v4Pm, weth } = ctx;
+            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            await (await v4Pm.setOwed(1, 1n, 0n)).wait();
+            const callsBefore = await universalRouter.callCount();
+            const wethBefore = await weth.balanceOf(safeAddr);
+
+            await expect(
+                manager.connect(operatorEOA).collectLp(
+                    UNISWAP_V4,
+                    collectParams(safeAddr, 1, V4_KEY, {
+                        swapFeesToUsdc: true,
+                        swap0: leg(0, V4_KEY),
+                    }),
+                ),
+            ).to.emit(manager, "FeesCollected");
+
+            expect(await universalRouter.callCount()).to.equal(callsBefore);
+            expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore + 1n);
         });
 
         it("rejects an expired deadline on the swap path only", async function () {

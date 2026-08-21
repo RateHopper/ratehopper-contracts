@@ -182,6 +182,10 @@ contract MockRevertingYieldHandler {
         PROTOCOL = _protocol;
     }
 
+    function poolTokens(bytes calldata poolParam) external pure returns (address token0, address token1) {
+        (token0, token1, ) = abi.decode(poolParam, (address, address, uint24));
+    }
+
     fallback() external {
         revert();
     }
@@ -204,6 +208,8 @@ contract MockSwapRouter {
 
     uint256 public output;
     mapping(address => uint256) public outputFor;
+    bool public enforceMinOut;
+    uint256 public callCount;
     address public callbackTarget;
     bytes public callbackData;
     /// @dev Last min-out the caller actually handed the router — the value a
@@ -219,12 +225,17 @@ contract MockSwapRouter {
         outputFor[tokenOut] = newOutput;
     }
 
+    function setEnforceMinOut(bool value) external {
+        enforceMinOut = value;
+    }
+
     function setCallback(address target, bytes calldata data) external {
         callbackTarget = target;
         callbackData = data;
     }
 
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
+        callCount++;
         lastAmountOutMinimum = params.amountOutMinimum;
         lastAmountIn = params.amountIn;
         if (callbackTarget != address(0)) {
@@ -239,6 +250,7 @@ contract MockSwapRouter {
             IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
         }
         amountOut = outputFor[params.tokenOut] != 0 ? outputFor[params.tokenOut] : output;
+        if (enforceMinOut) require(amountOut >= params.amountOutMinimum, "router: too little received");
         if (amountOut > 0) {
             IERC20(params.tokenOut).transfer(params.recipient, amountOut);
         }
@@ -399,6 +411,11 @@ contract MockNonfungiblePositionManager {
     function setOwed(uint256 tokenId, uint128 owed0, uint128 owed1) external {
         positionsData[tokenId].owed0 = owed0;
         positionsData[tokenId].owed1 = owed1;
+    }
+
+    function setPrincipal(uint256 tokenId, uint128 principal0, uint128 principal1) external {
+        positionsData[tokenId].principal0 = principal0;
+        positionsData[tokenId].principal1 = principal1;
     }
 
     function setTokens(uint256 tokenId, address token0, address token1) external {
