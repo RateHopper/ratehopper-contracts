@@ -260,7 +260,10 @@ async function deployUniV4Harness() {
     await tokenCRef.waitForDeployment();
     const uniPoolAddr = await uniPool.getAddress();
     const tokenCRefAddr = await tokenCRef.getAddress();
-    const twapSeed = (pool: string) => ({ pool, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY });
+    const twapSeed = (token: string, pool: string) => ({
+        token,
+        config: { pool, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+    });
 
     const manager = await Manager.deploy(
         await reg.getAddress(),
@@ -271,8 +274,7 @@ async function deployUniV4Harness() {
         [[FEE_TIER], [TICK_SPACING], [V4_KEY, V4_NATIVE_KEY, V4_UNINIT_KEY, V4_USDC0_KEY, V4_WRONG1_KEY]],
         [0, 0, 0],
         [0, 0, 0],
-        [wethAddr, ZERO, tokenCAddr],
-        [twapSeed(uniPoolAddr), twapSeed(uniPoolAddr), twapSeed(tokenCRefAddr)],
+        [twapSeed(wethAddr, uniPoolAddr), twapSeed(ZERO, uniPoolAddr), twapSeed(tokenCAddr, tokenCRefAddr)],
         treasury.address,
         Number(PERF_FEE_BPS),
         Number(COLLECT_FEE_BPS),

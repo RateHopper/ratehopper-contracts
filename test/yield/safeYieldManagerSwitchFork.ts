@@ -148,10 +148,15 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
         // The V4 native pool param below is allow-listed here, so its
         // address(0) reference has to exist too — the constructor holds seeded
         // params to the same standard as any later addition.
-        [WETH_ADDRESS, ethers.ZeroAddress],
         [
-            { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
-            { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+            {
+                token: WETH_ADDRESS,
+                config: { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+            },
+            {
+                token: ethers.ZeroAddress,
+                config: { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+            },
         ],
         treasury.address,
         1_000,

@@ -100,8 +100,12 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             [[POOL_PARAM]],
             [0],
             [0],
-            [WETH_ADDRESS],
-            [{ pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
+            [
+                {
+                    token: WETH_ADDRESS,
+                    config: { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+                },
+            ],
             treasury.address,
             1_000,
             250,

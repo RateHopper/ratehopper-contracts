@@ -50,3 +50,13 @@ struct TwapConfig {
     ///      `observe()` call is not enough to detect that.
     uint16 minCardinality;
 }
+
+/// @notice One constructor-seeded price reference. Pairing the key with its
+///         config in a single struct keeps them from ever being supplied at
+///         different lengths, and keeps the manager's constructor one argument
+///         under the stack limit that coverage instrumentation imposes (viaIR,
+///         see .solcover.js — the same reason `MintArgs` and `SwapSteps` exist).
+struct TwapSeed {
+    address token;
+    TwapConfig config;
+}

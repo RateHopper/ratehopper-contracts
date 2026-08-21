@@ -42,30 +42,37 @@
         "type": "uint128[]"
       },
       {
-        "internalType": "address[]",
-        "name": "_twapTokens",
-        "type": "address[]"
-      },
-      {
         "components": [
           {
             "internalType": "address",
-            "name": "pool",
+            "name": "token",
             "type": "address"
           },
           {
-            "internalType": "uint32",
-            "name": "window",
-            "type": "uint32"
-          },
-          {
-            "internalType": "uint16",
-            "name": "minCardinality",
-            "type": "uint16"
+            "components": [
+              {
+                "internalType": "address",
+                "name": "pool",
+                "type": "address"
+              },
+              {
+                "internalType": "uint32",
+                "name": "window",
+                "type": "uint32"
+              },
+              {
+                "internalType": "uint16",
+                "name": "minCardinality",
+                "type": "uint16"
+              }
+            ],
+            "internalType": "struct TwapConfig",
+            "name": "config",
+            "type": "tuple"
           }
         ],
-        "internalType": "struct TwapConfig[]",
-        "name": "_twapConfigs",
+        "internalType": "struct TwapSeed[]",
+        "name": "_twapSeeds",
         "type": "tuple[]"
       },
       {

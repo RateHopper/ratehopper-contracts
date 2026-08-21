@@ -66,11 +66,14 @@ const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) =>
 );
 const UNIV4_POOL_PARAMS = [encodeUniV4PoolParam(NATIVE, USDC_ADDRESS, 500, 10, NATIVE)];
 
-const TWAP_SEED_TOKENS = [WETH_ADDRESS, NATIVE, AERO_ADDRESS];
-const TWAP_SEED_CONFIGS = [
-    { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
-    { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
-    { pool: TWAP_REF_AERO_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+const twapSeed = (token: string, pool: string) => ({
+    token,
+    config: { pool, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+});
+const TWAP_SEEDS = [
+    twapSeed(WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL),
+    twapSeed(NATIVE, TWAP_REF_WETH_USDC_POOL),
+    twapSeed(AERO_ADDRESS, TWAP_REF_AERO_USDC_POOL),
 ];
 
 /**
@@ -221,8 +224,7 @@ export default buildModule("DeployYieldManager", (m) => {
             [UNIV3_POOL_PARAMS, AERODROME_POOL_PARAMS, UNIV4_POOL_PARAMS],
             [uniV3MinPoolLiquidity, aerodromeMinPoolLiquidity, uniV4MinPoolLiquidity],
             [uniV3MinPositionLiquidity, aerodromeMinPositionLiquidity, uniV4MinPositionLiquidity],
-            TWAP_SEED_TOKENS,
-            TWAP_SEED_CONFIGS,
+            TWAP_SEEDS,
             treasury,
             performanceFeeBps,
             feeCollectBps,

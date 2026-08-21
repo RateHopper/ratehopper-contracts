@@ -140,8 +140,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         bytes[][] memory _allowedPoolParams,
         uint128[] memory _minPoolLiquidity,
         uint128[] memory _minPositionLiquidity,
-        address[] memory _twapTokens,
-        TwapConfig[] memory _twapConfigs,
+        TwapSeed[] memory _twapSeeds,
         address _treasury,
         uint16 _performanceFeeBps,
         uint16 _feeCollectBps,
@@ -170,8 +169,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             _handlers.length != _protocols.length ||
             _allowedPoolParams.length != _protocols.length ||
             _minPoolLiquidity.length != _protocols.length ||
-            _minPositionLiquidity.length != _protocols.length ||
-            _twapConfigs.length != _twapTokens.length
+            _minPositionLiquidity.length != _protocols.length
         ) revert LengthMismatch();
 
         REGISTRY = _registry;
@@ -193,14 +191,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         // implies a live reference" would only start at the first post-deploy
         // change, and a fresh deployment would sit open-enabled but unable to
         // swap until a timelock proposal executed — days later.
-        for (uint256 i = 0; i < _twapTokens.length; i++) {
-            _storeTwapConfig(
-                $,
-                _twapTokens[i],
-                _twapConfigs[i].pool,
-                _twapConfigs[i].window,
-                _twapConfigs[i].minCardinality
-            );
+        for (uint256 i = 0; i < _twapSeeds.length; i++) {
+            TwapSeed memory seed = _twapSeeds[i];
+            _storeTwapConfig($, seed.token, seed.config.pool, seed.config.window, seed.config.minCardinality);
         }
 
         for (uint256 i = 0; i < _protocols.length; i++) {

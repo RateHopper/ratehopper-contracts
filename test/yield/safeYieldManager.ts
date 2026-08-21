@@ -214,8 +214,7 @@ async function deployYieldManagerHarness() {
         [0, 0],
         // Seeded at construction: the allow-listed params above are held to the
         // same reference requirement as any later addition.
-        [wethAddr],
-        [{ pool: uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
+        [{ token: wethAddr, config: { pool: uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY } }],
         treasury.address,
         Number(PERF_FEE_BPS),
         Number(COLLECT_FEE_BPS),
@@ -298,8 +297,12 @@ describe("SafeYieldManager", function () {
                     [[FEE_TIER], [TICK_SPACING]],
                     [0, 0],
                     [0, 0],
-                    [wethAddr],
-                    [{ pool: uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
+                    [
+                        {
+                            token: wethAddr,
+                            config: { pool: uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+                        },
+                    ],
                     treasury.address,
                     Number(PERF_FEE_BPS),
                     Number(COLLECT_FEE_BPS),
@@ -338,8 +341,12 @@ describe("SafeYieldManager", function () {
                     [[TICK_SPACING]],
                     [0],
                     [0],
-                    [wethAddr],
-                    [{ pool: uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
+                    [
+                        {
+                            token: wethAddr,
+                            config: { pool: uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+                        },
+                    ],
                     treasury.address,
                     Number(PERF_FEE_BPS),
                     Number(COLLECT_FEE_BPS),
@@ -1805,8 +1812,12 @@ describe("SafeYieldManager", function () {
                 [[FEE_TIER], [TICK_SPACING]],
                 [0, 0],
                 [0, 0],
-                [f.wethAddr],
-                [{ pool: f.uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
+                [
+                    {
+                        token: f.wethAddr,
+                        config: { pool: f.uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+                    },
+                ],
                 f.treasury.address,
                 Number(PERF_FEE_BPS),
                 Number(COLLECT_FEE_BPS),
@@ -1830,13 +1841,13 @@ describe("SafeYieldManager", function () {
             await expect(deployWith(0, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
             await expect(deployWith(1, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
             await expect(deployWith(2, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
+            await expect(deployWith(13, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
             await expect(deployWith(14, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
             await expect(deployWith(15, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
-            await expect(deployWith(16, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
-            await expect(deployWith(10, ZERO)).to.be.revertedWithCustomError(f.manager, "InvalidTreasury");
-            await expect(deployWith(13, 10_001)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
+            await expect(deployWith(9, ZERO)).to.be.revertedWithCustomError(f.manager, "InvalidTreasury");
+            await expect(deployWith(12, 10_001)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
+            await expect(deployWith(10, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
             await expect(deployWith(11, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
-            await expect(deployWith(12, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
         });
 
         // The invariant the seeded references exist to hold: a deployment
@@ -1849,7 +1860,6 @@ describe("SafeYieldManager", function () {
             const Manager = await ethers.getContractFactory("SafeYieldManager");
             const args = await baseArgs(f);
             args[8] = [];
-            args[9] = [];
             await expect((Manager as any).deploy(...args))
                 .to.be.revertedWithCustomError(f.manager, "TwapNotConfigured")
                 .withArgs(f.wethAddr);
@@ -1860,12 +1870,15 @@ describe("SafeYieldManager", function () {
             const Manager = await ethers.getContractFactory("SafeYieldManager");
             const seedWith = async (overrides: Record<string, any>) => {
                 const args = await baseArgs(f);
-                args[9] = [
+                args[8] = [
                     {
-                        pool: f.uniPoolAddr,
-                        window: TWAP_WINDOW,
-                        minCardinality: TWAP_CARDINALITY,
-                        ...overrides,
+                        token: f.wethAddr,
+                        config: {
+                            pool: f.uniPoolAddr,
+                            window: TWAP_WINDOW,
+                            minCardinality: TWAP_CARDINALITY,
+                            ...overrides,
+                        },
                     },
                 ];
                 return (Manager as any).deploy(...args);
@@ -1915,11 +1928,6 @@ describe("SafeYieldManager", function () {
             await expect(deployWith(5, [[FEE_TIER]])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
             await expect(deployWith(6, [0])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
             await expect(deployWith(7, [0])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
-            // Seeded references are length-checked against each other too.
-            await expect(deployWith(8, [f.wethAddr, f.usdcAddr])).to.be.revertedWithCustomError(
-                f.manager,
-                "LengthMismatch",
-            );
         });
     });
 
@@ -2226,8 +2234,12 @@ describe("SafeYieldManager", function () {
                 [[FEE_TIER]],
                 [0],
                 [0],
-                [f.wethAddr],
-                [{ pool: f.uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
+                [
+                    {
+                        token: f.wethAddr,
+                        config: { pool: f.uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+                    },
+                ],
                 f.treasury.address,
                 0,
                 10_000,
