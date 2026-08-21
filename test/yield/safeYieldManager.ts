@@ -1839,6 +1839,69 @@ describe("SafeYieldManager", function () {
             await expect(deployWith(12, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
         });
 
+        // The invariant the seeded references exist to hold: a deployment
+        // cannot allow-list a pool param whose non-USDC side has no live
+        // reference. Without this the constructor would be the one path into
+        // an allow-listed-but-unpriceable pool, and openLp would only discover
+        // it at the first swap.
+        it("refuses to allow-list a seeded pool param with no reference behind it", async function () {
+            const f = await loadFixture(deployYieldManagerHarness);
+            const Manager = await ethers.getContractFactory("SafeYieldManager");
+            const args = await baseArgs(f);
+            args[8] = [];
+            args[9] = [];
+            await expect((Manager as any).deploy(...args))
+                .to.be.revertedWithCustomError(f.manager, "TwapNotConfigured")
+                .withArgs(f.wethAddr);
+        });
+
+        it("holds a seeded reference to the same standard as a replaced one", async function () {
+            const f = await loadFixture(deployYieldManagerHarness);
+            const Manager = await ethers.getContractFactory("SafeYieldManager");
+            const seedWith = async (overrides: Record<string, any>) => {
+                const args = await baseArgs(f);
+                args[9] = [
+                    {
+                        pool: f.uniPoolAddr,
+                        window: TWAP_WINDOW,
+                        minCardinality: TWAP_CARDINALITY,
+                        ...overrides,
+                    },
+                ];
+                return (Manager as any).deploy(...args);
+            };
+
+            await expect(seedWith({ window: TWAP_WINDOW - 1 })).to.be.revertedWithCustomError(
+                f.manager,
+                "TwapWindowTooShort",
+            );
+            await expect(seedWith({ minCardinality: TWAP_CARDINALITY - 1 })).to.be.revertedWithCustomError(
+                f.manager,
+                "TwapCardinalityBelowFloor",
+            );
+            await expect(seedWith({ pool: f.stranger.address })).to.be.revertedWithCustomError(
+                f.manager,
+                "InvalidTwapReferencePool",
+            );
+
+            // A pool that does not trade the pair, and one that trades it but
+            // cannot answer over the window, are both rejected at deploy time
+            // rather than at the first swap.
+            const Pool = await ethers.getContractFactory("MockUniswapV3Pool");
+            const wrongPair = await Pool.deploy(f.wethAddr, f.wethAddr, Q96, 10n ** 18n);
+            await expect(seedWith({ pool: await wrongPair.getAddress() })).to.be.revertedWithCustomError(
+                f.manager,
+                "TwapPoolPairMismatch",
+            );
+
+            const thinHistory = await Pool.deploy(f.wethAddr, f.usdcAddr, Q96, 10n ** 18n);
+            await (await thinHistory.setObservationCardinality(TWAP_CARDINALITY - 1)).wait();
+            await expect(seedWith({ pool: await thinHistory.getAddress() })).to.be.revertedWithCustomError(
+                f.manager,
+                "TwapCardinalityTooLow",
+            );
+        });
+
         it("rejects every constructor array length mismatch", async function () {
             const f = await loadFixture(deployYieldManagerHarness);
             const Manager = await ethers.getContractFactory("SafeYieldManager");
