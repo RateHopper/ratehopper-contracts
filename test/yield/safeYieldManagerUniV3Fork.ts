@@ -44,15 +44,7 @@ async function pushUniV3SpotDown(wethIn: bigint) {
     await (await weth.deposit({ value: wethIn })).wait();
     await (await weth.approve(UNISWAP_V3_SWAP_ROUTER_ADDRESS, wethIn)).wait();
     await (
-        await router.exactInputSingle([
-            WETH_ADDRESS,
-            USDC_ADDRESS,
-            FEE_TIER,
-            trader.address,
-            wethIn,
-            0n,
-            0n,
-        ])
+        await router.exactInputSingle([WETH_ADDRESS, USDC_ADDRESS, FEE_TIER, trader.address, wethIn, 0n, 0n])
     ).wait();
 }
 

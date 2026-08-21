@@ -433,9 +433,10 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         const expectedPerformanceFee = (lifecycleProfit * 1_000n) / 10_000n;
         expect(lifecycleProfit).to.be.greaterThan(0n);
         expect(closed.args.feeUsd6).to.equal(expectedPerformanceFee);
-        const usdcCollectFee = collected.args.token0.toLowerCase() === USDC_ADDRESS.toLowerCase()
-            ? collected.args.fee0
-            : collected.args.fee1;
+        const usdcCollectFee =
+            collected.args.token0.toLowerCase() === USDC_ADDRESS.toLowerCase()
+                ? collected.args.fee0
+                : collected.args.fee1;
         expect((await usdc.balanceOf(treasury.address)) - treasuryBeforeClose).to.equal(
             expectedPerformanceFee + usdcCollectFee,
         );

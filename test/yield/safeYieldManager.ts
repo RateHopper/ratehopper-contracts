@@ -509,18 +509,16 @@ describe("SafeYieldManager", function () {
             await (await uniRouter.setOutput(TWAP_FLOOR - 1n)).wait();
 
             await expect(
-                manager.connect(operatorEOA).openLp(
-                    UNISWAP_V3,
-                    openParams(safeAddr, FEE_TIER, { swap0: leg(1, FEE_TIER) }),
-                ),
+                manager
+                    .connect(operatorEOA)
+                    .openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER, { swap0: leg(1, FEE_TIER) })),
             ).to.be.revertedWith("router: too little received");
 
             await (await uniRouter.setOutput(TWAP_FLOOR)).wait();
             await expect(
-                manager.connect(operatorEOA).openLp(
-                    UNISWAP_V3,
-                    openParams(safeAddr, FEE_TIER, { swap0: leg(1, FEE_TIER) }),
-                ),
+                manager
+                    .connect(operatorEOA)
+                    .openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER, { swap0: leg(1, FEE_TIER) })),
             ).to.emit(manager, "PositionOpened");
             expect(await uniRouter.lastAmountOutMinimum()).to.equal(TWAP_FLOOR);
         });
@@ -531,18 +529,16 @@ describe("SafeYieldManager", function () {
             await (await clRouter.setOutput(TWAP_FLOOR - 1n)).wait();
 
             await expect(
-                manager.connect(operatorEOA).openLp(
-                    AERODROME,
-                    openParams(safeAddr, TICK_SPACING, { swap0: leg(1, TICK_SPACING) }),
-                ),
+                manager
+                    .connect(operatorEOA)
+                    .openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { swap0: leg(1, TICK_SPACING) })),
             ).to.be.revertedWith("router: too little received");
 
             await (await clRouter.setOutput(TWAP_FLOOR)).wait();
             await expect(
-                manager.connect(operatorEOA).openLp(
-                    AERODROME,
-                    openParams(safeAddr, TICK_SPACING, { swap0: leg(1, TICK_SPACING) }),
-                ),
+                manager
+                    .connect(operatorEOA)
+                    .openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { swap0: leg(1, TICK_SPACING) })),
             ).to.emit(manager, "PositionOpened");
         });
 
@@ -2698,11 +2694,7 @@ describe("SafeYieldManager", function () {
             await (await clNpm.setMintUsageBps(2_500)).wait();
             const treasuryBeforeSwitch = await usdc.balanceOf(treasury.address);
             await expect(
-                manager.connect(operatorEOA).switchLp(
-                    UNISWAP_V3,
-                    AERODROME,
-                    switchParams(safeAddr, 1, TICK_SPACING),
-                ),
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
             )
                 .to.emit(manager, "SwitchResidueSettled")
                 .withArgs(safeAddr, AERODROME, 1n, 1_500_000n, 0n, 1_500_000n, 0n, 500_000n);
@@ -2715,10 +2707,9 @@ describe("SafeYieldManager", function () {
             await (await clRouter.setOutput(finalValue)).wait();
             const treasuryBeforeClose = await usdc.balanceOf(treasury.address);
             const receipt = await (
-                await manager.connect(operatorEOA).closeLp(
-                    AERODROME,
-                    closeParams(safeAddr, 1, TICK_SPACING, { swap0: leg(0, TICK_SPACING) }),
-                )
+                await manager
+                    .connect(operatorEOA)
+                    .closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING, { swap0: leg(0, TICK_SPACING) }))
             ).wait();
             const closed = receipt!.logs
                 .map((log: any) => {
@@ -2759,9 +2750,7 @@ describe("SafeYieldManager", function () {
             for (let caseIndex = 0; caseIndex < 6; caseIndex++) {
                 const f = await loadFixture(deployYieldManagerHarness);
                 const { manager, operatorEOA, safeAddr, treasury, usdc, uniNpm, clNpm, uniRouter, clRouter } = f;
-                await (
-                    await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))
-                ).wait();
+                await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
 
                 let protocol = UNISWAP_V3;
                 let tokenId = 1n;
@@ -2781,11 +2770,9 @@ describe("SafeYieldManager", function () {
 
                     const destinationParam = destination === UNISWAP_V3 ? FEE_TIER : TICK_SPACING;
                     const receipt = await (
-                        await manager.connect(operatorEOA).switchLp(
-                            protocol,
-                            destination,
-                            switchParams(safeAddr, tokenId, destinationParam),
-                        )
+                        await manager
+                            .connect(operatorEOA)
+                            .switchLp(protocol, destination, switchParams(safeAddr, tokenId, destinationParam))
                     ).wait();
                     const switched = receipt!.logs
                         .map((log: any) => {
@@ -2820,10 +2807,9 @@ describe("SafeYieldManager", function () {
                 await (await closeRouter.setOutput(finalValue)).wait();
                 const treasuryBefore = await usdc.balanceOf(treasury.address);
                 const receipt = await (
-                    await manager.connect(operatorEOA).closeLp(
-                        protocol,
-                        closeParams(safeAddr, tokenId, closeParam, { swap0: leg(0, closeParam) }),
-                    )
+                    await manager
+                        .connect(operatorEOA)
+                        .closeLp(protocol, closeParams(safeAddr, tokenId, closeParam, { swap0: leg(0, closeParam) }))
                 ).wait();
                 const closed = receipt!.logs
                     .map((log: any) => {
@@ -2834,9 +2820,8 @@ describe("SafeYieldManager", function () {
                         }
                     })
                     .find((event: any) => event?.name === "PositionClosed")!;
-                const lifecycleProfit = totalResidue + finalValue > USDC_AMOUNT
-                    ? totalResidue + finalValue - USDC_AMOUNT
-                    : 0n;
+                const lifecycleProfit =
+                    totalResidue + finalValue > USDC_AMOUNT ? totalResidue + finalValue - USDC_AMOUNT : 0n;
                 const expectedFee = (lifecycleProfit * PERF_FEE_BPS) / 10_000n;
                 expect(closed.args.feeUsd6).to.equal(expectedFee);
                 expect((await usdc.balanceOf(treasury.address)) - treasuryBefore).to.equal(expectedFee);
@@ -3383,6 +3368,111 @@ describe("SafeYieldManager", function () {
             const { manager, wethAddr, usdcAddr } = await loadFixture(deployYieldManagerHarness);
             expect(await manager.twapQuote(usdcAddr, wethAddr, 500_000n)).to.equal(500_000n);
             expect(await manager.twapMinimumOut(usdcAddr, wethAddr, 500_000n, 100)).to.equal(495_000n);
+        });
+
+        // The allow-list gained a parallel array plus an index map so protocol
+        // re-enablement can walk it. Swap-and-pop bookkeeping is easy to get
+        // wrong in a way nothing else notices, so it is pinned directly.
+        it("keeps the enumerable allow-list consistent through add, no-op and swap-and-pop removal", async function () {
+            const { manager, deployer, uniPool, wethAddr, usdcAddr } = await loadFixture(deployYieldManagerHarness);
+            const poolAddr = await uniPool.getAddress();
+            const extraA = encodeUniV3PoolParam(wethAddr, usdcAddr, 3000);
+            const extraB = encodeUniV3PoolParam(wethAddr, usdcAddr, 10000);
+
+            // The fixture allow-lists exactly one param for UNISWAP_V3.
+            expect(await manager.allowedPoolParamCount(UNISWAP_V3)).to.equal(1);
+            expect(await manager.allowedPoolParamAt(UNISWAP_V3, 0)).to.equal(FEE_TIER);
+
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, extraA, true)).wait();
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, extraB, true)).wait();
+            expect(await manager.allowedPoolParamCount(UNISWAP_V3)).to.equal(3);
+
+            // Re-allowing an already-allowed param must not duplicate the entry.
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, extraA, true)).wait();
+            expect(await manager.allowedPoolParamCount(UNISWAP_V3)).to.equal(3);
+            // Disallowing something never allowed is likewise a no-op, not an
+            // underflow on the index map.
+            const unseen = encodeUniV3PoolParam(wethAddr, usdcAddr, 100);
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, unseen, false)).wait();
+            expect(await manager.allowedPoolParamCount(UNISWAP_V3)).to.equal(3);
+
+            // Remove from the MIDDLE: the last entry has to move into the hole
+            // and its index entry has to follow it.
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, extraA, false)).wait();
+            expect(await manager.allowedPoolParamCount(UNISWAP_V3)).to.equal(2);
+            expect(await manager.isPoolParamAllowed(UNISWAP_V3, extraA)).to.equal(false);
+            const remaining = [
+                await manager.allowedPoolParamAt(UNISWAP_V3, 0),
+                await manager.allowedPoolParamAt(UNISWAP_V3, 1),
+            ];
+            expect(remaining).to.have.members([FEE_TIER, extraB]);
+
+            // Removing the moved entry exercises the index == lastIndex path,
+            // and the survivor must still be addressable afterwards.
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, extraB, false)).wait();
+            expect(await manager.allowedPoolParamCount(UNISWAP_V3)).to.equal(1);
+            expect(await manager.allowedPoolParamAt(UNISWAP_V3, 0)).to.equal(FEE_TIER);
+            expect(await manager.isPoolParamAllowed(UNISWAP_V3, FEE_TIER)).to.equal(true);
+
+            // Re-enabling the protocol still walks a coherent list.
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, extraA, true)).wait();
+            expect(await manager.allowedPoolParamCount(UNISWAP_V3)).to.equal(2);
+            expect(poolAddr).to.properAddress;
+        });
+
+        it("refuses to allow-list a param for a protocol with no handler", async function () {
+            const { manager, deployer, wethAddr, usdcAddr } = await loadFixture(deployYieldManagerHarness);
+            await expect(
+                manager.connect(deployer).setPoolParamAllowed(99, encodeUniV3PoolParam(wethAddr, usdcAddr, 500), true),
+            ).to.be.revertedWithCustomError(manager, "HandlerNotSet");
+        });
+
+        it("checks a degenerate same-token pool param only once", async function () {
+            const { manager, deployer, wethAddr } = await loadFixture(deployYieldManagerHarness);
+            // token0 == token1: the second reference lookup is skipped rather
+            // than repeated. WETH has a reference, so this is allowed.
+            await (
+                await manager
+                    .connect(deployer)
+                    .setPoolParamAllowed(UNISWAP_V3, encodeUniV3PoolParam(wethAddr, wethAddr, 500), true)
+            ).wait();
+            expect(
+                await manager.isPoolParamAllowed(UNISWAP_V3, encodeUniV3PoolParam(wethAddr, wethAddr, 500)),
+            ).to.equal(true);
+        });
+
+        it("bounds slippage and requires a reference when previewing the floor", async function () {
+            const { manager, wethAddr, usdcAddr } = await loadFixture(deployYieldManagerHarness);
+            await expect(manager.twapMinimumOut(usdcAddr, wethAddr, 1_000n, 0)).to.be.revertedWithCustomError(
+                manager,
+                "SlippageTooLow",
+            );
+            await expect(manager.twapMinimumOut(usdcAddr, wethAddr, 1_000n, 301)).to.be.revertedWithCustomError(
+                manager,
+                "SlippageAboveMax",
+            );
+            const unpriced = ethers.Wallet.createRandom().address;
+            await expect(manager.twapMinimumOut(usdcAddr, unpriced, 1_000n, 100)).to.be.revertedWithCustomError(
+                manager,
+                "TwapNotConfigured",
+            );
+        });
+
+        it("quotes the native key in both directions once it is configured", async function () {
+            const { manager, timelock, usdcAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
+            await (
+                await timelockCall(timelock, manager, "setTwapConfig", [
+                    ethers.ZeroAddress,
+                    await uniPool.getAddress(),
+                    TWAP_WINDOW,
+                    TWAP_CARDINALITY,
+                ])
+            ).wait();
+
+            // Native in and native out both resolve through WETH for the tick
+            // math while keeping address(0) as the configuration key.
+            expect(await manager.twapQuote(ethers.ZeroAddress, usdcAddr, 1_000_000n)).to.equal(1_000_000n);
+            expect(await manager.twapQuote(usdcAddr, ethers.ZeroAddress, 1_000_000n)).to.equal(1_000_000n);
         });
 
         it("guards new allow-list entries and protocol re-enablement with live references", async function () {

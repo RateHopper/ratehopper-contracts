@@ -283,8 +283,11 @@ async function deployUniV4Harness() {
     await (await clRouter.setOutput(WETH_OUT)).wait();
     await (await universalRouter.setOutput(WETH_OUT)).wait();
 
-    // Price references. Native ETH has no address of its own, so a native V4
-    // pool's non-USDC side is priced under WETH.
+    // Price references. Native ETH carries its OWN key, address(0), pointed at
+    // a WETH/USDC pool — WETH is substituted only for the tick math. Both keys
+    // are needed: swaps on a native pool read address(0), while the in-kind
+    // switch values its residue under WETH, because `withdrawLp` hands a native
+    // side back wrapped.
     const [c0, c1] =
         tokenCAddr.toLowerCase() < usdcAddr.toLowerCase() ? [tokenCAddr, usdcAddr] : [usdcAddr, tokenCAddr];
     const tokenCRef = await UniPool.deploy(c0, c1, Q96, 10n ** 18n);
@@ -586,18 +589,16 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await (await universalRouter.setOutput(floor - 1n)).wait();
 
             await expect(
-                manager.connect(operatorEOA).openLp(
-                    UNISWAP_V4,
-                    openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) }),
-                ),
+                manager
+                    .connect(operatorEOA)
+                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) })),
             ).to.be.revertedWith("ur: too little received");
 
             await (await universalRouter.setOutput(floor)).wait();
             await expect(
-                manager.connect(operatorEOA).openLp(
-                    UNISWAP_V4,
-                    openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) }),
-                ),
+                manager
+                    .connect(operatorEOA)
+                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) })),
             ).to.emit(manager, "PositionOpened");
             expect(await universalRouter.lastAmountOutMinimum()).to.equal(floor);
         });
