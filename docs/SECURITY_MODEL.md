@@ -124,6 +124,16 @@ what the input is worth.
 Repointing a reference changes the price boundary for every managed Safe, so
 `setTwapConfig` requires both `msg.sender == timelock` and
 `CRITICAL_ROLE`. A `DEFAULT_ADMIN_ROLE` holder cannot make the change directly.
+
+The INITIAL references are seeded by the constructor instead, through the same
+`_storeTwapConfig` the setter uses — same floors, same pair check, same live
+oracle read, so there is no weaker path in. Seeding is what makes the timelock
+affordable: configuring after deployment would leave a fresh manager
+open-enabled but unable to swap until a proposal executed days later. It also
+lets the constructor hold its own allow-listed pool params to the reference
+requirement `setPoolParamAllowed` enforces, so **"allow-listed implies a live
+reference" holds from block one** rather than starting at the first post-deploy
+change.
 The delay gives operators and Safe owners time to inspect a proposed reference,
 while `MIN_TWAP_WINDOW` (1800s), `MIN_TWAP_CARDINALITY` (60), immutable-pair
 validation, and a live oracle read prevent the timelock from installing a weak

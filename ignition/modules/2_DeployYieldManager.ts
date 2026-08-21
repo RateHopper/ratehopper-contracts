@@ -19,6 +19,11 @@ import {
     encodeAerodromePoolParam,
     encodeUniV3PoolParam,
     encodeUniV4PoolParam,
+    TWAP_REF_WETH_USDC_POOL,
+    TWAP_REF_AERO_USDC_POOL,
+    TWAP_WINDOW,
+    TWAP_CARDINALITY,
+    AERO_ADDRESS,
 } from "../../contractAddresses";
 import { envBigInt, envNumber, envString, makeRequireAddress } from "./deployHelpers";
 
@@ -35,24 +40,38 @@ const NATIVE = "0x0000000000000000000000000000000000000000";
 // Uniswap V3 fee tiers {100, 500, 3000} (10000 deliberately excluded — thin
 // pool, cheap slot0 manipulation); Aerodrome Slipstream tick spacings
 // {100, 200}; the canonical hookless native ETH/USDC 0.05% Uniswap V4 pool.
-// POST-DEPLOY, BEFORE FIRST USE: `setTwapConfig(token, refPool, window,
-// cardinality)` for every non-USDC token that will be swapped — WETH and the
-// native `address(0)` key (both may use the same WETH/USDC reference pool),
-// plus AERO if staked Aerodrome rewards are sold. Without it openLp/closeLp/
-// collectLp revert `TwapNotConfigured`, which fails closed but is a liveness
-// gap. The setter is timelock-critical, so post-deploy configuration must be
-// scheduled and executed by the configured timelock (which holds
-// CRITICAL_ROLE); neither the deployer nor `initialAdmin` can call it directly.
-// Reference pools: TWAP_REF_* in contractAddresses.ts.
+// Price references are SEEDED AT CONSTRUCTION (see TWAP_SEEDS below), because
+// `setTwapConfig` is timelock-critical: configuring after the fact would leave
+// a freshly deployed manager open-enabled but unable to swap until a timelock
+// proposal executed, days later. Seeding also lets the constructor hold its own
+// allow-listed pool params to the same reference requirement `setPoolParamAllowed`
+// applies, so "allow-listed implies a live reference" holds from block one.
+//
+// Every non-USDC side of every seeded pool param needs an entry: WETH, the
+// native `address(0)` key used by V4 native pools (both point at the same
+// WETH/USDC pool — WETH is substituted only for tick math), and AERO so staked
+// Aerodrome emissions can be sold without waiting on the timelock. A seeded
+// reference is validated live, so the deploy reverts rather than installing one
+// that cannot answer — if the AERO pool happens to be quiet at deploy time, drop
+// that entry and add it later by timelock; only WETH and NATIVE are load-bearing
+// for the pool params seeded below.
 //
 // Additional pairs are allow-listed post-deploy via setPoolParamAllowed only
-// after every non-USDC side has a live TWAP reference. Hooked V4 pools remain
-// restricted to audited hooks (the allow-list is the sole hook gate).
+// after every non-USDC side has a live TWAP reference — which now means a
+// timelock proposal for the reference first. Hooked V4 pools remain restricted
+// to audited hooks (the allow-list is the sole hook gate).
 const UNIV3_POOL_PARAMS = [100, 500, 3000].map((feeTier) => encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, feeTier));
 const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) =>
     encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, tickSpacing),
 );
 const UNIV4_POOL_PARAMS = [encodeUniV4PoolParam(NATIVE, USDC_ADDRESS, 500, 10, NATIVE)];
+
+const TWAP_SEED_TOKENS = [WETH_ADDRESS, NATIVE, AERO_ADDRESS];
+const TWAP_SEED_CONFIGS = [
+    { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+    { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+    { pool: TWAP_REF_AERO_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+];
 
 /**
  * Deployment module for the yield adapter stack (AP-4817):
@@ -202,6 +221,8 @@ export default buildModule("DeployYieldManager", (m) => {
             [UNIV3_POOL_PARAMS, AERODROME_POOL_PARAMS, UNIV4_POOL_PARAMS],
             [uniV3MinPoolLiquidity, aerodromeMinPoolLiquidity, uniV4MinPoolLiquidity],
             [uniV3MinPositionLiquidity, aerodromeMinPositionLiquidity, uniV4MinPositionLiquidity],
+            TWAP_SEED_TOKENS,
+            TWAP_SEED_CONFIGS,
             treasury,
             performanceFeeBps,
             feeCollectBps,

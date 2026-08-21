@@ -249,6 +249,19 @@ async function deployUniV4Harness() {
     await timelock.waitForDeployment();
 
     const Manager = await ethers.getContractFactory("SafeYieldManager");
+    // Price references, seeded at construction. Native ETH carries its OWN key,
+    // address(0), pointed at a WETH/USDC pool — WETH is substituted only for the
+    // tick math. Both keys are needed: swaps on a native pool read address(0),
+    // while the in-kind switch values its residue under WETH, because
+    // `withdrawLp` hands a native side back wrapped.
+    const [c0, c1] =
+        tokenCAddr.toLowerCase() < usdcAddr.toLowerCase() ? [tokenCAddr, usdcAddr] : [usdcAddr, tokenCAddr];
+    const tokenCRef = await UniPool.deploy(c0, c1, Q96, 10n ** 18n);
+    await tokenCRef.waitForDeployment();
+    const uniPoolAddr = await uniPool.getAddress();
+    const tokenCRefAddr = await tokenCRef.getAddress();
+    const twapSeed = (pool: string) => ({ pool, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY });
+
     const manager = await Manager.deploy(
         await reg.getAddress(),
         usdcAddr,
@@ -258,6 +271,8 @@ async function deployUniV4Harness() {
         [[FEE_TIER], [TICK_SPACING], [V4_KEY, V4_NATIVE_KEY, V4_UNINIT_KEY, V4_USDC0_KEY, V4_WRONG1_KEY]],
         [0, 0, 0],
         [0, 0, 0],
+        [wethAddr, ZERO, tokenCAddr],
+        [twapSeed(uniPoolAddr), twapSeed(uniPoolAddr), twapSeed(tokenCRefAddr)],
         treasury.address,
         Number(PERF_FEE_BPS),
         Number(COLLECT_FEE_BPS),
@@ -282,22 +297,6 @@ async function deployUniV4Harness() {
     await (await uniRouter.setOutput(WETH_OUT)).wait();
     await (await clRouter.setOutput(WETH_OUT)).wait();
     await (await universalRouter.setOutput(WETH_OUT)).wait();
-
-    // Price references. Native ETH carries its OWN key, address(0), pointed at
-    // a WETH/USDC pool — WETH is substituted only for the tick math. Both keys
-    // are needed: swaps on a native pool read address(0), while the in-kind
-    // switch values its residue under WETH, because `withdrawLp` hands a native
-    // side back wrapped.
-    const [c0, c1] =
-        tokenCAddr.toLowerCase() < usdcAddr.toLowerCase() ? [tokenCAddr, usdcAddr] : [usdcAddr, tokenCAddr];
-    const tokenCRef = await UniPool.deploy(c0, c1, Q96, 10n ** 18n);
-    await tokenCRef.waitForDeployment();
-    for (const token of [wethAddr, ZERO, tokenCAddr]) {
-        const pool = token === tokenCAddr ? await tokenCRef.getAddress() : await uniPool.getAddress();
-        await (
-            await timelockCall(timelock, manager, "setTwapConfig", [token, pool, TWAP_WINDOW, TWAP_CARDINALITY])
-        ).wait();
-    }
 
     return {
         deployer,

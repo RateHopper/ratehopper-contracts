@@ -1,2638 +1,2665 @@
 [
-    {
-        "inputs": [
-            {
-                "internalType": "contract IProtocolRegistry",
-                "name": "_registry",
-                "type": "address"
-            },
-            {
-                "internalType": "contract IERC20",
-                "name": "_usdc",
-                "type": "address"
-            },
-            {
-                "internalType": "contract IERC20",
-                "name": "_weth",
-                "type": "address"
-            },
-            {
-                "internalType": "uint8[]",
-                "name": "_protocols",
-                "type": "uint8[]"
-            },
-            {
-                "internalType": "address[]",
-                "name": "_handlers",
-                "type": "address[]"
-            },
-            {
-                "internalType": "bytes[][]",
-                "name": "_allowedPoolParams",
-                "type": "bytes[][]"
-            },
-            {
-                "internalType": "uint128[]",
-                "name": "_minPoolLiquidity",
-                "type": "uint128[]"
-            },
-            {
-                "internalType": "uint128[]",
-                "name": "_minPositionLiquidity",
-                "type": "uint128[]"
-            },
-            {
-                "internalType": "address",
-                "name": "_treasury",
-                "type": "address"
-            },
-            {
-                "internalType": "uint16",
-                "name": "_performanceFeeBps",
-                "type": "uint16"
-            },
-            {
-                "internalType": "uint16",
-                "name": "_feeCollectBps",
-                "type": "uint16"
-            },
-            {
-                "internalType": "uint16",
-                "name": "_maxFeeBps",
-                "type": "uint16"
-            },
-            {
-                "internalType": "address",
-                "name": "_initialAdmin",
-                "type": "address"
-            },
-            {
-                "internalType": "address",
-                "name": "_timelock",
-                "type": "address"
-            },
-            {
-                "internalType": "address",
-                "name": "_pauser",
-                "type": "address"
-            }
+  {
+    "inputs": [
+      {
+        "internalType": "contract IProtocolRegistry",
+        "name": "_registry",
+        "type": "address"
+      },
+      {
+        "internalType": "contract IERC20",
+        "name": "_usdc",
+        "type": "address"
+      },
+      {
+        "internalType": "contract IERC20",
+        "name": "_weth",
+        "type": "address"
+      },
+      {
+        "internalType": "uint8[]",
+        "name": "_protocols",
+        "type": "uint8[]"
+      },
+      {
+        "internalType": "address[]",
+        "name": "_handlers",
+        "type": "address[]"
+      },
+      {
+        "internalType": "bytes[][]",
+        "name": "_allowedPoolParams",
+        "type": "bytes[][]"
+      },
+      {
+        "internalType": "uint128[]",
+        "name": "_minPoolLiquidity",
+        "type": "uint128[]"
+      },
+      {
+        "internalType": "uint128[]",
+        "name": "_minPositionLiquidity",
+        "type": "uint128[]"
+      },
+      {
+        "internalType": "address[]",
+        "name": "_twapTokens",
+        "type": "address[]"
+      },
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "pool",
+            "type": "address"
+          },
+          {
+            "internalType": "uint32",
+            "name": "window",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint16",
+            "name": "minCardinality",
+            "type": "uint16"
+          }
         ],
-        "stateMutability": "nonpayable",
-        "type": "constructor"
-    },
-    {
-        "inputs": [],
-        "name": "AccessControlBadConfirmation",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "account",
-                "type": "address"
-            },
-            {
-                "internalType": "bytes32",
-                "name": "neededRole",
-                "type": "bytes32"
-            }
-        ],
-        "name": "AccessControlUnauthorizedAccount",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "DeadlineExpired",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "EnforcedPause",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "ExpectedPause",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "FailedCall",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "FeeAboveMax",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "HandlerCallFailed",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "HandlerNotSet",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "expected",
-                "type": "uint8"
-            },
-            {
-                "internalType": "uint8",
-                "name": "actual",
-                "type": "uint8"
-            }
-        ],
-        "name": "HandlerProtocolMismatch",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "InvalidExitBps",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "InvalidHandler",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "InvalidSwapAmountOutMin",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "InvalidTimelock",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "InvalidTreasury",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "pool",
-                "type": "address"
-            }
-        ],
-        "name": "InvalidTwapReferencePool",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "InvalidUsdcAmount",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "LengthMismatch",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "LpNotOnSafe",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "MinUsdcOutNotMet",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "step",
-                "type": "uint8"
-            }
-        ],
-        "name": "ModuleCallFailed",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "NotAuthorized",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "OnlyTimelock",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "PoolDoesNotExist",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "PoolNotInitialized",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "PoolParamNotAllowed",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "PoolTooThin",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "PositionLiquidityTooLow",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "ProtocolDisabled",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "ReentrancyGuardReentrantCall",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "bits",
-                "type": "uint8"
-            },
-            {
+        "internalType": "struct TwapConfig[]",
+        "name": "_twapConfigs",
+        "type": "tuple[]"
+      },
+      {
+        "internalType": "address",
+        "name": "_treasury",
+        "type": "address"
+      },
+      {
+        "internalType": "uint16",
+        "name": "_performanceFeeBps",
+        "type": "uint16"
+      },
+      {
+        "internalType": "uint16",
+        "name": "_feeCollectBps",
+        "type": "uint16"
+      },
+      {
+        "internalType": "uint16",
+        "name": "_maxFeeBps",
+        "type": "uint16"
+      },
+      {
+        "internalType": "address",
+        "name": "_initialAdmin",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "_timelock",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "_pauser",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "AccessControlBadConfirmation",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "neededRole",
+        "type": "bytes32"
+      }
+    ],
+    "name": "AccessControlUnauthorizedAccount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "DeadlineExpired",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "EnforcedPause",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ExpectedPause",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "FailedCall",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "FeeAboveMax",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "HandlerCallFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "HandlerNotSet",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "expected",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "actual",
+        "type": "uint8"
+      }
+    ],
+    "name": "HandlerProtocolMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidExitBps",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidHandler",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidSwapAmountOutMin",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidTimelock",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidTreasury",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "pool",
+        "type": "address"
+      }
+    ],
+    "name": "InvalidTwapReferencePool",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidUsdcAmount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "LengthMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "LpNotOnSafe",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MinUsdcOutNotMet",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "step",
+        "type": "uint8"
+      }
+    ],
+    "name": "ModuleCallFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NotAuthorized",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OnlyTimelock",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PoolDoesNotExist",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PoolNotInitialized",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PoolParamNotAllowed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PoolTooThin",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PositionLiquidityTooLow",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ProtocolDisabled",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ReentrancyGuardReentrantCall",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "bits",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint256",
+        "name": "value",
+        "type": "uint256"
+      }
+    ],
+    "name": "SafeCastOverflowedUintDowncast",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "SafeERC20FailedOperation",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SlippageAboveMax",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SlippageTooLow",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SwapFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "TokenNotWhitelisted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TwapCardinalityBelowFloor",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "pool",
+        "type": "address"
+      },
+      {
+        "internalType": "uint16",
+        "name": "have",
+        "type": "uint16"
+      },
+      {
+        "internalType": "uint16",
+        "name": "need",
+        "type": "uint16"
+      }
+    ],
+    "name": "TwapCardinalityTooLow",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "TwapNotConfigured",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "pool",
+        "type": "address"
+      },
+      {
+        "internalType": "uint32",
+        "name": "age",
+        "type": "uint32"
+      },
+      {
+        "internalType": "uint32",
+        "name": "maxAge",
+        "type": "uint32"
+      }
+    ],
+    "name": "TwapObservationStale",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TwapPoolPairMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "TwapReferenceRemovalNotAllowed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TwapWindowTooShort",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TwapWindowZero",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UnknownPosition",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "WrongTokenPair",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroAddress",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "onBehalfOf",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "attemptedFee",
+        "type": "uint256"
+      }
+    ],
+    "name": "CollectFeeTransferFailed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint16",
+        "name": "previousFeeCollectBps",
+        "type": "uint16"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint16",
+        "name": "newFeeCollectBps",
+        "type": "uint16"
+      }
+    ],
+    "name": "FeeCollectBpsUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "onBehalfOf",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "feeUsd6",
+        "type": "uint128"
+      }
+    ],
+    "name": "FeeTransferFailed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "onBehalfOf",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "token0",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "collected0",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "fee0",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "token1",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "collected1",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "fee1",
+        "type": "uint256"
+      }
+    ],
+    "name": "FeesCollected",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint16",
+        "name": "previousMaxSlippageBps",
+        "type": "uint16"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint16",
+        "name": "newMaxSlippageBps",
+        "type": "uint16"
+      }
+    ],
+    "name": "MaxSlippageBpsUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "previousValue",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "newValue",
+        "type": "uint128"
+      }
+    ],
+    "name": "MinPoolLiquidityUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "previousValue",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "newValue",
+        "type": "uint128"
+      }
+    ],
+    "name": "MinPositionLiquidityUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "name": "NftRescued",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "Paused",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousPauser",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newPauser",
+        "type": "address"
+      }
+    ],
+    "name": "PauserUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint16",
+        "name": "previousPerformanceFeeBps",
+        "type": "uint16"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint16",
+        "name": "newPerformanceFeeBps",
+        "type": "uint16"
+      }
+    ],
+    "name": "PerformanceFeeBpsUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes",
+        "name": "poolParam",
+        "type": "bytes"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "previousAllowed",
+        "type": "bool"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "newAllowed",
+        "type": "bool"
+      }
+    ],
+    "name": "PoolParamAllowedUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "onBehalfOf",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "basisUsd6",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "currentValueUsd6",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "feeUsd6",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint16",
+        "name": "exitBps",
+        "type": "uint16"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "carryForExitUsd6",
+        "type": "uint128"
+      }
+    ],
+    "name": "PositionClosed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "onBehalfOf",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "usdcInput",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "amount0ToLp",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "amount1ToLp",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "currentValueUsd6",
+        "type": "uint128"
+      }
+    ],
+    "name": "PositionOpened",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "onBehalfOf",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "fromProtocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "toProtocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "oldTokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newTokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "carriedBasisUsd6",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "withdrawn0",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "withdrawn1",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "used0",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "used1",
+        "type": "uint128"
+      }
+    ],
+    "name": "PositionSwitched",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "onBehalfOf",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "releasedBasisUsd6",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "releasedCarryUsd6",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount0",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount1",
+        "type": "uint256"
+      }
+    ],
+    "name": "PositionWithdrawn",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "bool",
+        "name": "forOpen",
+        "type": "bool"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "enabled",
+        "type": "bool"
+      }
+    ],
+    "name": "ProtocolStatusChanged",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "role",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "previousAdminRole",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "newAdminRole",
+        "type": "bytes32"
+      }
+    ],
+    "name": "RoleAdminChanged",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "role",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "sender",
+        "type": "address"
+      }
+    ],
+    "name": "RoleGranted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "role",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "sender",
+        "type": "address"
+      }
+    ],
+    "name": "RoleRevoked",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "onBehalfOf",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "rewardToken",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "grossReward",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "feePaid",
+        "type": "uint256"
+      }
+    ],
+    "name": "StakedRewardCollected",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "onBehalfOf",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "newTokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "residual0",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "residual1",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "residualUsd6",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "newBasisUsd6",
+        "type": "uint128"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "newCarryUsd6",
+        "type": "uint128"
+      }
+    ],
+    "name": "SwitchResidueSettled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "TokenRescued",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousTreasury",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newTreasury",
+        "type": "address"
+      }
+    ],
+    "name": "TreasuryUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "pool",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint32",
+        "name": "window",
+        "type": "uint32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint16",
+        "name": "minCardinality",
+        "type": "uint16"
+      }
+    ],
+    "name": "TwapConfigUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "Unpaused",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "oldHandler",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newHandler",
+        "type": "address"
+      }
+    ],
+    "name": "YieldHandlerUpdated",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "DEFAULT_ADMIN_ROLE",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_FEE_BPS",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_SETTABLE_SLIPPAGE_BPS",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MIN_TWAP_CARDINALITY",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MIN_TWAP_WINDOW",
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "REGISTRY",
+    "outputs": [
+      {
+        "internalType": "contract IProtocolRegistry",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "USDC",
+    "outputs": [
+      {
+        "internalType": "contract IERC20",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "WETH",
+    "outputs": [
+      {
+        "internalType": "contract IERC20",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+      }
+    ],
+    "name": "allowedPoolParamAt",
+    "outputs": [
+      {
+        "internalType": "bytes",
+        "name": "",
+        "type": "bytes"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      }
+    ],
+    "name": "allowedPoolParamCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "name": "carryProfitUsd6Of",
+    "outputs": [
+      {
+        "internalType": "uint128",
+        "name": "",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "onBehalfOf",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "tokenId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint16",
+            "name": "exitBps",
+            "type": "uint16"
+          },
+          {
+            "components": [
+              {
                 "internalType": "uint256",
-                "name": "value",
+                "name": "amountOutMin",
                 "type": "uint256"
-            }
-        ],
-        "name": "SafeCastOverflowedUintDowncast",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            }
-        ],
-        "name": "SafeERC20FailedOperation",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "SlippageAboveMax",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "SlippageTooLow",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "SwapFailed",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            }
-        ],
-        "name": "TokenNotWhitelisted",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "TwapCardinalityBelowFloor",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "pool",
-                "type": "address"
-            },
-            {
-                "internalType": "uint16",
-                "name": "have",
-                "type": "uint16"
-            },
-            {
-                "internalType": "uint16",
-                "name": "need",
-                "type": "uint16"
-            }
-        ],
-        "name": "TwapCardinalityTooLow",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            }
-        ],
-        "name": "TwapNotConfigured",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "pool",
-                "type": "address"
-            },
-            {
-                "internalType": "uint32",
-                "name": "age",
-                "type": "uint32"
-            },
-            {
-                "internalType": "uint32",
-                "name": "maxAge",
-                "type": "uint32"
-            }
-        ],
-        "name": "TwapObservationStale",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "TwapPoolPairMismatch",
-        "type": "error"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            }
-        ],
-        "name": "TwapReferenceRemovalNotAllowed",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "TwapWindowTooShort",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "TwapWindowZero",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "UnknownPosition",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "WrongTokenPair",
-        "type": "error"
-    },
-    {
-        "inputs": [],
-        "name": "ZeroAddress",
-        "type": "error"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "onBehalfOf",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "attemptedFee",
-                "type": "uint256"
-            }
-        ],
-        "name": "CollectFeeTransferFailed",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": false,
-                "internalType": "uint16",
-                "name": "previousFeeCollectBps",
-                "type": "uint16"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint16",
-                "name": "newFeeCollectBps",
-                "type": "uint16"
-            }
-        ],
-        "name": "FeeCollectBpsUpdated",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "onBehalfOf",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "feeUsd6",
-                "type": "uint128"
-            }
-        ],
-        "name": "FeeTransferFailed",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "onBehalfOf",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "address",
-                "name": "token0",
-                "type": "address"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "collected0",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "fee0",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "address",
-                "name": "token1",
-                "type": "address"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "collected1",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "fee1",
-                "type": "uint256"
-            }
-        ],
-        "name": "FeesCollected",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": false,
-                "internalType": "uint16",
-                "name": "previousMaxSlippageBps",
-                "type": "uint16"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint16",
-                "name": "newMaxSlippageBps",
-                "type": "uint16"
-            }
-        ],
-        "name": "MaxSlippageBpsUpdated",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "previousValue",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "newValue",
-                "type": "uint128"
-            }
-        ],
-        "name": "MinPoolLiquidityUpdated",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "previousValue",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "newValue",
-                "type": "uint128"
-            }
-        ],
-        "name": "MinPositionLiquidityUpdated",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "recipient",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            }
-        ],
-        "name": "NftRescued",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": false,
-                "internalType": "address",
-                "name": "account",
-                "type": "address"
-            }
-        ],
-        "name": "Paused",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "previousPauser",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "newPauser",
-                "type": "address"
-            }
-        ],
-        "name": "PauserUpdated",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": false,
-                "internalType": "uint16",
-                "name": "previousPerformanceFeeBps",
-                "type": "uint16"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint16",
-                "name": "newPerformanceFeeBps",
-                "type": "uint16"
-            }
-        ],
-        "name": "PerformanceFeeBpsUpdated",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": false,
+              },
+              {
                 "internalType": "bytes",
                 "name": "poolParam",
                 "type": "bytes"
-            },
-            {
-                "indexed": false,
-                "internalType": "bool",
-                "name": "previousAllowed",
-                "type": "bool"
-            },
-            {
-                "indexed": false,
-                "internalType": "bool",
-                "name": "newAllowed",
-                "type": "bool"
-            }
-        ],
-        "name": "PoolParamAllowedUpdated",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "onBehalfOf",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": true,
+              }
+            ],
+            "internalType": "struct SwapLeg",
+            "name": "swap0",
+            "type": "tuple"
+          },
+          {
+            "components": [
+              {
                 "internalType": "uint256",
-                "name": "tokenId",
+                "name": "amountOutMin",
                 "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "basisUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "currentValueUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "feeUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint16",
-                "name": "exitBps",
-                "type": "uint16"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "carryForExitUsd6",
-                "type": "uint128"
-            }
-        ],
-        "name": "PositionClosed",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "onBehalfOf",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "usdcInput",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "amount0ToLp",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "amount1ToLp",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "currentValueUsd6",
-                "type": "uint128"
-            }
-        ],
-        "name": "PositionOpened",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "onBehalfOf",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "fromProtocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "toProtocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "oldTokenId",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "newTokenId",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "carriedBasisUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "withdrawn0",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "withdrawn1",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "used0",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "used1",
-                "type": "uint128"
-            }
-        ],
-        "name": "PositionSwitched",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "onBehalfOf",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "releasedBasisUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "releasedCarryUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "amount0",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "amount1",
-                "type": "uint256"
-            }
-        ],
-        "name": "PositionWithdrawn",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": true,
-                "internalType": "bool",
-                "name": "forOpen",
-                "type": "bool"
-            },
-            {
-                "indexed": false,
-                "internalType": "bool",
-                "name": "enabled",
-                "type": "bool"
-            }
-        ],
-        "name": "ProtocolStatusChanged",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "bytes32",
-                "name": "role",
-                "type": "bytes32"
-            },
-            {
-                "indexed": true,
-                "internalType": "bytes32",
-                "name": "previousAdminRole",
-                "type": "bytes32"
-            },
-            {
-                "indexed": true,
-                "internalType": "bytes32",
-                "name": "newAdminRole",
-                "type": "bytes32"
-            }
-        ],
-        "name": "RoleAdminChanged",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "bytes32",
-                "name": "role",
-                "type": "bytes32"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "account",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "sender",
-                "type": "address"
-            }
-        ],
-        "name": "RoleGranted",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "bytes32",
-                "name": "role",
-                "type": "bytes32"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "account",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "sender",
-                "type": "address"
-            }
-        ],
-        "name": "RoleRevoked",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "onBehalfOf",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "address",
-                "name": "rewardToken",
-                "type": "address"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "grossReward",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "feePaid",
-                "type": "uint256"
-            }
-        ],
-        "name": "StakedRewardCollected",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "onBehalfOf",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": true,
-                "internalType": "uint256",
-                "name": "newTokenId",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "residual0",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "residual1",
-                "type": "uint256"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "residualUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "newBasisUsd6",
-                "type": "uint128"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint128",
-                "name": "newCarryUsd6",
-                "type": "uint128"
-            }
-        ],
-        "name": "SwitchResidueSettled",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "recipient",
-                "type": "address"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint256",
-                "name": "amount",
-                "type": "uint256"
-            }
-        ],
-        "name": "TokenRescued",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "previousTreasury",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "newTreasury",
-                "type": "address"
-            }
-        ],
-        "name": "TreasuryUpdated",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "pool",
-                "type": "address"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint32",
-                "name": "window",
-                "type": "uint32"
-            },
-            {
-                "indexed": false,
-                "internalType": "uint16",
-                "name": "minCardinality",
-                "type": "uint16"
-            }
-        ],
-        "name": "TwapConfigUpdated",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": false,
-                "internalType": "address",
-                "name": "account",
-                "type": "address"
-            }
-        ],
-        "name": "Unpaused",
-        "type": "event"
-    },
-    {
-        "anonymous": false,
-        "inputs": [
-            {
-                "indexed": true,
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "oldHandler",
-                "type": "address"
-            },
-            {
-                "indexed": true,
-                "internalType": "address",
-                "name": "newHandler",
-                "type": "address"
-            }
-        ],
-        "name": "YieldHandlerUpdated",
-        "type": "event"
-    },
-    {
-        "inputs": [],
-        "name": "DEFAULT_ADMIN_ROLE",
-        "outputs": [
-            {
-                "internalType": "bytes32",
-                "name": "",
-                "type": "bytes32"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "MAX_FEE_BPS",
-        "outputs": [
-            {
-                "internalType": "uint16",
-                "name": "",
-                "type": "uint16"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "MAX_SETTABLE_SLIPPAGE_BPS",
-        "outputs": [
-            {
-                "internalType": "uint16",
-                "name": "",
-                "type": "uint16"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "MIN_TWAP_CARDINALITY",
-        "outputs": [
-            {
-                "internalType": "uint16",
-                "name": "",
-                "type": "uint16"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "MIN_TWAP_WINDOW",
-        "outputs": [
-            {
-                "internalType": "uint32",
-                "name": "",
-                "type": "uint32"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "REGISTRY",
-        "outputs": [
-            {
-                "internalType": "contract IProtocolRegistry",
-                "name": "",
-                "type": "address"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "USDC",
-        "outputs": [
-            {
-                "internalType": "contract IERC20",
-                "name": "",
-                "type": "address"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "WETH",
-        "outputs": [
-            {
-                "internalType": "contract IERC20",
-                "name": "",
-                "type": "address"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "internalType": "uint256",
-                "name": "index",
-                "type": "uint256"
-            }
-        ],
-        "name": "allowedPoolParamAt",
-        "outputs": [
-            {
-                "internalType": "bytes",
-                "name": "",
-                "type": "bytes"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            }
-        ],
-        "name": "allowedPoolParamCount",
-        "outputs": [
-            {
-                "internalType": "uint256",
-                "name": "",
-                "type": "uint256"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            }
-        ],
-        "name": "carryProfitUsd6Of",
-        "outputs": [
-            {
-                "internalType": "uint128",
-                "name": "",
-                "type": "uint128"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "components": [
-                    {
-                        "internalType": "address",
-                        "name": "onBehalfOf",
-                        "type": "address"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "tokenId",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint16",
-                        "name": "exitBps",
-                        "type": "uint16"
-                    },
-                    {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "swap0",
-                        "type": "tuple"
-                    },
-                    {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "swap1",
-                        "type": "tuple"
-                    },
-                    {
-                        "internalType": "uint16",
-                        "name": "slippageBps",
-                        "type": "uint16"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "decreaseAmount0Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "decreaseAmount1Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "deadline",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "minUsdcOut",
-                        "type": "uint256"
-                    }
-                ],
-                "internalType": "struct CloseLpParams",
-                "name": "params",
-                "type": "tuple"
-            }
-        ],
-        "name": "closeLp",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "components": [
-                    {
-                        "internalType": "address",
-                        "name": "onBehalfOf",
-                        "type": "address"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "tokenId",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "bool",
-                        "name": "swapFeesToUsdc",
-                        "type": "bool"
-                    },
-                    {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "swap0",
-                        "type": "tuple"
-                    },
-                    {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "swap1",
-                        "type": "tuple"
-                    },
-                    {
-                        "internalType": "bool",
-                        "name": "swapRewardToUsdc",
-                        "type": "bool"
-                    },
-                    {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "rewardSwap",
-                        "type": "tuple"
-                    },
-                    {
-                        "internalType": "uint16",
-                        "name": "slippageBps",
-                        "type": "uint16"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "deadline",
-                        "type": "uint256"
-                    }
-                ],
-                "internalType": "struct CollectLpParams",
-                "name": "params",
-                "type": "tuple"
-            }
-        ],
-        "name": "collectLp",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "feeCollectBps",
-        "outputs": [
-            {
-                "internalType": "uint16",
-                "name": "",
-                "type": "uint16"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "bytes32",
-                "name": "role",
-                "type": "bytes32"
-            }
-        ],
-        "name": "getRoleAdmin",
-        "outputs": [
-            {
-                "internalType": "bytes32",
-                "name": "",
-                "type": "bytes32"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "bytes32",
-                "name": "role",
-                "type": "bytes32"
-            },
-            {
-                "internalType": "address",
-                "name": "account",
-                "type": "address"
-            }
-        ],
-        "name": "grantRole",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "bytes32",
-                "name": "role",
-                "type": "bytes32"
-            },
-            {
-                "internalType": "address",
-                "name": "account",
-                "type": "address"
-            }
-        ],
-        "name": "hasRole",
-        "outputs": [
-            {
-                "internalType": "bool",
-                "name": "",
-                "type": "bool"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
+              },
+              {
                 "internalType": "bytes",
                 "name": "poolParam",
                 "type": "bytes"
-            }
+              }
+            ],
+            "internalType": "struct SwapLeg",
+            "name": "swap1",
+            "type": "tuple"
+          },
+          {
+            "internalType": "uint16",
+            "name": "slippageBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint256",
+            "name": "decreaseAmount0Min",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "decreaseAmount1Min",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "minUsdcOut",
+            "type": "uint256"
+          }
         ],
-        "name": "isPoolParamAllowed",
-        "outputs": [
-            {
-                "internalType": "bool",
-                "name": "",
-                "type": "bool"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "maxSlippageBps",
-        "outputs": [
-            {
-                "internalType": "uint16",
-                "name": "",
-                "type": "uint16"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            }
-        ],
-        "name": "minPoolLiquidity",
-        "outputs": [
-            {
-                "internalType": "uint128",
-                "name": "",
-                "type": "uint128"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            }
-        ],
-        "name": "minPositionLiquidity",
-        "outputs": [
-            {
-                "internalType": "uint128",
-                "name": "",
-                "type": "uint128"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "components": [
-                    {
-                        "internalType": "address",
-                        "name": "onBehalfOf",
-                        "type": "address"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "usdcAmount",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "int24",
-                        "name": "tickLower",
-                        "type": "int24"
-                    },
-                    {
-                        "internalType": "int24",
-                        "name": "tickUpper",
-                        "type": "int24"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "mintAmount0Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "mintAmount1Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "swap0",
-                        "type": "tuple"
-                    },
-                    {
-                        "components": [
-                            {
-                                "internalType": "uint256",
-                                "name": "amountOutMin",
-                                "type": "uint256"
-                            },
-                            {
-                                "internalType": "bytes",
-                                "name": "poolParam",
-                                "type": "bytes"
-                            }
-                        ],
-                        "internalType": "struct SwapLeg",
-                        "name": "swap1",
-                        "type": "tuple"
-                    },
-                    {
-                        "internalType": "uint16",
-                        "name": "slippageBps",
-                        "type": "uint16"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "deadline",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "bytes",
-                        "name": "lpPoolParam",
-                        "type": "bytes"
-                    },
-                    {
-                        "internalType": "bool",
-                        "name": "stake",
-                        "type": "bool"
-                    }
-                ],
-                "internalType": "struct OpenLpParams",
-                "name": "params",
-                "type": "tuple"
-            }
-        ],
-        "name": "openLp",
-        "outputs": [
-            {
+        "internalType": "struct CloseLpParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "closeLp",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "onBehalfOf",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "tokenId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "swapFeesToUsdc",
+            "type": "bool"
+          },
+          {
+            "components": [
+              {
                 "internalType": "uint256",
-                "name": "tokenId",
+                "name": "amountOutMin",
                 "type": "uint256"
-            }
-        ],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "pause",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "paused",
-        "outputs": [
-            {
-                "internalType": "bool",
-                "name": "",
-                "type": "bool"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "pauser",
-        "outputs": [
-            {
-                "internalType": "address",
-                "name": "",
-                "type": "address"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "performanceFeeBps",
-        "outputs": [
-            {
-                "internalType": "uint16",
-                "name": "",
-                "type": "uint16"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            }
-        ],
-        "name": "positionHandlerOf",
-        "outputs": [
-            {
-                "internalType": "address",
-                "name": "",
-                "type": "address"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "",
-                "type": "uint8"
-            }
-        ],
-        "name": "protocolEnabledForClose",
-        "outputs": [
-            {
-                "internalType": "bool",
-                "name": "",
-                "type": "bool"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "",
-                "type": "uint8"
-            }
-        ],
-        "name": "protocolEnabledForOpen",
-        "outputs": [
-            {
-                "internalType": "bool",
-                "name": "",
-                "type": "bool"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "bytes32",
-                "name": "role",
-                "type": "bytes32"
-            },
-            {
-                "internalType": "address",
-                "name": "callerConfirmation",
-                "type": "address"
-            }
-        ],
-        "name": "renounceRole",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            },
-            {
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            },
-            {
-                "internalType": "address",
-                "name": "recipient",
-                "type": "address"
-            }
-        ],
-        "name": "rescueERC721",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            },
-            {
-                "internalType": "address",
-                "name": "recipient",
-                "type": "address"
-            },
-            {
-                "internalType": "uint256",
-                "name": "amount",
-                "type": "uint256"
-            }
-        ],
-        "name": "rescueToken",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "internalType": "uint256",
-                "name": "tokenId",
-                "type": "uint256"
-            }
-        ],
-        "name": "residualBasisUsd6Of",
-        "outputs": [
-            {
-                "internalType": "uint128",
-                "name": "",
-                "type": "uint128"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "bytes32",
-                "name": "role",
-                "type": "bytes32"
-            },
-            {
-                "internalType": "address",
-                "name": "account",
-                "type": "address"
-            }
-        ],
-        "name": "revokeRole",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint16",
-                "name": "newFeeCollectBps",
-                "type": "uint16"
-            }
-        ],
-        "name": "setFeeCollectBps",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint16",
-                "name": "newMaxSlippageBps",
-                "type": "uint16"
-            }
-        ],
-        "name": "setMaxSlippageBps",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "internalType": "uint128",
-                "name": "newValue",
-                "type": "uint128"
-            }
-        ],
-        "name": "setMinPoolLiquidity",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "internalType": "uint128",
-                "name": "newValue",
-                "type": "uint128"
-            }
-        ],
-        "name": "setMinPositionLiquidity",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "newPauser",
-                "type": "address"
-            }
-        ],
-        "name": "setPauser",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint16",
-                "name": "newPerformanceFeeBps",
-                "type": "uint16"
-            }
-        ],
-        "name": "setPerformanceFeeBps",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
+              },
+              {
                 "internalType": "bytes",
                 "name": "poolParam",
                 "type": "bytes"
-            },
-            {
-                "internalType": "bool",
-                "name": "allowed",
-                "type": "bool"
-            }
-        ],
-        "name": "setPoolParamAllowed",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "internalType": "bool",
-                "name": "enabled",
-                "type": "bool"
-            }
-        ],
-        "name": "setProtocolEnabledForClose",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "internalType": "bool",
-                "name": "enabled",
-                "type": "bool"
-            }
-        ],
-        "name": "setProtocolEnabledForOpen",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "newTreasury",
-                "type": "address"
-            }
-        ],
-        "name": "setTreasury",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            },
-            {
-                "internalType": "address",
-                "name": "pool",
-                "type": "address"
-            },
-            {
-                "internalType": "uint32",
-                "name": "window",
-                "type": "uint32"
-            },
-            {
-                "internalType": "uint16",
-                "name": "minCardinality",
-                "type": "uint16"
-            }
-        ],
-        "name": "setTwapConfig",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "internalType": "address",
-                "name": "handler",
-                "type": "address"
-            }
-        ],
-        "name": "setYieldHandler",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
+              }
+            ],
+            "internalType": "struct SwapLeg",
+            "name": "swap0",
+            "type": "tuple"
+          },
+          {
+            "components": [
+              {
                 "internalType": "uint256",
-                "name": "tokenId",
+                "name": "amountOutMin",
                 "type": "uint256"
-            }
-        ],
-        "name": "stakePoolOf",
-        "outputs": [
-            {
-                "internalType": "address",
-                "name": "",
-                "type": "address"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "bytes4",
-                "name": "interfaceId",
-                "type": "bytes4"
-            }
-        ],
-        "name": "supportsInterface",
-        "outputs": [
-            {
-                "internalType": "bool",
-                "name": "",
-                "type": "bool"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "fromProtocol",
-                "type": "uint8"
-            },
-            {
-                "internalType": "uint8",
-                "name": "toProtocol",
-                "type": "uint8"
-            },
-            {
-                "components": [
-                    {
-                        "internalType": "address",
-                        "name": "onBehalfOf",
-                        "type": "address"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "tokenId",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "decreaseAmount0Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "decreaseAmount1Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "int24",
-                        "name": "tickLower",
-                        "type": "int24"
-                    },
-                    {
-                        "internalType": "int24",
-                        "name": "tickUpper",
-                        "type": "int24"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "mintAmount0Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "mintAmount1Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "bytes",
-                        "name": "lpPoolParam",
-                        "type": "bytes"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "deadline",
-                        "type": "uint256"
-                    }
-                ],
-                "internalType": "struct SwitchLpParams",
-                "name": "params",
-                "type": "tuple"
-            }
-        ],
-        "name": "switchLp",
-        "outputs": [
-            {
+              },
+              {
+                "internalType": "bytes",
+                "name": "poolParam",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct SwapLeg",
+            "name": "swap1",
+            "type": "tuple"
+          },
+          {
+            "internalType": "bool",
+            "name": "swapRewardToUsdc",
+            "type": "bool"
+          },
+          {
+            "components": [
+              {
                 "internalType": "uint256",
-                "name": "newTokenId",
+                "name": "amountOutMin",
                 "type": "uint256"
-            }
+              },
+              {
+                "internalType": "bytes",
+                "name": "poolParam",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct SwapLeg",
+            "name": "rewardSwap",
+            "type": "tuple"
+          },
+          {
+            "internalType": "uint16",
+            "name": "slippageBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          }
         ],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "timelock",
-        "outputs": [
-            {
-                "internalType": "address",
-                "name": "",
-                "type": "address"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "treasury",
-        "outputs": [
-            {
-                "internalType": "address",
-                "name": "",
-                "type": "address"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "token",
-                "type": "address"
-            }
-        ],
-        "name": "twapConfigOf",
-        "outputs": [
-            {
-                "components": [
-                    {
-                        "internalType": "address",
-                        "name": "pool",
-                        "type": "address"
-                    },
-                    {
-                        "internalType": "uint32",
-                        "name": "window",
-                        "type": "uint32"
-                    },
-                    {
-                        "internalType": "uint16",
-                        "name": "minCardinality",
-                        "type": "uint16"
-                    }
-                ],
-                "internalType": "struct TwapConfig",
-                "name": "",
-                "type": "tuple"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "tokenIn",
-                "type": "address"
-            },
-            {
-                "internalType": "address",
-                "name": "tokenOut",
-                "type": "address"
-            },
-            {
+        "internalType": "struct CollectLpParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "collectLp",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "feeCollectBps",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "role",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getRoleAdmin",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "role",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "grantRole",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "role",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "hasRole",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "bytes",
+        "name": "poolParam",
+        "type": "bytes"
+      }
+    ],
+    "name": "isPoolParamAllowed",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "maxSlippageBps",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      }
+    ],
+    "name": "minPoolLiquidity",
+    "outputs": [
+      {
+        "internalType": "uint128",
+        "name": "",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      }
+    ],
+    "name": "minPositionLiquidity",
+    "outputs": [
+      {
+        "internalType": "uint128",
+        "name": "",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "onBehalfOf",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "usdcAmount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "int24",
+            "name": "tickLower",
+            "type": "int24"
+          },
+          {
+            "internalType": "int24",
+            "name": "tickUpper",
+            "type": "int24"
+          },
+          {
+            "internalType": "uint256",
+            "name": "mintAmount0Min",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "mintAmount1Min",
+            "type": "uint256"
+          },
+          {
+            "components": [
+              {
                 "internalType": "uint256",
-                "name": "amountIn",
+                "name": "amountOutMin",
                 "type": "uint256"
-            },
-            {
-                "internalType": "uint16",
-                "name": "slippageBps",
-                "type": "uint16"
-            }
-        ],
-        "name": "twapMinimumOut",
-        "outputs": [
-            {
+              },
+              {
+                "internalType": "bytes",
+                "name": "poolParam",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct SwapLeg",
+            "name": "swap0",
+            "type": "tuple"
+          },
+          {
+            "components": [
+              {
                 "internalType": "uint256",
-                "name": "",
+                "name": "amountOutMin",
                 "type": "uint256"
-            }
+              },
+              {
+                "internalType": "bytes",
+                "name": "poolParam",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct SwapLeg",
+            "name": "swap1",
+            "type": "tuple"
+          },
+          {
+            "internalType": "uint16",
+            "name": "slippageBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes",
+            "name": "lpPoolParam",
+            "type": "bytes"
+          },
+          {
+            "internalType": "bool",
+            "name": "stake",
+            "type": "bool"
+          }
         ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "address",
-                "name": "tokenIn",
-                "type": "address"
-            },
-            {
-                "internalType": "address",
-                "name": "tokenOut",
-                "type": "address"
-            },
-            {
-                "internalType": "uint256",
-                "name": "amountIn",
-                "type": "uint256"
-            }
+        "internalType": "struct OpenLpParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "openLp",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pause",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "paused",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pauser",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "performanceFeeBps",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "name": "positionHandlerOf",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "name": "protocolEnabledForClose",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "name": "protocolEnabledForOpen",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "role",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "callerConfirmation",
+        "type": "address"
+      }
+    ],
+    "name": "renounceRole",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+      }
+    ],
+    "name": "rescueERC721",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "rescueToken",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "name": "residualBasisUsd6Of",
+    "outputs": [
+      {
+        "internalType": "uint128",
+        "name": "",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "role",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "revokeRole",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "newFeeCollectBps",
+        "type": "uint16"
+      }
+    ],
+    "name": "setFeeCollectBps",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "newMaxSlippageBps",
+        "type": "uint16"
+      }
+    ],
+    "name": "setMaxSlippageBps",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint128",
+        "name": "newValue",
+        "type": "uint128"
+      }
+    ],
+    "name": "setMinPoolLiquidity",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint128",
+        "name": "newValue",
+        "type": "uint128"
+      }
+    ],
+    "name": "setMinPositionLiquidity",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newPauser",
+        "type": "address"
+      }
+    ],
+    "name": "setPauser",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "newPerformanceFeeBps",
+        "type": "uint16"
+      }
+    ],
+    "name": "setPerformanceFeeBps",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "bytes",
+        "name": "poolParam",
+        "type": "bytes"
+      },
+      {
+        "internalType": "bool",
+        "name": "allowed",
+        "type": "bool"
+      }
+    ],
+    "name": "setPoolParamAllowed",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "bool",
+        "name": "enabled",
+        "type": "bool"
+      }
+    ],
+    "name": "setProtocolEnabledForClose",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "bool",
+        "name": "enabled",
+        "type": "bool"
+      }
+    ],
+    "name": "setProtocolEnabledForOpen",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newTreasury",
+        "type": "address"
+      }
+    ],
+    "name": "setTreasury",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "pool",
+        "type": "address"
+      },
+      {
+        "internalType": "uint32",
+        "name": "window",
+        "type": "uint32"
+      },
+      {
+        "internalType": "uint16",
+        "name": "minCardinality",
+        "type": "uint16"
+      }
+    ],
+    "name": "setTwapConfig",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "address",
+        "name": "handler",
+        "type": "address"
+      }
+    ],
+    "name": "setYieldHandler",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "name": "stakePoolOf",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes4",
+        "name": "interfaceId",
+        "type": "bytes4"
+      }
+    ],
+    "name": "supportsInterface",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "fromProtocol",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "toProtocol",
+        "type": "uint8"
+      },
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "onBehalfOf",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "tokenId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "decreaseAmount0Min",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "decreaseAmount1Min",
+            "type": "uint256"
+          },
+          {
+            "internalType": "int24",
+            "name": "tickLower",
+            "type": "int24"
+          },
+          {
+            "internalType": "int24",
+            "name": "tickUpper",
+            "type": "int24"
+          },
+          {
+            "internalType": "uint256",
+            "name": "mintAmount0Min",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "mintAmount1Min",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes",
+            "name": "lpPoolParam",
+            "type": "bytes"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          }
         ],
-        "name": "twapQuote",
-        "outputs": [
-            {
-                "internalType": "uint256",
-                "name": "",
-                "type": "uint256"
-            }
+        "internalType": "struct SwitchLpParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "switchLp",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "newTokenId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "timelock",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "treasury",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "twapConfigOf",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "pool",
+            "type": "address"
+          },
+          {
+            "internalType": "uint32",
+            "name": "window",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint16",
+            "name": "minCardinality",
+            "type": "uint16"
+          }
         ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "unpause",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "protocol",
-                "type": "uint8"
-            },
-            {
-                "components": [
-                    {
-                        "internalType": "address",
-                        "name": "onBehalfOf",
-                        "type": "address"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "tokenId",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "decreaseAmount0Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "decreaseAmount1Min",
-                        "type": "uint256"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "deadline",
-                        "type": "uint256"
-                    }
-                ],
-                "internalType": "struct WithdrawLpParams",
-                "name": "params",
-                "type": "tuple"
-            }
+        "internalType": "struct TwapConfig",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "tokenIn",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "tokenOut",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amountIn",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint16",
+        "name": "slippageBps",
+        "type": "uint16"
+      }
+    ],
+    "name": "twapMinimumOut",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "tokenIn",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "tokenOut",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amountIn",
+        "type": "uint256"
+      }
+    ],
+    "name": "twapQuote",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "unpause",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "protocol",
+        "type": "uint8"
+      },
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "onBehalfOf",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "tokenId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "decreaseAmount0Min",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "decreaseAmount1Min",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          }
         ],
-        "name": "withdrawLp",
-        "outputs": [
-            {
-                "internalType": "uint256",
-                "name": "amount0",
-                "type": "uint256"
-            },
-            {
-                "internalType": "uint256",
-                "name": "amount1",
-                "type": "uint256"
-            }
-        ],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {
-                "internalType": "uint8",
-                "name": "",
-                "type": "uint8"
-            }
-        ],
-        "name": "yieldHandlers",
-        "outputs": [
-            {
-                "internalType": "address",
-                "name": "",
-                "type": "address"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    }
+        "internalType": "struct WithdrawLpParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "withdrawLp",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "amount0",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount1",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "name": "yieldHandlers",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
 ]

@@ -140,6 +140,8 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         bytes[][] memory _allowedPoolParams,
         uint128[] memory _minPoolLiquidity,
         uint128[] memory _minPositionLiquidity,
+        address[] memory _twapTokens,
+        TwapConfig[] memory _twapConfigs,
         address _treasury,
         uint16 _performanceFeeBps,
         uint16 _feeCollectBps,
@@ -168,7 +170,8 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             _handlers.length != _protocols.length ||
             _allowedPoolParams.length != _protocols.length ||
             _minPoolLiquidity.length != _protocols.length ||
-            _minPositionLiquidity.length != _protocols.length
+            _minPositionLiquidity.length != _protocols.length ||
+            _twapConfigs.length != _twapTokens.length
         ) revert LengthMismatch();
 
         REGISTRY = _registry;
@@ -183,6 +186,22 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         $.performanceFeeBps = _performanceFeeBps;
         $.feeCollectBps = _feeCollectBps;
         $.maxSlippageBps = 300;
+
+        // References are installed BEFORE any protocol is registered, so the
+        // allow-listing below can hold every pool param to the same standard
+        // `setPoolParamAllowed` does. Without this the invariant "allow-listed
+        // implies a live reference" would only start at the first post-deploy
+        // change, and a fresh deployment would sit open-enabled but unable to
+        // swap until a timelock proposal executed — days later.
+        for (uint256 i = 0; i < _twapTokens.length; i++) {
+            _storeTwapConfig(
+                $,
+                _twapTokens[i],
+                _twapConfigs[i].pool,
+                _twapConfigs[i].window,
+                _twapConfigs[i].minCardinality
+            );
+        }
 
         for (uint256 i = 0; i < _protocols.length; i++) {
             _validateHandler(_protocols[i], _handlers[i]);
@@ -199,6 +218,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             emit MinPositionLiquidityUpdated(_protocols[i], 0, _minPositionLiquidity[i]);
 
             for (uint256 j = 0; j < _allowedPoolParams[i].length; j++) {
+                _requirePoolParamTwapReferences($, _handlers[i], _allowedPoolParams[i][j]);
                 _storePoolParamAllowed($, _protocols[i], _allowedPoolParams[i][j], true);
             }
         }
@@ -859,12 +879,20 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         uint32 window,
         uint16 minCardinality
     ) external onlyTimelockCriticalRole {
-        YieldLayout storage $ = _yieldStorage();
+        if (pool == address(0)) revert TwapReferenceRemovalNotAllowed(token);
+        _storeTwapConfig(_yieldStorage(), token, pool, window, minCardinality);
+    }
 
-        if (pool == address(0)) {
-            revert TwapReferenceRemovalNotAllowed(token);
-        }
-
+    /// @dev Validate and install one reference. Shared by the constructor and
+    ///      the timelocked setter so a seeded reference is held to exactly the
+    ///      same standard as a replaced one — there is no weaker path in.
+    function _storeTwapConfig(
+        YieldLayout storage $,
+        address token,
+        address pool,
+        uint32 window,
+        uint16 minCardinality
+    ) internal {
         if (window < MIN_TWAP_WINDOW) revert TwapWindowTooShort();
         if (minCardinality < MIN_TWAP_CARDINALITY) revert TwapCardinalityBelowFloor();
         if (pool.code.length == 0) revert InvalidTwapReferencePool(pool);

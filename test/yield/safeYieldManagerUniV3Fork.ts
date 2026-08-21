@@ -100,6 +100,8 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             [[POOL_PARAM]],
             [0],
             [0],
+            [WETH_ADDRESS],
+            [{ pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
             treasury.address,
             1_000,
             250,
@@ -109,19 +111,6 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             pauser.address,
         );
         await manager.waitForDeployment();
-        // Price reference for the swap floor (H-01).
-        await (
-            await timelock.execute(
-                await manager.getAddress(),
-                manager.interface.encodeFunctionData("setTwapConfig", [
-                    WETH_ADDRESS,
-                    TWAP_REF_WETH_USDC_POOL,
-                    TWAP_WINDOW,
-                    TWAP_CARDINALITY,
-                ]),
-            )
-        ).wait();
-
         await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
         const factory = new ethers.Contract(UNISWAP_V3_FACTORY_ADDRESS, FACTORY_ABI, ethers.provider);

@@ -140,7 +140,8 @@ async function deployYieldManagerHarness() {
     const UniFactory = await ethers.getContractFactory("MockUniswapV3Factory");
     const uniFactory = await UniFactory.deploy();
     await uniFactory.waitForDeployment();
-    await (await uniFactory.setPool(await uniPool.getAddress())).wait();
+    const uniPoolAddr = await uniPool.getAddress();
+    await (await uniFactory.setPool(uniPoolAddr)).wait();
     const UniNPM = await ethers.getContractFactory("MockNonfungiblePositionManager");
     const uniNpm = await UniNPM.deploy();
     await uniNpm.waitForDeployment();
@@ -211,6 +212,10 @@ async function deployYieldManagerHarness() {
         [[FEE_TIER], [TICK_SPACING]],
         [0, 0],
         [0, 0],
+        // Seeded at construction: the allow-listed params above are held to the
+        // same reference requirement as any later addition.
+        [wethAddr],
+        [{ pool: uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
         treasury.address,
         Number(PERF_FEE_BPS),
         Number(COLLECT_FEE_BPS),
@@ -229,17 +234,6 @@ async function deployYieldManagerHarness() {
     await (await uniRouter.setOutput(WETH_OUT)).wait();
     await (await clRouter.setOutput(WETH_OUT)).wait();
 
-    // Price reference for the non-USDC side. One Uniswap V3 pool serves every
-    // venue, so the Aerodrome legs below are floored by this same history.
-    await (
-        await timelockCall(timelock, manager, "setTwapConfig", [
-            wethAddr,
-            await uniPool.getAddress(),
-            TWAP_WINDOW,
-            TWAP_CARDINALITY,
-        ])
-    ).wait();
-
     return {
         deployer,
         operatorEOA,
@@ -252,6 +246,7 @@ async function deployYieldManagerHarness() {
         wethAddr,
         usdcAddr,
         uniPool,
+        uniPoolAddr,
         uniFactory,
         uniNpm,
         uniRouter,
@@ -290,7 +285,7 @@ describe("SafeYieldManager", function () {
         });
 
         it("reverts on constructor array length mismatch", async function () {
-            const { manager, reg, usdcAddr, wethAddr, uniHandler, treasury, deployer, pauser, timelock } =
+            const { manager, reg, usdcAddr, wethAddr, uniHandler, treasury, deployer, pauser, timelock, uniPoolAddr } =
                 await loadFixture(deployYieldManagerHarness);
             const Manager = await ethers.getContractFactory("SafeYieldManager");
             await expect(
@@ -303,6 +298,8 @@ describe("SafeYieldManager", function () {
                     [[FEE_TIER], [TICK_SPACING]],
                     [0, 0],
                     [0, 0],
+                    [wethAddr],
+                    [{ pool: uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
                     treasury.address,
                     Number(PERF_FEE_BPS),
                     Number(COLLECT_FEE_BPS),
@@ -315,8 +312,19 @@ describe("SafeYieldManager", function () {
         });
 
         it("rejects mismatched and non-contract handlers in the constructor", async function () {
-            const { manager, reg, usdcAddr, wethAddr, uniHandler, treasury, deployer, pauser, stranger, timelock } =
-                await loadFixture(deployYieldManagerHarness);
+            const {
+                manager,
+                reg,
+                usdcAddr,
+                wethAddr,
+                uniHandler,
+                treasury,
+                deployer,
+                pauser,
+                stranger,
+                timelock,
+                uniPoolAddr,
+            } = await loadFixture(deployYieldManagerHarness);
             const Manager = await ethers.getContractFactory("SafeYieldManager");
             const registryAddress = await reg.getAddress();
             const timelockAddress = await timelock.getAddress();
@@ -330,6 +338,8 @@ describe("SafeYieldManager", function () {
                     [[TICK_SPACING]],
                     [0],
                     [0],
+                    [wethAddr],
+                    [{ pool: uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
                     treasury.address,
                     Number(PERF_FEE_BPS),
                     Number(COLLECT_FEE_BPS),
@@ -1795,6 +1805,8 @@ describe("SafeYieldManager", function () {
                 [[FEE_TIER], [TICK_SPACING]],
                 [0, 0],
                 [0, 0],
+                [f.wethAddr],
+                [{ pool: f.uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
                 f.treasury.address,
                 Number(PERF_FEE_BPS),
                 Number(COLLECT_FEE_BPS),
@@ -1818,13 +1830,13 @@ describe("SafeYieldManager", function () {
             await expect(deployWith(0, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
             await expect(deployWith(1, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
             await expect(deployWith(2, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
-            await expect(deployWith(12, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
-            await expect(deployWith(13, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
             await expect(deployWith(14, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
-            await expect(deployWith(8, ZERO)).to.be.revertedWithCustomError(f.manager, "InvalidTreasury");
-            await expect(deployWith(11, 10_001)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
-            await expect(deployWith(9, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
-            await expect(deployWith(10, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
+            await expect(deployWith(15, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
+            await expect(deployWith(16, ZERO)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
+            await expect(deployWith(10, ZERO)).to.be.revertedWithCustomError(f.manager, "InvalidTreasury");
+            await expect(deployWith(13, 10_001)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
+            await expect(deployWith(11, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
+            await expect(deployWith(12, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
         });
 
         it("rejects every constructor array length mismatch", async function () {
@@ -1840,6 +1852,11 @@ describe("SafeYieldManager", function () {
             await expect(deployWith(5, [[FEE_TIER]])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
             await expect(deployWith(6, [0])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
             await expect(deployWith(7, [0])).to.be.revertedWithCustomError(f.manager, "LengthMismatch");
+            // Seeded references are length-checked against each other too.
+            await expect(deployWith(8, [f.wethAddr, f.usdcAddr])).to.be.revertedWithCustomError(
+                f.manager,
+                "LengthMismatch",
+            );
         });
     });
 
@@ -2146,6 +2163,8 @@ describe("SafeYieldManager", function () {
                 [[FEE_TIER]],
                 [0],
                 [0],
+                [f.wethAddr],
+                [{ pool: f.uniPoolAddr, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY }],
                 f.treasury.address,
                 0,
                 10_000,
@@ -2155,14 +2174,6 @@ describe("SafeYieldManager", function () {
                 f.pauser.address,
             );
             await manager.waitForDeployment();
-            await (
-                await timelockCall(f.timelock, manager, "setTwapConfig", [
-                    f.wethAddr,
-                    await f.uniPool.getAddress(),
-                    TWAP_WINDOW,
-                    TWAP_CARDINALITY,
-                ])
-            ).wait();
 
             await (await manager.connect(f.operatorEOA).openLp(UNISWAP_V3, openParams(f.safeAddr, FEE_TIER))).wait();
             await (await f.uniNpm.setOwed(1, 0, 40_000n)).wait();

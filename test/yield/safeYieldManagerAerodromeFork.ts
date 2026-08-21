@@ -78,6 +78,11 @@ async function deployAeroStack() {
         [[POOL_PARAM]],
         [0],
         [0],
+        [WETH_ADDRESS, AERO_ADDRESS],
+        [
+            { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+            { pool: TWAP_REF_AERO_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+        ],
         treasury.address,
         1_000,
         250,
@@ -87,19 +92,6 @@ async function deployAeroStack() {
         pauser.address,
     );
     await manager.waitForDeployment();
-    // Price reference for the swap floor (H-01).
-    for (const [token, pool] of [
-        [WETH_ADDRESS, TWAP_REF_WETH_USDC_POOL],
-        [AERO_ADDRESS, TWAP_REF_AERO_USDC_POOL],
-    ]) {
-        await (
-            await timelock.execute(
-                await manager.getAddress(),
-                manager.interface.encodeFunctionData("setTwapConfig", [token, pool, TWAP_WINDOW, TWAP_CARDINALITY]),
-            )
-        ).wait();
-    }
-
     await enableModuleOnSafe(safeAddress, admin, await manager.getAddress());
 
     return { operator, treasury, safeAddress, handler, manager, registry };
