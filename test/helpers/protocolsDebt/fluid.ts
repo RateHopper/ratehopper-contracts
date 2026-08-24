@@ -53,12 +53,21 @@ export class FluidHelper {
     async getPosition(vaultAddress: string, userAddress) {
         const resolver = new ethers.Contract(FLUID_VAULT_RESOLVER, fluidVaultResolverAbi, this.signer);
         const positions = await resolver.positionsByUser(userAddress);
-        const positionIndex = positions[1].findIndex((vault) => vault[0].toLowerCase() === vaultAddress);
-        if (positionIndex === -1) {
+
+        // Every past run leaves its emptied position NFT behind, so the test Safe holds several on
+        // the same vault. Taking the FIRST match returns the oldest — supply 0 — and borrowing
+        // against zero collateral makes Fluid divide by zero (Panic 0x12, surfaced as GS013).
+        // Prefer the funded position, then the newest, so the borrow lands on what we just supplied.
+        const matches = positions[1]
+            .map((vault, i) => ({ vault, position: positions[0][i] }))
+            .filter(({ vault }) => vault[0].toLowerCase() === vaultAddress.toLowerCase());
+        if (matches.length === 0) {
             console.log("No position found on vault: " + vaultAddress);
             return;
         }
-        return positions[0][positionIndex];
+        const funded = matches.filter(({ position }) => position[9] > 0n);
+        const pool = funded.length > 0 ? funded : matches;
+        return pool.reduce((newest, c) => (c.position[0] > newest.position[0] ? c : newest)).position;
     }
 
     async getDebtAmount(vaultAddress: string, userAddress?: string): Promise<bigint> {

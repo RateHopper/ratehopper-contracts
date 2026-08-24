@@ -30,11 +30,13 @@ import { MaxUint256 } from "ethers";
 import {
     clearSnapshots,
     loadFixture,
+    setBalance,
     SnapshotRestorer,
     takeSnapshot,
     time,
 } from "@nomicfoundation/hardhat-network-helpers";
 import {
+    dealTokenAmount,
     eip1193Provider,
     formatAmount,
     fundETH,
@@ -77,15 +79,9 @@ export function createSafeTestHelpers(context: { signer: ethers.Wallet; safeWall
     async function sendCollateralToSafe(tokenAddress = cbETH_ADDRESS, protocol?: DebtProtocols) {
         if (tokenAddress === WETH_ADDRESS && protocol === DebtProtocols.FLUID) {
             // Send ETH directly to Safe for WETH only for Fluid protocol
-            const tx = await signer.sendTransaction({
-                to: safeAddress,
-                value: ethers.parseEther("0.001"),
-            });
-            await tx.wait();
+            await setBalance(safeAddress, ethers.parseEther("1"));
         } else {
-            const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
-            const tx = await tokenContract.transfer(safeAddress, ethers.parseEther("0.001"));
-            await tx.wait();
+            await dealTokenAmount(tokenAddress, safeAddress, DEFAULT_SUPPLY_AMOUNT);
         }
     }
 

@@ -130,6 +130,63 @@ export async function fundETH(receiverAddress: string) {
     console.log(`Balance:`, ethers.formatEther(balance), "ETH");
 }
 
+const BALANCE_SLOT_CACHE = new Map<string, number>();
+
+/**
+ * Give `receiver` an ERC20 balance by writing the token's balance slot on the fork.
+ *
+ * The suites used to move collateral with a real `transfer` from the test EOA, which made every
+ * run depend on what that live wallet still held at the pinned fork block — a balance that only
+ * ever goes down. Once it ran dry the transfers reverted (WETH9 `require`s without a reason, so
+ * this surfaced as the opaque "reverted without a reason string"), and a wallet top-up would buy
+ * only a handful of further runs. Writing the slot removes the dependency entirely.
+ *
+ * The slot index is discovered by probing rather than hardcoded, so a token whose layout differs
+ * (or a proxy) is handled without a per-token table. Throws if no slot matches — silently funding
+ * nothing would resurface later as an unexplained revert.
+ */
+export async function dealToken(tokenAddress: string, receiverAddress: string, amount: bigint) {
+    const token = new ethers.Contract(tokenAddress, ERC20_ABI, ethers.provider);
+    const key = tokenAddress.toLowerCase();
+    const probe = ethers.toBeHex(amount === 0n ? 1n : amount, 32);
+
+    const write = async (slot: number) => {
+        const mapped = ethers.keccak256(
+            ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [receiverAddress, slot]),
+        );
+        const previous = await ethers.provider.send("eth_getStorageAt", [tokenAddress, mapped, "latest"]);
+        await ethers.provider.send("hardhat_setStorageAt", [tokenAddress, mapped, probe]);
+        return { mapped, previous };
+    };
+
+    const cached = BALANCE_SLOT_CACHE.get(key);
+    if (cached !== undefined) {
+        await write(cached);
+        return;
+    }
+
+    for (let slot = 0; slot < 60; slot++) {
+        const { mapped, previous } = await write(slot);
+        if ((await token.balanceOf(receiverAddress)) === BigInt(probe)) {
+            BALANCE_SLOT_CACHE.set(key, slot);
+            return;
+        }
+        await ethers.provider.send("hardhat_setStorageAt", [tokenAddress, mapped, previous]);
+    }
+    throw new Error(`dealToken: could not locate the balance slot for ${tokenAddress}`);
+}
+
+/**
+ * Deal `amount` (in whole tokens) using the token's own decimals.
+ *
+ * The suites previously sized every collateral transfer with `parseEther`, which is only correct
+ * for 18-decimal tokens — on cbBTC (8 decimals) `parseEther("0.001")` asks for ten million cbBTC.
+ */
+export async function dealTokenAmount(tokenAddress: string, receiverAddress: string, amount: string) {
+    const decimals = await getDecimals(tokenAddress);
+    await dealToken(tokenAddress, receiverAddress, ethers.parseUnits(amount, decimals));
+}
+
 /**
  * Fund an address with ETH for gas fees using the first Hardhat signer (deployer)
  * This is useful for funding impersonated accounts in tests

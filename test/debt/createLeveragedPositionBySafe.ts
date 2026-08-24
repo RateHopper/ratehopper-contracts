@@ -11,7 +11,7 @@ import "dotenv/config";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { LeveragedPosition } from "../../typechain-types";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
-import { eip1193Provider, fundSignerWithETH, getDecimals, getParaswapData } from "../helpers/utils";
+import { dealToken, eip1193Provider, fundSignerWithETH, getDecimals, getParaswapData } from "../helpers/utils";
 import { protocolHelperMap } from "../helpers/protocolHelperMap";
 import Safe from "@safe-global/protocol-kit";
 import {
@@ -42,7 +42,10 @@ describe("Create leveraged position by Safe", function () {
 
     let deployedContractAddress: string;
 
-    const defaultTargetSupplyAmount = "0.002";
+    // 2x leverage, derived so it cannot drift from the principle: the swap leg is
+    // `target - principle`, and a target below the principle makes that negative — which Paraswap
+    // rejects as "Invalid Amount" rather than anything that points back at the constants.
+    const defaultTargetSupplyAmount = String(Number(DEFAULT_SUPPLY_AMOUNT) * 2);
     const cbBTCPrincipleAmount = 0.00006;
 
     let safeWallet;
@@ -133,11 +136,11 @@ describe("Create leveraged position by Safe", function () {
         const paraswapData = await getParaswapData(collateralAddress, debtAddress, deployedContractAddress, diffAmount);
 
         // send collateral token to safe
-        const tx = await collateralContract.transfer(
+        await dealToken(
+            collateralAddress,
             safeAddress,
             ethers.parseUnits(principleAmount.toString(), collateralDecimals),
         );
-        await tx.wait();
 
         const approveTransactionData: MetaTransactionData = {
             to: collateralAddress,
@@ -486,8 +489,7 @@ describe("Create leveraged position by Safe", function () {
         const borrowAmount = ethers.parseUnits(borrowAmountStr, debtDecimals);
 
         // Transfer collateral to Safe
-        const transferTx = await collateralContract.transfer(safeAddress, supplyAmount);
-        await transferTx.wait();
+        await dealToken(collateralAddress, safeAddress, supplyAmount);
         console.log("Transferred collateral to Safe");
 
         if (protocol === DebtProtocols.FLUID) {

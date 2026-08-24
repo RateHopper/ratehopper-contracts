@@ -12,7 +12,14 @@ import {
 } from "../helpers/constants";
 import { abi as ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 import { MetaTransactionData, OperationType } from "@safe-global/types-kit";
-import { eip1193Provider, fundETH, fundSignerWithETH, getDecimals, getParaswapData } from "../helpers/utils";
+import {
+    dealTokenAmount,
+    eip1193Provider,
+    fundETH,
+    fundSignerWithETH,
+    getDecimals,
+    getParaswapData,
+} from "../helpers/utils";
 import { FLUID_cbETH_USDC_VAULT, FluidHelper, fluidVaultMap } from "../helpers/protocolsDebt/fluid";
 import FluidVaultAbi from "../../externalAbi/fluid/fluidVaultT1.json";
 import { expect } from "chai";
@@ -74,9 +81,7 @@ describe("SafeExecTransactionWrapper", function () {
             });
             await tx.wait();
         } else {
-            const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
-            const tx = await tokenContract.transfer(safeAddress, ethers.parseEther("0.001"));
-            await tx.wait();
+            await dealTokenAmount(tokenAddress, safeAddress, DEFAULT_SUPPLY_AMOUNT);
         }
     }
 
