@@ -2,9 +2,9 @@
   "chainId": 8453,
   "network": "base",
   "contracts": {
-    "DeployYieldManager#AerodromeYieldHandler": "0x574aD82074DAfA2577de9236E3DE893F73E8bc8E",
-    "DeployYieldManager#UniV3YieldHandler": "0x3905F83412EFeA5FA60c674e5AA4faaBde3bCDDF",
-    "DeployYieldManager#UniV4YieldHandler": "0x6eaDd472Bcb756cc1CA906B22635A4877b6ebdd4",
-    "DeployYieldManager#SafeYieldManager": "0x1D5B6c90ff1751cA71534aA92547E21cb23d7616"
+    "DeployYieldManager#AerodromeYieldHandler": "0x942c5A46570F31236a6560aDE8Fd740A5163e303",
+    "DeployYieldManager#UniV3YieldHandler": "0x057790539471b103012df78e5A923E0b41d86168",
+    "DeployYieldManager#UniV4YieldHandler": "0x748b064A61f30E41b0904f91e5874f59714777d3",
+    "DeployYieldManager#SafeYieldManager": "0x93281e160181B8EBdEB8a8d9493BcD34dE5fA1b8"
   }
 }
