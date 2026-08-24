@@ -5,7 +5,12 @@ const chainId = process.env.CHAIN_ID || "8453";
 const networkNames = { 8453: "base", 84532: "base-sepolia" };
 const network = networkNames[chainId] || `chain-${chainId}`;
 const root = path.resolve(__dirname, "..");
-const source = path.join(root, "ignition", "deployments", `chain-${chainId}`, "deployed_addresses.json");
+// Same override convention as scripts/lpSafeShared.ts's deployedManagerAddress(): a deploy under a
+// non-default --deployment-id (e.g. a version bump kept separate from the chain-${chainId} default)
+// must be synced from THAT id, or this silently writes the stale default generation's addresses
+// back over the reviewable deployments/${network}.json manifest.
+const deploymentId = process.env.IGNITION_DEPLOYMENT_ID || `chain-${chainId}`;
+const source = path.join(root, "ignition", "deployments", deploymentId, "deployed_addresses.json");
 const outputDir = path.join(root, "deployments");
 const output = path.join(outputDir, `${network}.json`);
 
