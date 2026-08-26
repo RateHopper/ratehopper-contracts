@@ -2883,6 +2883,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@uniswap/v4-core@npm:1.0.2":
+  version: 1.0.2
+  resolution: "@uniswap/v4-core@npm:1.0.2"
+  checksum: 10c0/a0f97e6a73e6d6395191d1f95d0e8914f338dab83144092105b12dd7bebf7cab8bd8f2ceeab048061f54c0e499e83d3dcde9443062949f6f7c227c2ee4d54f2c
+  languageName: node
+  linkType: hard
+
+"@uniswap/v4-periphery@npm:1.0.3":
+  version: 1.0.3
+  resolution: "@uniswap/v4-periphery@npm:1.0.3"
+  checksum: 10c0/5cfcb9390870901949350b3aa614aa99896d440b1fc79d4c5582690bbb9c483c0707ae6817a115d12c40cfbb46087b220f61b57c068290a3329f5eb0884fea0c
+  languageName: node
+  linkType: hard
+
 "abbrev@npm:1":
   version: 1.1.1
   resolution: "abbrev@npm:1.1.1"
@@ -7620,6 +7634,8 @@ __metadata:
     "@types/mocha": "npm:>=9.1.0"
     "@types/node": "npm:>=18.0.0"
     "@uniswap/v3-periphery": "npm:^1.4.4"
+    "@uniswap/v4-core": "npm:1.0.2"
+    "@uniswap/v4-periphery": "npm:1.0.3"
     axios: "npm:^1.13.2"
     chai: "npm:^4.2.0"
     dotenv: "npm:^16.4.5"
