@@ -5,7 +5,6 @@ RateHopper Contracts is a smart contract system that enables users to automatica
 ## Key Features
 
 - **Multi-Protocol Support**: Currently supports borrowing from:
-
     - Aave V3
     - Compound
     - Morpho
@@ -26,48 +25,55 @@ RateHopper Contracts is a smart contract system that enables users to automatica
 
 - **Uniswap V3 LP Lifecycle**: `RatehopperUniV3Positions` is a Gnosis Safe module that opens, harvests fees from, and closes WETH/USDC LP positions atomically. Charges a configurable performance fee on profit at close, plus a separate fee on accrued LP fees. Critical setters are timelock-gated.
 
+- **Unified Yield Module (SafeYieldManager)**: `SafeYieldManager` is the single Safe module for all yield (LP) protocols — the yield-side counterpart of `SafeDebtManager`. Users enable this ONE contract as a module; per-protocol mechanics live in stateless handlers (`UniV3YieldHandler`, `AerodromeYieldHandler`, `UniV4YieldHandler`) invoked via delegatecall. Protocols are identified by plain `uint8` ids (the `YIELD_PROTOCOL_*` constants in `Types.sol` document the canonical assignment), so adding a protocol is a handler deployment + timelocked `setYieldHandler` on the already-deployed manager — no redeploy, and not a new module every user must enable. The standalone `RatehopperUniV3Positions` module above is **legacy**: it keeps serving positions opened through it (coexistence, no state migration), while new positions open through `SafeYieldManager` — Uniswap V3, Aerodrome Slipstream (CL, with optional staking for AERO emissions), and Uniswap V4 (including native ETH pools), over any allow-listed pair.
+
 ## Architecture
+
+See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for what the Safe-module
+custody model implies: why the performance fee is cooperative, why repayment
+residue is refunded, and why the pauser can delay exits but never trap a
+position.
 
 The system consists of several key components:
 
 1. **Governance & Access Control**:
-
-    - `TimelockController`: OpenZeppelin's timelock implementation with 8-hour delay by default for critical operations
+    - `TimelockController`: OpenZeppelin's timelock implementation with 2-day delay by default for critical operations
     - `ProtocolRegistry.sol`: Central registry with hybrid access control:
         - `DEFAULT_ADMIN_ROLE`: For routine operations (whitelist, token mappings) - immediate execution
         - `CRITICAL_ROLE`: For critical operations (setParaswapV6, setOperator) - requires timelock
 
-2. **DebtSwap.sol**: The main contract that orchestrates the debt switching process using flash loans.
+2. **SafeDebtManager.sol**: The main contract that orchestrates the debt switching process using flash loans.
 
-3. **Protocol Handlers**: Individual handlers for each supported lending protocol:
-
-    - In `contracts/protocols/` directory:
-
-        - `AaveV3Handler.sol`: Handles interactions with Aave V3 protocol
-        - `CompoundHandler.sol`: Handles interactions with Compound protocol
-        - `MorphoHandler.sol`: Handles interactions with Morpho protocol
-
-    - In `contracts/protocolsSafe/` directory:
-        - `MoonwellHandler.sol`: Handles interactions with Moonwell protocol
-        - `FluidSafeHandler.sol`: Handles interactions with Fluid protocol through Safe
+3. **Debt Handlers** (`contracts/debt/handlers/`): Individual handlers for each supported lending protocol, all implementing `IDebtHandler` and extending `BaseDebtHandler.sol`:
+    - `AaveV3DebtHandler.sol`: Handles interactions with Aave V3 protocol
+    - `CompoundDebtHandler.sol`: Handles interactions with Compound protocol
+    - `MorphoDebtHandler.sol`: Handles interactions with Morpho protocol
+    - `MoonwellDebtHandler.sol`: Handles interactions with Moonwell protocol
+    - `FluidSafeDebtHandler.sol`: Handles interactions with Fluid protocol through Safe
 
 4. **Safe Modules**: Modules for Gnosis Safe integration:
-
     - `SafeDebtManager.sol`: Enables debt swaps through Gnosis Safe
     - Both operator-initiated and Safe owner-initiated transactions supported
 
 5. **LeveragedPosition.sol**: Facilitates creation of leveraged positions across protocols.
 
 6. **RatehopperUniV3Positions.sol**: Standalone Gnosis Safe module for Uniswap V3 WETH/USDC LP lifecycle. Three external entry points:
-
     - `openLp()` — splits the Safe's USDC, swaps half to WETH via the pinned SwapRouter02, mints a Uniswap V3 LP NFT on the Safe.
     - `closeLp()` — partial or full unwind (`exitBps`): harvests accrued fees, `decreaseLiquidity`, collects principal, optionally `burn`s, swaps the WETH leg back to USDC.
     - `collectLp()` — mid-position fee harvest with no decrease/burn.
 
     Caller passes per-call `swapAmountOutMin` and `deadline` (audit fixes C-01 / H-02). The constructor rejects any non-WETH/USDC token pair (M-08). Performance fee is charged on net profit (`currentValueUsd6 - basisUsd6`); fee-collect is charged on accrued fees only. All fee setters are gated by `CRITICAL_ROLE` on a TimelockController (H-04); `rescueToken` and similar emergency ops are gated by `DEFAULT_ADMIN_ROLE`.
 
-7. **Morpho Libraries**: Supporting libraries for the Morpho protocol:
+7. **SafeYieldManager.sol + Yield Handlers** (`contracts/yield/`): Adapter-pattern successor to (6). `SafeYieldManager` is the single Safe module users enable; it owns basis bookkeeping (`residualBasisUsd6Of`, keyed by `(uint8 protocolId, tokenId)`), the performance fee, pause / per-protocol disable switches, and the timelocked setter surface. Protocol ids are plain `uint8` (not a Solidity enum) end-to-end, so a NEW protocol registers on the deployed manager via `setYieldHandler(id, handler)` — followed by the pauser enabling open/close and the admin allow-listing pool params — with no redeploy; the `YIELD_PROTOCOL_*` constants in `Types.sol` just document the canonical id assignment (append-only). Protocol mechanics live in stateless handlers executed via delegatecall:
+    - `switchLp()` atomically closes a full position and opens its replacement in another allowed pool/protocol, carrying only the cost basis attributable to value actually deployed into the new LP.
+    - `BaseYieldHandler.sol` — the shared `openLp`/`closeLp`/`collectLp` flow for V3-style CL protocols over ANY token pair; protocol diffs are isolated in virtual hooks (pool resolution, pair decoding, `slot0` read, swap calldata, mint calldata, `positions` decoding). USDC stays the sole funding/accounting currency: each non-USDC side of the pair is acquired/realized through its own USDC `SwapLeg` (a side that IS USDC needs no swap), so a WETH/USDC position swaps one leg and a WBTC/USDT-style position swaps both.
+    - `V3StyleYieldHandler.sol` — the `BaseYieldHandler` hooks implemented once against the canonical Uniswap V3 interfaces (factory `getPool` by `uint24 feeTier`, 7-field `slot0`, SwapRouter02), with the protocol id as a constructor argument so V3-shaped protocols and tests reuse the hook bodies.
+    - `UniV3YieldHandler.sol` (extends `V3StyleYieldHandler`) / `AerodromeYieldHandler.sol` (extends `BaseYieldHandler`) — concrete adapters holding protocol immutables.
+    - `UniV4YieldHandler.sol` — implements `IYieldHandler` directly (the V4 singleton/actions model doesn't fit the V3-shaped hooks): pool params are the full V4 `PoolKey` tuple (`keccak256(poolParam)` IS the V4 PoolId), ERC20 sides route through two-step Permit2 approvals and UniversalRouter swaps, and native ETH pools (`currency0 == address(0)`) are supported.
+    - Shared mutable state lives in an ERC-7201 namespace (`YieldStorage`, `ratehopper.storage.yield`), so handler delegatecode can never collide with the manager's inherited storage. Handlers MUST NOT declare storage variables.
+    - Pool selection params are ABI-encoded bytes carrying the PAIR plus the protocol key (`abi.encode(token0, token1, uint24 feeTier)` for Uniswap V3, `abi.encode(token0, token1, int24 tickSpacing)` for Aerodrome), allow-listed by `keccak256(poolParam)` — richer identifiers fit without interface changes (Uniswap V4 uses the full `PoolKey` tuple). A protocol whose mechanics don't fit `BaseYieldHandler` implements `IYieldHandler` directly.
 
+8. **Morpho Libraries**: Supporting libraries for the Morpho protocol:
     - `MathLib.sol`: Provides fixed-point arithmetic operations for the Morpho protocol
     - `SharesMathLib.sol`: Handles share-to-asset conversion with virtual shares to protect against share price manipulations
 
@@ -83,12 +89,12 @@ The system consists of several key components:
 
 **Compound V3:**
 
-- Call `allow()` to authorize DebtSwap contract
+- Call `allow()` to authorize the SafeDebtManager contract
 - Extra data: `"0x"`
 
 **Morpho:**
 
-- Call `setAuthorization(debtSwapContract, true)`
+- Call `setAuthorization(safeDebtManager, true)`
 - Extra data: Encode `(MarketParams, borrowShares)` - **REQUIRED**
 
 **Moonwell:**
@@ -111,7 +117,7 @@ The system consists of several key components:
 
 ## Key Functions
 
-### DebtSwap Contract
+### SafeDebtManager Contract
 
 - `executeDebtSwap`: Main entry point for initiating a debt position transfer
 - `uniswapV3FlashCallback`: Handles the flash loan callback from Uniswap V3
@@ -120,9 +126,9 @@ The system consists of several key components:
 - `getHandler`: Retrieves the handler address for a specific protocol
 - `emergencyWithdraw`: Allows the owner to withdraw tokens in case of emergency
 
-### Protocol Handlers
+### Debt Handlers
 
-Each protocol handler implements the following key functions:
+Each debt handler implements the following key functions:
 
 - `getDebtAmount`: Retrieves current debt amount for a user
 - `switchIn`: Handles debt switching within the same protocol
@@ -139,14 +145,14 @@ To execute a debt swap, you'll need to provide the following parameters:
 ```solidity
 function executeDebtSwap(
     address _flashloanPool,       // Uniswap V3 pool address for flash loan
-    Protocol _fromProtocol,       // Source protocol enum (COMPOUND, AAVE_V3, MORPHO, FLUID, MOONWELL)
-    Protocol _toProtocol,         // Destination protocol enum
+    DebtProtocol _fromProtocol,   // Source protocol enum (AAVE_V3, COMPOUND, MORPHO, FLUID, MOONWELL)
+    DebtProtocol _toProtocol,     // Destination protocol enum
     address _fromDebtAsset,       // Debt asset address on source protocol
     address _toDebtAsset,         // Debt asset address on destination protocol
     uint256 _amount,              // Amount to swap (use type(uint256).max for full debt)
     CollateralAsset[] calldata _collateralAssets,  // Array of collateral assets
-    bytes calldata _fromExtraData,  // Extra data for source protocol
-    bytes calldata _toExtraData,    // Extra data for destination protocol
+    address _onBehalfOf,          // Safe address the swap is executed for
+    bytes[2] calldata _extraData, // [fromExtraData, toExtraData] for the two protocols
     ParaswapParams calldata _paraswapParams  // Paraswap parameters for token swaps
 )
 ```
@@ -155,8 +161,8 @@ function executeDebtSwap(
 
 ```solidity
 struct CollateralAsset {
-    address asset;   // Collateral asset address
-    uint256 amount;  // Collateral amount
+    address asset; // Collateral asset address
+    uint256 amount; // Collateral amount
 }
 ```
 
@@ -164,11 +170,10 @@ struct CollateralAsset {
 
 ```solidity
 struct ParaswapParams {
-    uint256 srcAmount;    // Source amount with slippage adjustment (for token swaps)
-    bytes swapData;      // Encoded swap data from Paraswap API
+    uint256 srcAmount; // Source amount with slippage adjustment (for token swaps)
+    bytes swapData; // Encoded swap data from Paraswap API
 }
 ```
-
 
 ## Environment Variables
 
@@ -176,25 +181,51 @@ Create a `.env` file with the following required variables (use `.env.sample` as
 
 ```env
 # Core deploy
-ADMIN_ADDRESS=0x...           # Initial admin and timelock proposer/executor (used by 1_DeployCore AND 2_DeployUniV3Helper)
+ADMIN_ADDRESS=0x...           # Initial admin and timelock proposer/executor (used by all deploy modules)
 SAFE_OPERATOR_ADDRESS=0x...   # Operator address for Safe interactions
 PAUSER_ADDRESS=0x...          # Address that can pause contracts
 DEPLOYER_PRIVATE_KEY=...      # Private key for deployment
 EXPLORER_KEY=...              # Block explorer API key for verification
+BASE_FORK_BLOCK_NUMBER=49470000 # Optional deterministic fork block for CI
 
-# Optional — RatehopperUniV3Positions deploy (yarn deploy:2_univ3_helper)
-RHP_REGISTRY=0x...            # ProtocolRegistry address. Falls back to PROTOCOL_REGISTRY_ADDRESS in contractAddresses.ts
-RHP_TREASURY=0x...            # Treasury that collects feeCollectBps + performanceFeeBps cuts. REQUIRED.
-RHP_INITIAL_ADMIN=0x...       # DEFAULT_ADMIN_ROLE holder (rescueToken etc.). Falls back to ADMIN_ADDRESS
-RHP_TIMELOCK=0x...            # Reuse an existing TimelockController instead of deploying a new one
-RHP_PERFORMANCE_FEE_BPS=1000  # Performance fee on profit at closeLp (bps). Default 1000 (10%)
-RHP_FEE_COLLECT_BPS=250       # Fee on accrued LP fees harvested via collectLp/closeLp (bps). Default 250 (2.5%)
-RHP_MAX_FEE_BPS=2000          # Hard upper bound on BOTH fees (bps). Default 2000 (20%)
+# Yield deploy config (deploy:2_yield_manager)
+# Resolution order: SYM_* module override → shared unprefixed name → legacy
+# RHP_* fallback (addresses only) → default. Empty values (X=) count as
+# unset and fall through.
+TREASURY=0x...                # Fee treasury for all yield modules. REQUIRED.
+REGISTRY=0x...                # Optional. Falls back to PROTOCOL_REGISTRY_ADDRESS in contractAddresses.ts
+INITIAL_ADMIN=0x...           # Optional. DEFAULT_ADMIN_ROLE holder. Falls back to ADMIN_ADDRESS
+RHP_TIMELOCK=0x...            # Optional. Reuse an existing TimelockController for the yield module only
+                              # (module override: SYM_TIMELOCK). The registry deploy uses REGISTRY_TIMELOCK.
+PERFORMANCE_FEE_BPS=1000      # Optional. Performance fee on profit at closeLp (bps). Default 1000 (10%)
+FEE_COLLECT_BPS=250           # Optional. Fee on accrued LP fees (bps). Default 250 (2.5%)
+MAX_FEE_BPS=2000              # Optional. Hard upper bound on BOTH fees (bps). Default 2000 (20%)
+MIN_POSITION_LIQUIDITY=10000  # Optional. Floor on NPM mint liquidity. Default 10000
+MIN_POOL_LIQUIDITY=0          # Optional. Floor on pool.liquidity() for spot-price reads. Default 0 (disabled)
 
-# Optional — TimelockController inside 2_DeployUniV3Helper
+# Optional — TimelockController sub-module (shared by all deploys)
 TIMELOCK_ADMIN=0x...          # Proposer + executor on the new timelock. Falls back to ADMIN_ADDRESS
-TIMELOCK_DELAY=28800          # Min delay before queued ops execute (seconds). Default 28800 (8 hours)
+TIMELOCK_DELAY=172800         # Min delay before queued ops execute (seconds). Default 172800 (2 days)
+
+# Optional — per-module overrides: the same suffix with the module prefix wins
+# over the shared name, e.g. SYM_TREASURY / RHP_MAX_FEE_BPS.
+# SafeYieldManager-specific:
+SYM_PAUSER=0x...              # Pauser (pause / per-protocol disable). Falls back to PAUSER_ADDRESS, then ADMIN_ADDRESS
+SYM_UNIV3_MIN_POSITION_LIQUIDITY=10000       # Per-protocol floors; fall back to MIN_POSITION_LIQUIDITY /
+SYM_AERODROME_MIN_POSITION_LIQUIDITY=10000   # MIN_POOL_LIQUIDITY, then the defaults
+SYM_UNIV3_MIN_POOL_LIQUIDITY=0     # Set independently after measuring the target Uni V3 pool
+SYM_AERODROME_MIN_POOL_LIQUIDITY=0 # Set independently after measuring the target Slipstream pool
+SYM_UNIV4_MIN_POSITION_LIQUIDITY=10000
+SYM_UNIV4_MIN_POOL_LIQUIDITY=0     # Set independently after measuring the target V4 pool
+
+# Optional Uniswap V4 address overrides — default to the canonical Base
+# addresses in contractAddresses.ts; only set when targeting another network.
+# SYM_UNIV4_POSITION_MANAGER=0x...  # V4 PositionManager
+# SYM_UNIVERSAL_ROUTER=0x...        # UniversalRouter
+# SYM_PERMIT2=0x...                 # Permit2 (Base uses 0x...B43aC78BA3)
+# SYM_UNIV4_STATE_VIEW=0x...        # StateView lens
 ```
+
 ## Setup and Development
 
 1. Install dependencies:
@@ -226,13 +257,17 @@ The project uses:
 
 ## Testing
 
-Comprehensive tests are available in the `/test` directory covering:
+Comprehensive tests are available in the `/test` directory, organized by area (`test/debt/`, `test/yield/`, `test/registry/`, `test/legacy/`, plus shared fixtures in `test/helpers/`), covering:
 
-- Individual protocol handlers
+- Individual debt protocol handlers
 - Cross-protocol debt switching flows
 - Multiple collateral asset scenarios
 - Safe module integration
 - Leveraged position creation
+- Yield stack: `SafeYieldManager` unit suites (mock-driven) and per-protocol fork suites (Uniswap V3, Aerodrome, Uniswap V4, cross-protocol `switchLp`)
+- Legacy standalone yield module (`test/legacy/`)
+
+The `*Fork.ts` suites run against a Base mainnet fork and need `BASE_RPC_URL` (see Environment Variables).
 
 Run tests with:
 
@@ -258,7 +293,7 @@ The core contracts are defined in a single module at `ignition/modules/1_DeployC
 
 ### Export ABIs
 
-ABI files for the four core integration contracts are exported to `abis/` from Hardhat artifacts:
+ABI files for the five core integration contracts are exported to `abis/` from Hardhat artifacts:
 
 ```bash
 yarn abis
@@ -270,6 +305,7 @@ This compiles the contracts and writes:
 - `abis/RatehopperUniV3Positions.json`
 - `abis/SafeDebtManager.json`
 - `abis/SafeExecTransactionWrapper.json`
+- `abis/SafeYieldManager.json`
 
 The deploy scripts below run the ABI exporter automatically after a successful deployment.
 
@@ -301,22 +337,23 @@ This deploys all contracts sequentially in a single transaction chain:
 4. **LeveragedPosition** → `transferOwnership` to `ADMIN_ADDRESS`
 5. **SafeExecTransactionWrapper**
 
-### Deploy RatehopperUniV3Positions (Standalone)
+### Deploy SafeYieldManager (Unified Yield Stack)
 
-`RatehopperUniV3Positions` is deployed separately because it sits on top of an existing `ProtocolRegistry` and needs its own TimelockController for fund-impacting setters.
+Deploys the adapter-pattern yield stack: `UniV3YieldHandler` + `AerodromeYieldHandler` + `UniV4YieldHandler` + `SafeYieldManager`.
 
 ```bash
-yarn deploy:2_univ3_helper
+yarn deploy:2_yield_manager
 ```
 
-This deploys `ignition/modules/2_DeployUniV3Helper.ts` to Base with verification enabled and refreshes the ABI files in `abis/`.
+This deploys `ignition/modules/2_DeployYieldManager.ts` to Base with verification enabled and refreshes the ABI files in `abis/`.
 
-This module by default deploys:
+The module by default deploys:
 
-1. **TimelockController** (proposer + executor = `TIMELOCK_ADMIN` ?? `ADMIN_ADDRESS`; delay = `TIMELOCK_DELAY` ?? 8 hours)
-2. **RatehopperUniV3Positions** (wired to the registry from `RHP_REGISTRY` ?? `PROTOCOL_REGISTRY_ADDRESS`; CRITICAL_ROLE granted to the timelock from step 1)
+1. **TimelockController** (shared `TimelockControllerModule`; skipped when `SYM_TIMELOCK` / `RHP_TIMELOCK` is set)
+2. **UniV3YieldHandler**, **AerodromeYieldHandler** and **UniV4YieldHandler** (stateless delegatecall targets pinned to the canonical Base position-manager / factory / router / Permit2 / USDC addresses)
+3. **SafeYieldManager** with all three handlers registered, protocols enabled, and default pool-param allow-lists seeded (WETH/USDC on Uniswap V3 fee tiers `{100, 500, 3000}` and Aerodrome tick spacings `{100, 200}`; the hookless native ETH/USDC 0.05% pool on Uniswap V4). Additional pools are allow-listed post-deploy via `setPoolParamAllowed` — hooked V4 pools only after the hook is audited.
 
-To reuse an existing TimelockController instead of deploying a new one, set `RHP_TIMELOCK=0x...` — the module skips step 1 and points RHP at the supplied address. See `## Environment Variables` for the full list of optional knobs.
+Coexistence note: the standalone `RatehopperUniV3Positions` deployment keeps serving positions opened through it. `SafeYieldManager` rejects those tokenIds (`UnknownPosition`) and vice versa — there is no basis migration; legacy positions drain naturally via the legacy module.
 
 ### Deployment Output
 
@@ -335,6 +372,15 @@ Inspect deployed addresses:
 cat ignition/deployments/chain-8453/deployed_addresses.json
 ```
 
+Ignition state is intentionally gitignored. Every deploy command also syncs a
+stable, reviewable public manifest to `deployments/base.json`; commit that file
+after a production deployment so downstream consumers do not depend on a local
+Ignition directory. It can also be refreshed manually with:
+
+```bash
+yarn deployments:sync
+```
+
 ### Wiping Deployments
 
 Use `wipe:all` when you want to clear all local Ignition state for Base and redeploy everything from scratch:
@@ -349,9 +395,9 @@ Shortcut scripts are available for common futures:
 
 ```bash
 yarn wipe:leveraged-position
-yarn wipe:univ3-positions
 yarn wipe:safe-debt-manager
 yarn wipe:safe-wrapper
+yarn wipe:yield-manager
 ```
 
 In short: use `wipe:all` for a clean redeploy of the whole Base deployment, and use `wipe` or a `wipe:*` shortcut only when you intentionally want to rerun one named future.
@@ -376,7 +422,7 @@ This script:
 
 ### Timelock Operations
 
-Critical `ProtocolRegistry` setters (`setParaswapV6`, `setOperator`) carry `CRITICAL_ROLE` and revert unless `msg.sender` is the timelock, so they must be scheduled and executed through the `TimelockController` (8-hour delay by default). Each script is a two-step flow: schedule, wait for the delay, then re-run with `EXECUTE=true` reusing the same `OPERATION_ID` printed during scheduling.
+Critical `ProtocolRegistry` setters (`setParaswapV6`, `setOperator`) carry `CRITICAL_ROLE` and revert unless `msg.sender` is the timelock, so they must be scheduled and executed through the `TimelockController` (2-day delay by default). Each script is a two-step flow: schedule, wait for the delay, then re-run with `EXECUTE=true` reusing the same `OPERATION_ID` printed during scheduling.
 
 #### Finding the TimelockController address
 
@@ -427,6 +473,17 @@ EXECUTE=true OPERATION_ID="..." TIMELOCK_ADDRESS=0x... PROTOCOL_REGISTRY_ADDRESS
 yarn hardhat run scripts/timelockUpdateOperator.ts --network base
 ```
 
+### Yield / LP Operations Scripts
+
+Operational scripts for driving a deployed `SafeYieldManager` from a user's own Safe (the `msg.sender == Safe` path of `onlyOperatorOrSafe`) live in `scripts/`:
+
+- `openLpBySafe.ts` — opens an LP position (Uniswap V3 / Aerodrome / Uniswap V4 pool params supported)
+- `closeLpBySafe.ts` — partial or full close
+- `collectLpBySafe.ts` — mid-position fee harvest
+- `switchLpBySafe.ts` — atomic move of a position to another allowed pool/protocol
+- `lpSafeShared.ts` — shared ABIs/helpers (no entry point)
+
+Each script documents its configuration constants in its header comment; set `SAFE_OWNER_PRIVATE_KEY` (or `DEPLOYER_PRIVATE_KEY`) in `.env` and run with `npx hardhat run scripts/<name>.ts --network base`.
 
 ## Security Features
 
@@ -434,7 +491,7 @@ The contracts include several security features:
 
 ### Access Control & Governance
 
-- **Timelock Controller**: 8-hour delay by default for critical operations (Paraswap and operator updates)
+- **Timelock Controller**: 2-day delay by default for critical operations (Paraswap and operator updates)
 - **Hybrid Access Control**:
     - `DEFAULT_ADMIN_ROLE`: For routine operations (immediate execution)
     - `CRITICAL_ROLE`: For critical operations (requires timelock)

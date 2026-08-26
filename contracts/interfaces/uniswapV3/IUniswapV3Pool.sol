@@ -46,4 +46,29 @@ interface IUniswapV3Pool {
 
     /// @notice The currently in-range liquidity available to the pool.
     function liquidity() external view returns (uint128);
+
+    /// @notice Cumulative tick and liquidity values at each `secondsAgos`.
+    /// @dev Reverts (`OLD`) when a requested point predates the oldest stored
+    ///      observation — the fail-closed signal that the window is not backed
+    ///      by recorded history.
+    function observe(
+        uint32[] calldata secondsAgos
+    ) external view returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s);
+
+    /// @notice A single stored observation.
+    /// @dev Needed to read the NEWEST observation's timestamp: `observe`
+    ///      values the span from that timestamp to now at the LIVE tick, so
+    ///      the age of this entry is exactly how much of the average is
+    ///      spot rather than history.
+    function observations(
+        uint256 index
+    )
+        external
+        view
+        returns (
+            uint32 blockTimestamp,
+            int56 tickCumulative,
+            uint160 secondsPerLiquidityCumulativeX128,
+            bool initialized
+        );
 }

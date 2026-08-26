@@ -1,0 +1,53 @@
+// Import and re-export shared constants from contractAddresses.ts
+export {
+    // Protocol addresses
+    UNISWAP_V3_FACTORY_ADDRESS,
+    AAVE_V3_POOL_ADDRESS,
+    AAVE_V3_DATA_PROVIDER_ADDRESS,
+    PARASWAP_V6_CONTRACT_ADDRESS,
+    // Token addresses
+    WETH_ADDRESS,
+    USDC_ADDRESS,
+    USDbC_ADDRESS,
+    cbETH_ADDRESS,
+    cbBTC_ADDRESS,
+    DAI_ADDRESS,
+    AERO_ADDRESS,
+    wstETH_ADDRESS,
+    rETH_ADDRESS,
+    weETH_ADDRESS,
+    EURC_ADDRESS,
+    GHO_ADDRESS,
+    wrsETH_ADDRESS,
+    WELL_ADDRESS,
+    USDS_ADDRESS,
+    tBTC_ADDRESS,
+    LBTC_ADDRESS,
+    VIRTUAL_ADDRESS,
+    eUSD_ADDRESS,
+    MAI_ADDRESS,
+    sUSDS_ADDRESS,
+    UNISWAP_V3_SWAP_ROUTER_ADDRESS,
+} from "../../contractAddresses";
+
+export const TEST_ADDRESS = "0x50fe1109188A0B666c4d78908E3E539D73F97E33";
+export const TEST_FEE_BENEFICIARY_ADDRESS = "0xF7A9C820e0dcE141AC2F56324697A9E8AA82F7Fa";
+
+// Uniswap v3 pools for flashloan
+export const ETH_USDbC_POOL = "0x3B8000CD10625ABdC7370fb47eD4D4a9C6311fD5"; // 0.01% fee
+export const EURC_USDC_POOL = "0x7279c08a36333e12c3fc81747963264c100d66fb"; // 0.05% fee
+export const GHO_USDC_POOL = "0xbaF56aeD39b4583c526971Ab51f8F2D4d8e59eb7"; // 0.3% fee
+export const cbETH_ETH_POOL = "0xA9DaFa443a02FBc907Cb0093276B3E6F4ef02A46";
+export const cbBTC_USDC_POOL = "0xE9e25E35aa99A2A60155010802b81A25C45bA185";
+export const ETH_USDC_POOL = "0xb4CB800910B228ED3d0834cF79D697127BBB00e5"; // 0.01% fee
+export const DAI_USDC_POOL = "0xC18F50d6A832f12F6DcAaeEe8D0c87A65B96787E";
+
+export enum DebtProtocols {
+    AAVE_V3 = 0,
+    COMPOUND = 1,
+    MORPHO = 2,
+    FLUID = 3,
+    MOONWELL = 4,
+}
+
+export const DEFAULT_SUPPLY_AMOUNT = "0.001";

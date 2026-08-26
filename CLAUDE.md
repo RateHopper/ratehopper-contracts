@@ -16,14 +16,23 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 ### Core Contracts
 
 - **SafeDebtManager.sol**: Main entry point for debt swaps via Gnosis Safe
+- **SafeYieldManager.sol**: Single Safe-module entry point for yield (LP) protocols; delegatecalls stateless yield handlers, shared state in ERC-7201 namespace (`YieldStorage`)
 - **LeveragedPosition.sol**: Creates leveraged positions across protocols
 - **ProtocolRegistry.sol**: Central registry for token mappings, operator, and protocol configs
-- **Types.sol**: Shared type definitions
+- **Types.sol**: Shared type definitions (`DebtProtocol` enum, `YIELD_PROTOCOL_*` uint8 id constants)
+- **RatehopperUniV3Positions.sol**: Legacy standalone yield module, deployed and serving existing positions; superseded by SafeYieldManager for new positions (coexistence — do not modify)
 
-### Protocol Handlers (`contracts/protocols/`, `contracts/protocolsSafe/`)
+### Protocol Handlers (`contracts/debt/handlers/`)
 
-- **AaveV3Handler.sol**, **CompoundHandler.sol**, **MoonwellHandler.sol**, **FluidSafeHandler.sol**
+- **AaveV3DebtHandler.sol**, **CompoundDebtHandler.sol**, **MorphoDebtHandler.sol**, **MoonwellDebtHandler.sol**, **FluidSafeDebtHandler.sol** extend **BaseDebtHandler.sol**
 - Each implements: `getDebtAmount`, `switchIn`, `switchFrom`, `switchTo`, `repay`
+
+### Yield Handlers (`contracts/yield/handlers/`)
+
+- **BaseYieldHandler.sol** owns the shared LP flow, protocol diffs in virtual hooks; **V3StyleYieldHandler.sol** implements the hooks against canonical Uniswap V3 interfaces (protocol id as constructor arg); **UniV3YieldHandler.sol** extends V3StyleYieldHandler, **AerodromeYieldHandler.sol** extends BaseYieldHandler directly
+- **UniV4YieldHandler.sol** implements `IYieldHandler` directly (V4 singleton/actions model doesn't fit the V3-shaped hooks): PoolKey pool params (`keccak256(poolParam)` == V4 PoolId), Permit2 two-step approvals, UniversalRouter swaps, native ETH pools supported; V4 math imported from exact-pinned npm packages (`@uniswap/v4-core@1.0.2`, `@uniswap/v4-periphery@1.0.3` — keep exact versions, no `^`); V4 interfaces remain hand-written minimal versions vendored under `contracts/interfaces/uniswapV4/` (do not replace with official interfaces — their `Currency`/`PositionInfo` types would leak into handler code)
+- Stateless delegatecall targets: MUST NOT declare storage variables; mutable state only via `YieldStorage._yieldStorage()`
+- Pool selection params are ABI-encoded bytes (`uint24` feeTier / `int24` tickSpacing / full V4 `PoolKey` tuple)
 
 ### Access Control
 
@@ -42,14 +51,14 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 
 ### Naming
 
-- Handlers: `<Protocol>Handler.sol`
+- Handlers: `<Protocol>DebtHandler.sol` (debt) / `<Protocol>YieldHandler.sol` (yield)
 - Interfaces: `I<ContractName>.sol`
-- Tests: `test/<feature>.ts`
+- Tests: `test/<area>/<feature>.ts` — areas: `debt/`, `registry/`, `yield/`, `legacy/` (deployed standalone modules), `helpers/` (fixtures/utils, no tests)
 
 ## Key Files
 
 - `contractAddresses.ts`: Token and protocol addresses
-- `test/constants.ts`, `test/utils.ts`, `test/deployUtils.ts`: Test helpers
+- `test/helpers/constants.ts`, `test/helpers/utils.ts`, `test/helpers/deployUtils.ts`: Test helpers
 
 ## Security Requirements
 

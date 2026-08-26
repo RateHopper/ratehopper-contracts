@@ -7,7 +7,7 @@
                 "type": "address"
             },
             {
-                "internalType": "enum Protocol[]",
+                "internalType": "enum DebtProtocol[]",
                 "name": "protocols",
                 "type": "uint8[]"
             },
@@ -179,7 +179,7 @@
             },
             {
                 "indexed": false,
-                "internalType": "enum Protocol",
+                "internalType": "enum DebtProtocol",
                 "name": "protocol",
                 "type": "uint8"
             },
@@ -228,7 +228,7 @@
             },
             {
                 "indexed": false,
-                "internalType": "enum Protocol",
+                "internalType": "enum DebtProtocol",
                 "name": "protocol",
                 "type": "uint8"
             },
@@ -316,7 +316,7 @@
         "inputs": [
             {
                 "indexed": true,
-                "internalType": "enum Protocol",
+                "internalType": "enum DebtProtocol",
                 "name": "protocol",
                 "type": "uint8"
             },
@@ -357,7 +357,7 @@
                 "type": "address"
             },
             {
-                "internalType": "enum Protocol",
+                "internalType": "enum DebtProtocol",
                 "name": "_protocol",
                 "type": "uint8"
             },
@@ -422,7 +422,7 @@
                 "type": "address"
             },
             {
-                "internalType": "enum Protocol",
+                "internalType": "enum DebtProtocol",
                 "name": "_protocol",
                 "type": "uint8"
             },
@@ -585,7 +585,7 @@
     {
         "inputs": [
             {
-                "internalType": "enum Protocol",
+                "internalType": "enum DebtProtocol",
                 "name": "",
                 "type": "uint8"
             }
@@ -650,7 +650,7 @@
     {
         "inputs": [
             {
-                "internalType": "enum Protocol",
+                "internalType": "enum DebtProtocol",
                 "name": "_protocol",
                 "type": "uint8"
             },
