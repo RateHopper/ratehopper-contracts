@@ -233,6 +233,21 @@ contract MockBlindYieldHandler {
     }
 }
 
+/// @notice Handler stand-in whose pool-param views revert WITH a reason,
+///         proving the manager bubbles a handler's own revert data instead of
+///         masking it as `HandlerCallFailed`.
+contract MockLoudYieldHandler {
+    uint8 public immutable PROTOCOL;
+
+    constructor(uint8 _protocol) {
+        PROTOCOL = _protocol;
+    }
+
+    function poolParamHasHooks(bytes calldata) external pure returns (bool) {
+        revert("loud handler");
+    }
+}
+
 /// @notice Mirrors SwapRouter02's `exactInputSingle` selector (0x04e45aaf).
 ///         Pulls `amountIn` of `tokenIn` from the caller (the Safe) and pays a
 ///         configurable `output` of `tokenOut` to the recipient. `output == 0`

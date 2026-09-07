@@ -454,6 +454,12 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                     f.pauser.address,
                 ),
             ).to.be.revertedWithCustomError(f.manager, "HookedPoolParamNeedsTimelock");
+            await expect(
+                f.manager.connect(f.deployer).allowHookedPoolParam(UNISWAP_V4, hooked),
+            ).to.be.revertedWithCustomError(f.manager, "OnlyTimelock");
+            await expect(
+                timelockCall(f.timelock, f.manager, "allowHookedPoolParam", [99, hooked]),
+            ).to.be.revertedWithCustomError(f.manager, "HandlerNotSet");
 
             await expect(timelockCall(f.timelock, f.manager, "allowHookedPoolParam", [UNISWAP_V4, hooked]))
                 .to.emit(f.manager, "PoolParamAllowedUpdated")

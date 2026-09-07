@@ -2279,6 +2279,17 @@ describe("SafeYieldManager", function () {
             ).to.be.revertedWithCustomError(manager, "HandlerCallFailed");
         });
 
+        it("bubbles a handler view's own revert reason when allow-listing", async function () {
+            const { manager, deployer, timelock } = await loadFixture(deployYieldManagerHarness);
+            const Loud = await ethers.getContractFactory("MockLoudYieldHandler");
+            const loud = await Loud.deploy(3);
+            await loud.waitForDeployment();
+            await (await timelockCall(timelock, manager, "setYieldHandler", [3, await loud.getAddress()])).wait();
+            await expect(manager.connect(deployer).setPoolParamAllowed(3, FEE_TIER, true)).to.be.revertedWith(
+                "loud handler",
+            );
+        });
+
         it("wraps an empty poolTokens revert in HandlerCallFailed when allow-listing", async function () {
             const { manager, deployer, timelock } = await loadFixture(deployYieldManagerHarness);
             const Blind = await ethers.getContractFactory("MockBlindYieldHandler");
