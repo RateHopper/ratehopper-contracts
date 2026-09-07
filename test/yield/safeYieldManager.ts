@@ -755,6 +755,36 @@ describe("SafeYieldManager", function () {
                 .withArgs(safeAddr, 1n, 10_000n);
             expect(await usdc.balanceOf(treasury.address)).to.equal(0);
         });
+
+        it("M-1: keeps the USDC exit working after the swap leg's pool param is de-listed", async function () {
+            const { manager, operatorEOA, deployer, safeAddr, uniNpm, uniRouter } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, BAD_FEE_TIER, true)).wait();
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, FEE_TIER, false)).wait();
+            expect(await manager.isPoolParamAllowed(UNISWAP_V3, FEE_TIER)).to.equal(false);
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .openLp(UNISWAP_V3, openParams(safeAddr, BAD_FEE_TIER, { swap0: leg(WETH_OUT, FEE_TIER) })),
+            ).to.be.revertedWithCustomError(manager, "PoolParamNotAllowed");
+
+            await (await uniNpm.setOwed(1, 100_000n, 0)).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .collectLp(
+                        UNISWAP_V3,
+                        collectParams(safeAddr, 1, FEE_TIER, { swapFeesToUsdc: true, swap0: leg(0, FEE_TIER) }),
+                    ),
+            ).to.emit(manager, "FeesCollected");
+            await (await uniRouter.setOutput(600_000n)).wait();
+            await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER))).to.emit(
+                manager,
+                "PositionClosed",
+            );
+        });
     });
 
     describe("collectLp", function () {
@@ -1316,10 +1346,9 @@ describe("SafeYieldManager", function () {
             expect(await clNpm.ownerOf(1)).to.equal(stakePoolAddr);
         });
 
-        it("swaps the claimed stakePool reward to USDC when swapRewardToUsdc is set", async function () {
+        it("swaps the claimed stakePool reward to USDC through a pool param that is not allow-listed (M-1)", async function () {
             const {
                 manager,
-                deployer,
                 timelock,
                 operatorEOA,
                 safeAddr,
@@ -1335,7 +1364,8 @@ describe("SafeYieldManager", function () {
             const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
 
             // Arm the stakePool with a mock AERO payout and give the reward its own
-            // allowed AERO/USDC pool so the swap leg validates.
+            // AERO/USDC pool: exit legs need a route and a reference, not an
+            // allow-list entry.
             const ERC = await ethers.getContractFactory("MockERC20");
             const aero = await ERC.deploy("Mock Aero", "AERO", 18);
             await aero.waitForDeployment();
@@ -1364,7 +1394,7 @@ describe("SafeYieldManager", function () {
                     TWAP_CARDINALITY,
                 ])
             ).wait();
-            await (await manager.connect(deployer).setPoolParamAllowed(AERODROME, AERO_PARAM, true)).wait();
+            expect(await manager.isPoolParamAllowed(AERODROME, AERO_PARAM)).to.equal(false);
             await (await clRouter.setOutputFor(usdcAddr, 123_456n)).wait();
 
             await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));

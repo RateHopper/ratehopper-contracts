@@ -777,6 +777,27 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 .to.be.revertedWithCustomError(v4Handler, "ModuleCallFailed")
                 .withArgs(60);
         });
+
+        it("M-1: keeps the V4 USDC exit working after the swap leg's pool key is de-listed", async function () {
+            const ctx = await openedFixture();
+            const { manager, operatorEOA, deployer, safeAddr, v4Pm } = ctx;
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V4, V4_KEY, false)).wait();
+            expect(await manager.isPoolParamAllowed(UNISWAP_V4, V4_KEY)).to.equal(false);
+
+            await (await v4Pm.setOwed(1, 40_000n, 0n)).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .collectLp(
+                        UNISWAP_V4,
+                        collectParams(safeAddr, 1, V4_KEY, { swapFeesToUsdc: true, swap0: leg(0, V4_KEY) }),
+                    ),
+            ).to.emit(manager, "FeesCollected");
+            await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY))).to.emit(
+                manager,
+                "PositionClosed",
+            );
+        });
     });
 
     describe("closeLp (native ETH pair)", function () {

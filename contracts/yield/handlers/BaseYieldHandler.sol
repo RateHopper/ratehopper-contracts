@@ -533,6 +533,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     ) internal returns (uint256 received) {
         if (token == address(USDC)) return halfUsdc;
 
+        // Allow-list membership is an open-side check only (see `_validateSwapLeg`).
+        _validatePoolParamAllowed(leg.poolParam);
         _validateSwapLeg(token, leg, p.slippageBps);
         // Only consume tokens produced by this call, never pre-existing ones.
         uint256 balanceBefore = IERC20(token).balanceOf(p.onBehalfOf);
@@ -716,16 +718,18 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         }
     }
 
-    /// @dev Route checks only: the leg's pool param must be allow-listed and
-    ///      must resolve to a pool that actually trades {token, USDC}. The USDC
-    ///      side of a pair has no swap, so its (ignored) leg is not validated.
+    /// @dev Route checks only: the leg's pool param must resolve to a pool that
+    ///      actually trades {token, USDC} and clears the liquidity floor. The
+    ///      USDC side of a pair has no swap, so its (ignored) leg is not
+    ///      validated. Allow-list membership is checked by opens only
+    ///      (`_acquireSide`): exits must survive a de-listing, and the price is
+    ///      protected by the TWAP floor, not the allow-list (SECURITY_MODEL.md).
     ///      The PRICE check is not here — it needs the input amount, which is
     ///      only known at the swap itself, so it lives in `_swapViaSafe`.
     function _validateSwapLeg(address token, SwapLeg calldata leg, uint16 slippageBps) internal view {
         if (token == address(USDC)) return;
         if (slippageBps == 0) revert SlippageTooLow();
         if (slippageBps > _yieldStorage().maxSlippageBps) revert SlippageAboveMax();
-        _validatePoolParamAllowed(leg.poolParam);
         (address expect0, address expect1) = token < address(USDC) ? (token, address(USDC)) : (address(USDC), token);
         _validatePool(_getPool(leg.poolParam), expect0, expect1);
     }

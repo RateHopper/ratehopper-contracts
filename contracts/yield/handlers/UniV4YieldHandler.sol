@@ -470,6 +470,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     ) internal returns (uint256 received) {
         if (currency == address(USDC)) return halfUsdc;
 
+        // Allow-list membership is an open-side check only (see `_validateSwapLeg`).
+        _validatePoolParamAllowed(leg.poolParam);
         _validateSwapLeg(currency, leg, p.slippageBps);
         // Only consume tokens produced by this call, never pre-existing ones.
         uint256 balanceBefore = _balanceOf(currency, p.onBehalfOf);
@@ -734,16 +736,18 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         if (floor > 0 && STATE_VIEW.getLiquidity(poolId) < floor) revert PoolTooThin();
     }
 
-    /// @dev Route checks only: allow-listed pool param, resolving to a pool
-    ///      that actually trades {currency, USDC} (native ETH sorts first:
-    ///      address(0) < any token). The USDC side of a pair has no swap, so
-    ///      its (ignored) leg is not validated. The PRICE check needs the input
+    /// @dev Route checks only: a hookless, initialized pool above the liquidity
+    ///      floor that actually trades {currency, USDC} (native ETH sorts
+    ///      first: address(0) < any token). The USDC side of a pair has no
+    ///      swap, so its (ignored) leg is not validated. Allow-list membership
+    ///      is checked by opens only (`_acquireSide`): exits must survive a
+    ///      de-listing, and the price is protected by the TWAP floor, not the
+    ///      allow-list (SECURITY_MODEL.md). The PRICE check needs the input
     ///      amount and so lives in `_swapV4ViaSafe`.
     function _validateSwapLeg(address currency, SwapLeg calldata leg, uint16 slippageBps) internal view {
         if (currency == address(USDC)) return;
         if (slippageBps == 0) revert SlippageTooLow();
         if (slippageBps > _yieldStorage().maxSlippageBps) revert SlippageAboveMax();
-        _validatePoolParamAllowed(leg.poolParam);
         (address expect0, address expect1) = currency < address(USDC)
             ? (currency, address(USDC))
             : (address(USDC), currency);

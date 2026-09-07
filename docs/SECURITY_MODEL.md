@@ -148,6 +148,17 @@ replacement is executed, `withdrawLp` remains available. `twapMinimumOut`
 exposes the exact contract-derived floor for operations and deployment
 verification.
 
+The allow-list gates OPENS only. An exit's swap leg (`closeLp`, the
+`collectLp` swap path) is validated for pair shape, the per-protocol
+`minPoolLiquidity` floor (zero, i.e. disabled, in the shipped deployment) and
+the reference-TWAP floor, but not for allow-list membership. The TWAP floor is
+what protects the price: whatever pool the leg names, the Safe receives at
+least `slippageBps` below the 30-minute TWAP value, which is the same ceiling
+an allow-listed pool already had under a sandwich. Requiring membership would
+let a routine de-listing brick the USDC exit of every position that used that
+pool. A dynamic exit delta whose floor rounds to zero stays on the Safe in kind
+rather than failing the exit — the same rule the harvest paths already follow.
+
 ### `withdrawLp`: the exit that reads no price
 
 Flooring `closeLp` on an oracle would otherwise mean a broken reference strands
