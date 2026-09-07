@@ -218,6 +218,21 @@ contract MockRevertingYieldHandler {
     }
 }
 
+/// @notice Handler stand-in whose `poolTokens` reverts with EMPTY returndata,
+///         driving SafeYieldManager's `HandlerCallFailed` fallback in the
+///         staticcall path (`_decodePoolTokens`).
+contract MockBlindYieldHandler {
+    uint8 public immutable PROTOCOL;
+
+    constructor(uint8 _protocol) {
+        PROTOCOL = _protocol;
+    }
+
+    function poolTokens(bytes calldata) external pure returns (address, address) {
+        revert();
+    }
+}
+
 /// @notice Mirrors SwapRouter02's `exactInputSingle` selector (0x04e45aaf).
 ///         Pulls `amountIn` of `tokenIn` from the caller (the Safe) and pays a
 ///         configurable `output` of `tokenOut` to the recipient. `output == 0`
@@ -572,6 +587,15 @@ contract MockERC721 {
 /// accepts a contract exposing a non-zero getMinDelay; tests use this helper
 /// to exercise the caller-is-timelock boundary without waiting for wall-clock
 /// delay in every setter test.
+/// @notice A "timelock" that reports no delay at all, for the constructor's
+///         `minDelay == 0` rejection (MockTimelockController refuses to be
+///         built with zero).
+contract MockZeroDelayTimelock {
+    function getMinDelay() external pure returns (uint256) {
+        return 0;
+    }
+}
+
 contract MockTimelockController {
     uint256 public immutable minDelay;
 

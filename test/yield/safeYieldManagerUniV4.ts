@@ -718,6 +718,16 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             expect(await universalRouter.lastAmountOutMinimum()).to.equal(floor);
         });
 
+        it("refuses an open leg whose reference floor rounds to zero", async function () {
+            const { manager, operatorEOA, safeAddr, uniPool, v4Handler } = await loadFixture(deployUniV4Harness);
+            await (await uniPool.setTwapTick(800_000)).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(0, V4_KEY) })),
+            ).to.be.revertedWithCustomError(v4Handler, "InvalidSwapAmountOutMin");
+        });
+
         it("maps module-call failures to their step codes", async function () {
             const { manager, operatorEOA, safeAddr, safe, usdcAddr, permit2, universalRouter, v4Pm, v4Handler } =
                 await loadFixture(deployUniV4Harness);
