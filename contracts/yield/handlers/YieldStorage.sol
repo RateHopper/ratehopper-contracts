@@ -143,6 +143,16 @@ abstract contract YieldStorage {
         uint256 grossReward,
         uint256 feePaid
     );
+    /// @notice A partial close left the surviving position on the Safe unstaked
+    ///         (pin cleared) because its stake pool no longer accepts deposits.
+    ///         The module has no re-stake path: a Safe that re-stakes by hand
+    ///         must unstake by hand before closing through the module again.
+    event RestakeSkipped(
+        address indexed onBehalfOf,
+        uint8 indexed protocol,
+        uint256 indexed tokenId,
+        address stakePool
+    );
     event FeeTransferFailed(address indexed onBehalfOf, uint256 indexed tokenId, uint128 feeUsd6);
     event CollectFeeTransferFailed(
         address indexed onBehalfOf,

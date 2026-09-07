@@ -1600,6 +1600,54 @@ describe("SafeYieldManager", function () {
             expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(stakePoolAddr);
         });
 
+        it("M-3: skips the restake and clears the pin when the gauge was killed", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, clRouter, voter } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+
+            await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
+            const liquidityBefore = (await clNpm.positionsData(1))[4];
+            await (await clRouter.setOutput(300_000n)).wait();
+            await (await voter.killGauge(stakePoolAddr)).wait();
+            await (await stakePool.setDepositFails(true)).wait();
+
+            await expect(
+                manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, {
+                        exitBps: 5_000,
+                        swap0: leg(300_000n, TICK_SPACING),
+                    }),
+                ),
+            )
+                .to.emit(manager, "RestakeSkipped")
+                .withArgs(safeAddr, AERODROME, 1n, stakePoolAddr);
+
+            expect(await clNpm.ownerOf(1)).to.equal(safeAddr);
+            expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(ZERO);
+            expect((await clNpm.positionsData(1))[4]).to.equal(liquidityBefore / 2n);
+
+            await expect(
+                manager.connect(operatorEOA).collectLp(AERODROME, collectParams(safeAddr, 1, TICK_SPACING)),
+            ).to.emit(manager, "FeesCollected");
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING, { swap0: leg(300_000n, TICK_SPACING) })),
+            ).to.emit(manager, "PositionClosed");
+        });
+
+        it("M-3: refuses to stake into a killed gauge at open", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, voter, aeroHandler } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+            await (await voter.killGauge(stakePoolAddr)).wait();
+
+            await expect(
+                manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true })),
+            ).to.be.revertedWithCustomError(aeroHandler, "StakingNotSupported");
+        });
+
         // M-03: emissions are fee-bearing yield on EVERY route that can claim them
         // — an explicit collect, and the gauge withdrawal inside a close or switch.
         describe("staked reward fee (M-03)", function () {

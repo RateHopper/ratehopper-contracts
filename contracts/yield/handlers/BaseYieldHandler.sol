@@ -63,8 +63,9 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
     error OnlyDelegatecall();
     error TokenApprovalFailed(address token);
-    /// @notice Thrown when `OpenLpParams.stake` is set for a protocol
-    ///         whose handler has no stakePool (e.g. Uniswap V3).
+    /// @notice Thrown when `OpenLpParams.stake` is set for a protocol whose
+    ///         handler has no stakePool (e.g. Uniswap V3) or whose stakePool
+    ///         no longer accepts deposits (`_stakePoolAcceptsDeposits`).
     error StakingNotSupported();
 
     /// @dev Inputs for `_mintFromAmounts`, the mint half shared by `openLp`
@@ -170,6 +171,16 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     ///      staked. Only reached for protocols that staked in the first place.
     function _restakeInto(address /* _onBehalfOf */, uint256 /* tokenId */, address /* stakePool */) internal virtual {
         revert StakingNotSupported();
+    }
+
+    /// @dev Whether `stakePool` still takes deposits. A gauge that governance
+    ///      has killed keeps honouring withdrawals but rejects deposits, so a
+    ///      partial close must not try to put the surviving NFT back — the
+    ///      restake would revert and strand the position behind the very exit
+    ///      meant to free it. Default: always. Aerodrome overrides it with the
+    ///      Voter's liveness flag.
+    function _stakePoolAcceptsDeposits(address /* stakePool */) internal view virtual returns (bool) {
+        return true;
     }
 
     /// @dev Forget which pool a position was staked in. Full close only — the NFT
@@ -356,11 +367,16 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         // matching reality. A full close burned the NFT, so the pin is dropped.
         // A restake failure reverts the whole close — a half-closed, unstaked
         // position with a live pin is exactly the divergence this guards against.
+        // A pool that no longer takes deposits (`_stakePoolAcceptsDeposits`) is
+        // the one exception: nothing to restake into, so the pin is dropped.
         if (unstakedFrom != address(0)) {
             if (p.exitBps == 10_000) {
                 _clearStakePin(p.tokenId);
-            } else {
+            } else if (_stakePoolAcceptsDeposits(unstakedFrom)) {
                 _restakeInto(p.onBehalfOf, p.tokenId, unstakedFrom);
+            } else {
+                _clearStakePin(p.tokenId);
+                emit RestakeSkipped(p.onBehalfOf, PROTOCOL, p.tokenId, unstakedFrom);
             }
         }
 

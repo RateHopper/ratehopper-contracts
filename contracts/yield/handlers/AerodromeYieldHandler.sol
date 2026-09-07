@@ -37,12 +37,17 @@ contract AerodromeYieldHandler is BaseYieldHandler {
 
     /// @dev Stake the minted Slipstream NFT into its pool's stake pool (resolved
     ///      via the Voter) for AERO emissions: the Safe approves the stakePool for
-    ///      the NFT, then deposits. Reverts if the pool has no stakePool.
+    ///      the NFT, then deposits. Reverts if the pool has no live stakePool.
     function _stake(address _onBehalfOf, uint256 tokenId, bytes memory lpPoolParam) internal override {
         address stakePool = VOTER.gauges(_getPool(lpPoolParam));
-        if (stakePool == address(0)) revert StakingNotSupported();
+        if (stakePool == address(0) || !_stakePoolAcceptsDeposits(stakePool)) revert StakingNotSupported();
         _restakeInto(_onBehalfOf, tokenId, stakePool);
         _yieldStorage().stakePoolOf[PROTOCOL][tokenId] = stakePool;
+    }
+
+    /// @dev The Voter's liveness flag: a killed gauge reverts `deposit` ("GK").
+    function _stakePoolAcceptsDeposits(address stakePool) internal view override returns (bool) {
+        return VOTER.isAlive(stakePool);
     }
 
     /// @dev Deposit `tokenId` into `stakePool`. Shared by the initial stake and by
