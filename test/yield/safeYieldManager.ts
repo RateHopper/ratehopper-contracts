@@ -2321,6 +2321,34 @@ describe("SafeYieldManager", function () {
             expect((await usdc.balanceOf(safeAddr)) - safeUsdcBefore).to.equal(40_000n);
         });
 
+        it("L-5: skims the collect fee from a no-return token, and still waives it on a real failure", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, usdcAddr, uniNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            const NoReturn = await ethers.getContractFactory("MockNoReturnERC20");
+            const usdt = await NoReturn.deploy();
+            await usdt.waitForDeployment();
+            const usdtAddr = await usdt.getAddress();
+            await (await usdt.mint(await uniNpm.getAddress(), 10n ** 12n)).wait();
+
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniNpm.setTokens(1, usdtAddr, usdcAddr)).wait();
+            await (await uniNpm.setOwed(1, 100_000n, 0)).wait();
+
+            await expect(manager.connect(operatorEOA).collectLp(UNISWAP_V3, collectParams(safeAddr, 1, FEE_TIER)))
+                .to.emit(manager, "FeesCollected")
+                .withArgs(safeAddr, UNISWAP_V3, 1n, usdtAddr, 100_000n, 2_500n, usdcAddr, 0n, 0n);
+            expect(await usdt.balanceOf(treasury.address)).to.equal(2_500n);
+            expect(await usdt.balanceOf(safeAddr)).to.equal(97_500n);
+
+            await (await uniNpm.setOwed(1, 100_000n, 0)).wait();
+            await (await usdt.setRevertTransferTo(treasury.address)).wait();
+            await expect(manager.connect(operatorEOA).collectLp(UNISWAP_V3, collectParams(safeAddr, 1, FEE_TIER)))
+                .to.emit(manager, "CollectFeeTransferFailed")
+                .withArgs(safeAddr, 1n, usdtAddr, 2_500n);
+            expect(await usdt.balanceOf(treasury.address)).to.equal(2_500n);
+            expect(await usdt.balanceOf(safeAddr)).to.equal(197_500n);
+        });
+
         it("forwards nothing to the Safe when feeCollectBps consumes the whole harvest", async function () {
             const f = await loadFixture(deployYieldManagerHarness);
             const Manager = await ethers.getContractFactory("SafeYieldManager");

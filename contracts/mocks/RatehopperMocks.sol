@@ -89,6 +89,28 @@ contract MockERC20 is IERC20 {
     }
 }
 
+/// @notice USDT-shaped ERC20: `transfer` returns NO data. Only the surface the
+///         collect-fee skim touches.
+contract MockNoReturnERC20 {
+    mapping(address => uint256) public balanceOf;
+    address public revertTransferTo;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+    }
+
+    function setRevertTransferTo(address account) external {
+        revertTransferTo = account;
+    }
+
+    function transfer(address to, uint256 amount) external {
+        require(to != revertTransferTo, "blacklisted");
+        require(balanceOf[msg.sender] >= amount, "ERC20: balance");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+    }
+}
+
 /// @notice WETH9-shaped MockERC20: payable `deposit` mints against received
 ///         ETH, `withdraw` burns and sends ETH back — the wrap/unwrap surface
 ///         the V4 handler's in-kind switch legs use.
@@ -483,8 +505,16 @@ contract MockNonfungiblePositionManager {
         amount1 = p.owed1;
         p.owed0 = 0;
         p.owed1 = 0;
-        if (amount0 > 0) IERC20(p.token0).transfer(params.recipient, amount0);
-        if (amount1 > 0) IERC20(p.token1).transfer(params.recipient, amount1);
+        if (amount0 > 0) _pay(p.token0, params.recipient, amount0);
+        if (amount1 > 0) _pay(p.token1, params.recipient, amount1);
+    }
+
+    /// @dev Raw transfer so a no-return token (MockNoReturnERC20) can be paid
+    ///      out like the real position manager does; the return value was
+    ///      never inspected here anyway.
+    function _pay(address token, address to, uint256 amount) internal {
+        (bool ok, ) = token.call(abi.encodeCall(IERC20.transfer, (to, amount)));
+        require(ok, "mock transfer failed");
     }
 
     function decreaseLiquidity(

@@ -633,6 +633,10 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev Skim `feeCollectBps` to the treasury, forward the rest to the
     ///      Safe. Treasury transfer failure waives the fee instead of
     ///      blocking users (e.g. USDC blacklist on the treasury).
+    ///      The skim uses SafeERC20's non-reverting variant rather than a typed
+    ///      `try`: a no-return token (USDT-style) makes the typed call's
+    ///      returndata decode fail, and THAT failure is not caught by `catch` —
+    ///      it reverts the harvest after the treasury was already paid.
     function _chargeCollectFee(
         address token,
         uint256 amount,
@@ -642,20 +646,11 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         if (amount == 0) return 0;
         YieldLayout storage $ = _yieldStorage();
         fee = (amount * $.feeCollectBps) / 10_000;
-        uint256 toSafe = amount;
-        if (fee > 0) {
-            try IERC20(token).transfer($.treasury, fee) returns (bool ok) {
-                if (ok) {
-                    toSafe = amount - fee;
-                } else {
-                    emit CollectFeeTransferFailed(_onBehalfOf, tokenId, token, fee);
-                    fee = 0;
-                }
-            } catch {
-                emit CollectFeeTransferFailed(_onBehalfOf, tokenId, token, fee);
-                fee = 0;
-            }
+        if (fee > 0 && !IERC20(token).trySafeTransfer($.treasury, fee)) {
+            emit CollectFeeTransferFailed(_onBehalfOf, tokenId, token, fee);
+            fee = 0;
         }
+        uint256 toSafe = amount - fee;
         if (toSafe > 0) IERC20(token).safeTransfer(_onBehalfOf, toSafe);
     }
 
