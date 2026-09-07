@@ -472,6 +472,60 @@ describe("Safe wallet should debtSwap", function () {
                     },
                 );
             });
+
+            it("from market 1 to market 2 with a partial amount", async function () {
+                await supplyAndBorrow(DebtProtocols.MORPHO);
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    DebtProtocols.MORPHO,
+                    DebtProtocols.MORPHO,
+                    cbETH_ADDRESS,
+                    {
+                        morphoFromMarketId: morphoMarket1Id,
+                        morphoToMarketId: morphoMarket2Id,
+                        debtAmountBps: 5_000,
+                        collateralBps: 5_000,
+                    },
+                );
+            });
+
+            it("from market 1 to market 2 with a partial amount repaid by assets (no shares in extraData)", async function () {
+                await supplyAndBorrow(DebtProtocols.MORPHO);
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    DebtProtocols.MORPHO,
+                    DebtProtocols.MORPHO,
+                    cbETH_ADDRESS,
+                    {
+                        morphoFromMarketId: morphoMarket1Id,
+                        morphoToMarketId: morphoMarket2Id,
+                        debtAmountBps: 5_000,
+                        collateralBps: 5_000,
+                        morphoRepayByAssets: true,
+                    },
+                );
+            });
+
+            it("from market 1 to market 2 in full after a day of unaccrued interest", async function () {
+                await supplyAndBorrow(DebtProtocols.MORPHO);
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    DebtProtocols.MORPHO,
+                    DebtProtocols.MORPHO,
+                    cbETH_ADDRESS,
+                    {
+                        morphoFromMarketId: morphoMarket1Id,
+                        morphoToMarketId: morphoMarket2Id,
+                        idleSeconds: 86_400,
+                    },
+                );
+            });
         });
 
         // we don't support DAI anymore
@@ -1794,7 +1848,11 @@ describe("Safe wallet should debtSwap", function () {
             fromFluidVaultAddress?: string;
             tofluidVaultAddress?: string;
             randomizeDebtAmount?: boolean;
+            debtAmountBps?: number;
             useMaxCollateral?: boolean;
+            collateralBps?: number;
+            morphoRepayByAssets?: boolean;
+            idleSeconds?: number;
             preferredDEX?: string;
         } = {
             useMaxAmount: true,
@@ -1841,12 +1899,13 @@ describe("Safe wallet should debtSwap", function () {
             // Keep the fuzzed amount non-zero and quote the same amount that will be swapped.
             actualDebtAmount = 1n + BigInt(Math.floor(Math.random() * Number(srcDebtBefore - 1n)));
         }
+        if (options.debtAmountBps !== undefined) {
+            actualDebtAmount = (srcDebtBefore * BigInt(options.debtAmountBps)) / 10_000n;
+        }
 
+        const useMaxAmount = options.useMaxAmount !== false && options.debtAmountBps === undefined;
         // Add 0.001% of initial amount (rounded up) for non-max amounts
-        const debtAmount =
-            options.useMaxAmount !== false
-                ? MaxUint256
-                : actualDebtAmount + (actualDebtAmount * 1n + 9_999n) / 1_000_000n;
+        const debtAmount = useMaxAmount ? MaxUint256 : actualDebtAmount + (actualDebtAmount * 1n + 9_999n) / 1_000_000n;
 
         // get paraswap data
         let paraswapData = {
@@ -1935,7 +1994,9 @@ describe("Safe wallet should debtSwap", function () {
             case DebtProtocols.MORPHO:
                 await helpers.morphoAuthorizeTxBySafe();
 
-                const borrowShares = await fromHelper.getBorrowShares(options!.morphoFromMarketId!, safeAddress);
+                const borrowShares = options.morphoRepayByAssets
+                    ? 0n
+                    : await fromHelper.getBorrowShares(options!.morphoFromMarketId!, safeAddress);
 
                 fromExtraData = fromHelper.encodeExtraData(options!.morphoFromMarketId!, borrowShares);
                 break;
@@ -2029,7 +2090,11 @@ describe("Safe wallet should debtSwap", function () {
         }
 
         // Build collateralArray (supports multiple collaterals)
-        const finalCollateralAmount = options.useMaxCollateral ? MaxUint256 : collateralAmount;
+        const finalCollateralAmount = options.useMaxCollateral
+            ? MaxUint256
+            : options.collateralBps !== undefined
+              ? (collateralAmount * BigInt(options.collateralBps)) / 10_000n
+              : collateralAmount;
         const collateralArray = options.anotherCollateralTokenAddress
             ? [
                   { asset: collateralTokenAddress, amount: finalCollateralAmount },
@@ -2041,7 +2106,7 @@ describe("Safe wallet should debtSwap", function () {
             : [{ asset: collateralTokenAddress, amount: finalCollateralAmount }];
 
         // simulate waiting for user's confirmation
-        await time.increaseTo((await time.latest()) + 60);
+        await time.increaseTo((await time.latest()) + (options.idleSeconds ?? 60));
 
         // Create Safe transaction for executeDebtSwap
         const executeDebtSwapTxData: MetaTransactionData = {
@@ -2112,6 +2177,12 @@ describe("Safe wallet should debtSwap", function () {
         if (!options.randomizeDebtAmount) {
             expect(srcDebtAfter).to.be.lt(srcDebtBefore);
             expect(dstDebtAfter).to.be.gt(dstDebtBefore);
+        }
+        if (options.debtAmountBps !== undefined) {
+            expect(srcDebtAfter).to.be.closeTo(srcDebtBefore - actualDebtAmount, actualDebtAmount / 100n);
+        }
+        if (useMaxAmount && fromProtocol === DebtProtocols.MORPHO) {
+            expect(srcDebtAfter).to.equal(0n);
         }
     }
 

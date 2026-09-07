@@ -25,14 +25,19 @@ contract MorphoDebtHandler is BaseDebtHandler {
         morpho = IMorpho(_MORPHO_ADDRESS);
     }
 
+    /// @dev Accrues interest first (IDebtHandler declares this non-view for that
+    ///      reason, as Moonwell's handler does): the stored totals lag by the
+    ///      interest since `lastUpdate`, which on a quiet market is far more than
+    ///      the +1 buffer, so a full-close flash sized from them would no longer
+    ///      cover every share once `switchFrom` repays.
     function getDebtAmount(
         address /* asset */,
         address /* onBehalfOf */,
         bytes calldata fromExtraData
-    ) public view returns (uint256) {
+    ) external returns (uint256) {
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(fromExtraData, (MarketParams, uint256));
-        Id marketId = marketParams.id();
-        Market memory m = morpho.market(marketId);
+        morpho.accrueInterest(marketParams);
+        Market memory m = morpho.market(marketParams.id());
         return borrowShares.toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares) + 1;
     }
 
@@ -66,13 +71,23 @@ contract MorphoDebtHandler is BaseDebtHandler {
 
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(extraData, (MarketParams, uint256));
         require(marketParams.loanToken == fromAsset, "fromAsset mismatch with marketParams in extraData");
+        Id marketId = marketParams.id();
 
-        IERC20(fromAsset).forceApprove(address(morpho), amount + (amount / 100));
-        morpho.repay(marketParams, 0, borrowShares, onBehalfOf, "");
+        // Repay by shares (the exact, dust-free full close) only when `amount` —
+        // all the flash loan delivered — covers every share after accrual;
+        // otherwise this is a partial migration and repays exactly `amount`.
+        bool fullClose = false;
+        if (borrowShares > 0) {
+            morpho.accrueInterest(marketParams);
+            Market memory m = morpho.market(marketId);
+            fullClose = amount >= borrowShares.toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares);
+        }
+
+        IERC20(fromAsset).forceApprove(address(morpho), amount);
+        morpho.repay(marketParams, fullClose ? 0 : amount, fullClose ? borrowShares : 0, onBehalfOf, "");
 
         uint256 withdrawAmount = collateralAssets[0].amount;
         if (withdrawAmount == type(uint256).max) {
-            Id marketId = marketParams.id();
             Position memory pos = morpho.position(marketId, onBehalfOf);
             withdrawAmount = uint256(pos.collateral);
             require(withdrawAmount > 0, "No collateral available to withdraw");
@@ -182,6 +197,7 @@ contract MorphoDebtHandler is BaseDebtHandler {
 
         uint256 withdrawAmount = amount;
         if (amount == type(uint256).max) {
+            morpho.accrueInterest(marketParams);
             withdrawAmount = _calculateMaxWithdrawAmount(marketParams, onBehalfOf);
             require(withdrawAmount > 0, "No collateral available to withdraw");
         }
