@@ -123,7 +123,8 @@ export function encodeAerodromePoolParam(token0: string, token1: string, tickSpa
 
 // Uniswap V4 pool param is the full PoolKey tuple, so keccak256 of it IS the
 // V4 PoolId. Native ETH pools use currency0 = ZeroAddress; hookless pools use
-// hooks = ZeroAddress (hooked pools are gated by the admin allow-list only).
+// hooks = ZeroAddress (a hooked key is admitted only through the timelocked
+// SafeYieldManager.allowHookedPoolParam).
 export function encodeUniV4PoolParam(
     currency0: string,
     currency1: string,

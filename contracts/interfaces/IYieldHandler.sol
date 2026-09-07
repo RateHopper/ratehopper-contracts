@@ -132,6 +132,13 @@ interface IYieldHandler {
     ///         `token0` may be address(0) — the native-ETH currency sentinel.
     function poolTokens(bytes calldata lpPoolParam) external pure returns (address token0, address token1);
 
+    /// @notice Whether the pool named by `lpPoolParam` runs third-party hook
+    ///         code on its liquidity and swap paths (Uniswap V4 hooks). A hook
+    ///         also runs inside the oracle-free `withdrawLp` exit, so the
+    ///         manager admits such a pool only through the timelock. Protocols
+    ///         without hooks always return false.
+    function poolParamHasHooks(bytes calldata lpPoolParam) external pure returns (bool);
+
     /// @return tokenId   Newly minted LP NFT id (owned by the Safe).
     /// @return basisUsd6 USDC-equivalent value of the freshly minted LP.
     /// @return used0     token0 consumed by the mint.

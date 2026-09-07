@@ -161,6 +161,13 @@ let a routine de-listing brick the USDC exit of every position that used that
 pool. A dynamic exit delta whose floor rounds to zero stays on the Safe in kind
 rather than failing the exit — the same rule the harvest paths already follow.
 
+Hooked Uniswap V4 pools are the exception on both counts. A hook runs on every
+liquidity and swap path, including the oracle-free `withdrawLp` exit, so
+admitting one is a timelocked critical change (`allowHookedPoolParam`, after the
+hook has been reviewed; routine `setPoolParamAllowed` refuses it), and an exit
+leg may route through a hooked pool only if it is allow-listed — a hookless
+route for the same pair is always available instead.
+
 ### `withdrawLp`: the exit that reads no price
 
 Flooring `closeLp` on an oracle would otherwise mean a broken reference strands

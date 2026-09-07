@@ -422,6 +422,79 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             ).to.be.revertedWithCustomError(v4Handler, "OnlyDelegatecall");
         });
 
+        it("admits a hooked pool key only through the timelock", async function () {
+            const f = await loadFixture(deployUniV4Harness);
+            const hooked = encodeUniV4PoolParam(f.wethAddr, f.usdcAddr, 500, 10, f.safeAddr);
+            await (await f.stateView.setPool(ethers.keccak256(hooked), Q96, 10n ** 18n)).wait();
+            expect(await f.v4Handler.poolParamHasHooks(hooked)).to.equal(true);
+            expect(await f.v4Handler.poolParamHasHooks(V4_KEY)).to.equal(false);
+            expect(await f.uniHandler.poolParamHasHooks(FEE_TIER)).to.equal(false);
+
+            await expect(
+                f.manager.connect(f.deployer).setPoolParamAllowed(UNISWAP_V4, hooked, true),
+            ).to.be.revertedWithCustomError(f.manager, "HookedPoolParamNeedsTimelock");
+            const Manager = await ethers.getContractFactory("SafeYieldManager");
+            await expect(
+                Manager.deploy(
+                    await f.reg.getAddress(),
+                    f.usdcAddr,
+                    f.wethAddr,
+                    [UNISWAP_V4],
+                    [await f.v4Handler.getAddress()],
+                    [[hooked]],
+                    [0],
+                    [0],
+                    [twapSeed(f.wethAddr, f.uniPoolAddr)],
+                    f.treasury.address,
+                    Number(PERF_FEE_BPS),
+                    Number(COLLECT_FEE_BPS),
+                    MAX_FEE_BPS,
+                    f.deployer.address,
+                    await f.timelock.getAddress(),
+                    f.pauser.address,
+                ),
+            ).to.be.revertedWithCustomError(f.manager, "HookedPoolParamNeedsTimelock");
+
+            await expect(timelockCall(f.timelock, f.manager, "allowHookedPoolParam", [UNISWAP_V4, hooked]))
+                .to.emit(f.manager, "PoolParamAllowedUpdated")
+                .withArgs(UNISWAP_V4, hooked, false, true);
+            expect(await f.manager.isPoolParamAllowed(UNISWAP_V4, hooked)).to.equal(true);
+
+            await (await f.manager.connect(f.deployer).setPoolParamAllowed(UNISWAP_V4, hooked, false)).wait();
+            expect(await f.manager.isPoolParamAllowed(UNISWAP_V4, hooked)).to.equal(false);
+        });
+
+        it("routes an exit through a hooked pool only once the timelock has admitted it", async function () {
+            const {
+                manager,
+                operatorEOA,
+                safeAddr,
+                v4Handler,
+                stateView,
+                universalRouter,
+                timelock,
+                wethAddr,
+                usdcAddr,
+            } = await loadFixture(deployUniV4Harness);
+            const hooked = encodeUniV4PoolParam(wethAddr, usdcAddr, 500, 10, safeAddr);
+            await (await stateView.setPool(ethers.keccak256(hooked), Q96, 10n ** 18n)).wait();
+            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            await (await universalRouter.setOutputFor(usdcAddr, CLOSE_OUT)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(CLOSE_OUT, hooked) })),
+            ).to.be.revertedWithCustomError(v4Handler, "PoolParamNotAllowed");
+
+            await (await timelockCall(timelock, manager, "allowHookedPoolParam", [UNISWAP_V4, hooked])).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(CLOSE_OUT, hooked) })),
+            ).to.emit(manager, "PositionClosed");
+        });
+
         it("L-3: allow-lists a native pool only when both the native and the WETH reference answer", async function () {
             const f = await loadFixture(deployUniV4Harness);
             const Manager = await ethers.getContractFactory("SafeYieldManager");

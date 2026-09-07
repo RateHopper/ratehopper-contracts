@@ -195,8 +195,9 @@ contract MockSafeHarness {
 
 /// @notice Handler stand-in whose every entry point reverts with EMPTY
 ///         returndata, driving SafeYieldManager's `HandlerCallFailed`
-///         fallback branch in `_delegateToHandler`. `PROTOCOL()` is real so
-///         `setYieldHandler`'s validation accepts it.
+///         fallback branch in `_delegateToHandler`. `PROTOCOL()` and the two
+///         pool-param views are real so `setYieldHandler` and allow-listing
+///         accept it.
 contract MockRevertingYieldHandler {
     uint8 public immutable PROTOCOL;
 
@@ -206,6 +207,10 @@ contract MockRevertingYieldHandler {
 
     function poolTokens(bytes calldata poolParam) external pure returns (address token0, address token1) {
         (token0, token1, ) = abi.decode(poolParam, (address, address, uint24));
+    }
+
+    function poolParamHasHooks(bytes calldata) external pure returns (bool) {
+        return false;
     }
 
     fallback() external {

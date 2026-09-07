@@ -60,8 +60,9 @@ const NATIVE = "0x0000000000000000000000000000000000000000";
 //
 // Additional pairs are allow-listed post-deploy via setPoolParamAllowed only
 // after every non-USDC side has a live TWAP reference — which now means a
-// timelock proposal for the reference first. Hooked V4 pools remain restricted
-// to audited hooks (the allow-list is the sole hook gate).
+// timelock proposal for the reference first. Hooked V4 pool keys are admitted
+// only through the timelocked allowHookedPoolParam, after the hook has been
+// reviewed; routine setPoolParamAllowed (and this constructor) refuse them.
 const UNIV3_POOL_PARAMS = [100, 500, 3000].map((feeTier) => encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, feeTier));
 const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) =>
     encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, tickSpacing),
