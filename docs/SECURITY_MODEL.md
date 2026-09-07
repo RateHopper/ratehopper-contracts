@@ -5,7 +5,7 @@ every token belongs to the user's Safe; the module is an executor the Safe has
 chosen to authorize. Most of what follows is a consequence of that one fact.
 
 This document records the accepted properties of that design (audit items H-01,
-I-01, I-02 and I-03) and the decisions behind them.
+I-01, I-02 and I-03, and Shred September 2026 item L-2) and the decisions behind them.
 
 ## I-01 — The performance fee is cooperative, by construction
 
@@ -203,6 +203,34 @@ switch that cannot price its residue reverts rather than guessing.
 `withdrawLp` releases any carry without charging it, and says so in
 `PositionWithdrawn.releasedCarryUsd6`. That is the same fee-free-exit property
 as I-01, made visible rather than silent.
+
+## Shred September 2026 L-2 — Partial-close basis rounding (accepted)
+
+The September 2026 Shred audit identifies the case where a partial close removes
+non-zero liquidity but its proportional cost-basis slice rounds down to zero.
+`SafeYieldManager.closeLp` computes `basisForExit = floor(residualBasis *
+exitBps / 10_000)` in raw USDC units. The handlers independently round the
+liquidity slice down, so the two slices need not become non-zero together.
+
+We accept this rounding behavior without a contract change. Relative to the
+exact proportional basis slice, each close omits less than one raw USDC unit
+(0.000001 USDC) from `basisForExit`. That amount stays in the remaining basis;
+it is not deleted. This is a per-close bound on the basis rounding error, not
+a lifetime bound on accumulated rounding or on all causes of fee differences.
+The zero slice can slightly overstate this close's taxable profit, with fees
+still subject to the configured performance-fee rate and integer rounding.
+
+A zero basis is also a legitimate state, not just a rounding artifact:
+`switchLp` sets the replacement basis to zero when the residue returned to the
+Safe repays all of the previous basis, and carries any excess as profit. The
+replacement may still have substantial liquidity. Reverting whenever
+`basisForExit == 0 && liquidityToRemove > 0`, as suggested in L-2, would disable
+every partial close of such a position.
+
+The existing inverse guard remains: a partial close reverts when
+`basisForExit > 0 && liquidityToRemove == 0`, preventing a basis reduction with
+no liquidity removed. Full closes consume the entire remaining basis and
+liquidity. L-2 is therefore **acknowledged / accepted**, not reported as fixed.
 
 ## M-01 — No router call is left without a floor
 
