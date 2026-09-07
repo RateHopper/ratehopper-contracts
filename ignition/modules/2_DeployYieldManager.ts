@@ -50,11 +50,13 @@ const NATIVE = "0x0000000000000000000000000000000000000000";
 // Every non-USDC side of every seeded pool param needs an entry: WETH, the
 // native `address(0)` key used by V4 native pools (both point at the same
 // WETH/USDC pool — WETH is substituted only for tick math), and AERO so staked
-// Aerodrome emissions can be sold without waiting on the timelock. A seeded
-// reference is validated live, so the deploy reverts rather than installing one
-// that cannot answer — if the AERO pool happens to be quiet at deploy time, drop
-// that entry and add it later by timelock; only WETH and NATIVE are load-bearing
-// for the pool params seeded below.
+// Aerodrome emissions can be sold without waiting on the timelock. A native V4
+// pool param requires BOTH the NATIVE and the WETH key (its withdraw leg hands
+// the native side back wrapped). A seeded reference is validated live, so the
+// deploy reverts rather than installing one that cannot answer — if the AERO
+// pool happens to be quiet at deploy time, drop that entry and add it later by
+// timelock; only WETH and NATIVE are load-bearing for the pool params seeded
+// below.
 //
 // Additional pairs are allow-listed post-deploy via setPoolParamAllowed only
 // after every non-USDC side has a live TWAP reference — which now means a

@@ -610,6 +610,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ) internal view {
         (address token0, address token1) = _decodePoolTokens(handler, poolParam);
         _requireTwapReference($, token0);
+        // A native side comes back from `withdrawLp` wrapped, so a switch out
+        // of this pool values its residue under the WETH key: both must answer.
+        if (token0 == address(0)) _requireTwapReference($, address(WETH));
         if (token1 != token0) _requireTwapReference($, token1);
     }
 

@@ -141,12 +141,14 @@ or unusable configuration. An active key can never be cleared to zero; a new
 validated pool replaces it atomically. New pool parameters cannot be
 allow-listed, and a protocol's open side cannot be re-enabled, unless every
 non-USDC currency decoded by its registered handler has a live reference.
-Native ETH checks the `address(0)` key. The close-side emergency switch remains
-oracle-independent so it can re-enable `withdrawLp`; close/collect swap paths
-still fail closed inside the handlers. If an active reference fails before a
-replacement is executed, `withdrawLp` remains available. `twapMinimumOut`
-exposes the exact contract-derived floor for operations and deployment
-verification.
+Native ETH checks BOTH the `address(0)` key (swap legs on a native pool) and
+the WETH key (`withdrawLp` hands a native side back wrapped, so a switch out of
+that pool values its residue under WETH). The close-side emergency switch
+remains oracle-independent so it can re-enable `withdrawLp`; close/collect swap
+paths still fail closed inside the handlers. If an active reference fails
+before a replacement is executed, `withdrawLp` remains available.
+`twapMinimumOut` exposes the exact contract-derived floor for operations and
+deployment verification.
 
 The allow-list gates OPENS only. An exit's swap leg (`closeLp`, the
 `collectLp` swap path) is validated for pair shape, the per-protocol

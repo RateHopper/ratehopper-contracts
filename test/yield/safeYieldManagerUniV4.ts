@@ -37,6 +37,11 @@ function timelockCall(timelock: any, manager: any, functionName: string, args: a
     return timelock.execute(manager.target, manager.interface.encodeFunctionData(functionName, args));
 }
 
+const twapSeed = (token: string, pool: string) => ({
+    token,
+    config: { pool, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+});
+
 const UNISWAP_V3 = YieldProtocol.UNISWAP_V3;
 const AERODROME = YieldProtocol.AERODROME;
 const UNISWAP_V4 = YieldProtocol.UNISWAP_V4;
@@ -260,10 +265,6 @@ async function deployUniV4Harness() {
     await tokenCRef.waitForDeployment();
     const uniPoolAddr = await uniPool.getAddress();
     const tokenCRefAddr = await tokenCRef.getAddress();
-    const twapSeed = (token: string, pool: string) => ({
-        token,
-        config: { pool, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
-    });
 
     const manager = await Manager.deploy(
         await reg.getAddress(),
@@ -314,6 +315,7 @@ async function deployUniV4Harness() {
         usdcAddr,
         tokenCAddr,
         uniPool,
+        uniPoolAddr,
         uniFactory,
         uniNpm,
         uniRouter,
@@ -418,6 +420,45 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                     deadline: DEADLINE,
                 }),
             ).to.be.revertedWithCustomError(v4Handler, "OnlyDelegatecall");
+        });
+
+        it("L-3: allow-lists a native pool only when both the native and the WETH reference answer", async function () {
+            const f = await loadFixture(deployUniV4Harness);
+            const Manager = await ethers.getContractFactory("SafeYieldManager");
+            const deployWith = async (seeds: { token: string; config: any }[], allowed: string[]) =>
+                Manager.deploy(
+                    await f.reg.getAddress(),
+                    f.usdcAddr,
+                    f.wethAddr,
+                    [UNISWAP_V4],
+                    [await f.v4Handler.getAddress()],
+                    [allowed],
+                    [0],
+                    [0],
+                    seeds,
+                    f.treasury.address,
+                    Number(PERF_FEE_BPS),
+                    Number(COLLECT_FEE_BPS),
+                    MAX_FEE_BPS,
+                    f.deployer.address,
+                    await f.timelock.getAddress(),
+                    f.pauser.address,
+                );
+
+            await expect(deployWith([twapSeed(ZERO, f.uniPoolAddr)], [V4_NATIVE_KEY]))
+                .to.be.revertedWithCustomError(f.manager, "TwapNotConfigured")
+                .withArgs(f.wethAddr);
+            await expect(deployWith([twapSeed(f.wethAddr, f.uniPoolAddr)], [V4_NATIVE_KEY]))
+                .to.be.revertedWithCustomError(f.manager, "TwapNotConfigured")
+                .withArgs(ZERO);
+
+            const nativeOnly = await deployWith([twapSeed(ZERO, f.uniPoolAddr)], []);
+            await nativeOnly.waitForDeployment();
+            await expect(nativeOnly.connect(f.deployer).setPoolParamAllowed(UNISWAP_V4, V4_NATIVE_KEY, true))
+                .to.be.revertedWithCustomError(f.manager, "TwapNotConfigured")
+                .withArgs(f.wethAddr);
+
+            expect(await f.manager.isPoolParamAllowed(UNISWAP_V4, V4_NATIVE_KEY)).to.equal(true);
         });
     });
 
