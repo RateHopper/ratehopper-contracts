@@ -48,7 +48,7 @@ async function deployRoundingFixture() {
     return { operator, safe, repaymentSink, fromAsset, toAsset, poolAddress, swap, handler, manager };
 }
 
-describe("SafeDebtManager flash principal rounding (Shred L-4)", function () {
+describe("SafeDebtManager flash principal rounding", function () {
     for (const { principal, expectedInput, expectedDust } of [
         { principal: 1_000_000_000_000_000_001n, expectedInput: 1_000_002n, expectedDust: 999_999_999_999n },
         { principal: 1_000_000_000_000_000_000n, expectedInput: 1_000_001n, expectedDust: 0n },

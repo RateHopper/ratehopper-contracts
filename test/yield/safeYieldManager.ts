@@ -766,7 +766,7 @@ describe("SafeYieldManager", function () {
             expect(await usdc.balanceOf(treasury.address)).to.equal(0);
         });
 
-        it("M-1: keeps the USDC exit working after the swap leg's pool param is de-listed", async function () {
+        it("keeps the USDC exit working after the swap leg's pool param is de-listed", async function () {
             const { manager, operatorEOA, deployer, safeAddr, uniNpm, uniRouter } =
                 await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
@@ -796,7 +796,7 @@ describe("SafeYieldManager", function () {
             );
         });
 
-        it("L-1: leaves a close delta in kind when its floor rounds to zero instead of reverting", async function () {
+        it("leaves a close delta in kind when its floor rounds to zero instead of reverting", async function () {
             const { manager, operatorEOA, safeAddr, weth, wethAddr, uniNpm, uniRouter } =
                 await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
@@ -1377,7 +1377,7 @@ describe("SafeYieldManager", function () {
             expect(await clNpm.ownerOf(1)).to.equal(stakePoolAddr);
         });
 
-        it("swaps the claimed stakePool reward to USDC through a pool param that is not allow-listed (M-1)", async function () {
+        it("swaps the claimed stakePool reward to USDC through a pool param that is not allow-listed", async function () {
             const {
                 manager,
                 timelock,
@@ -1681,7 +1681,7 @@ describe("SafeYieldManager", function () {
             expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(stakePoolAddr);
         });
 
-        it("M-3: skips the restake and clears the pin when the gauge was killed", async function () {
+        it("skips the restake and clears the pin when the gauge was killed", async function () {
             const { manager, operatorEOA, safeAddr, clNpm, clPool, clRouter, voter } =
                 await loadFixture(deployYieldManagerHarness);
             const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
@@ -1718,7 +1718,7 @@ describe("SafeYieldManager", function () {
             ).to.emit(manager, "PositionClosed");
         });
 
-        it("M-3: refuses to stake into a killed gauge at open", async function () {
+        it("refuses to stake into a killed gauge at open", async function () {
             const { manager, operatorEOA, safeAddr, clNpm, clPool, voter, aeroHandler } =
                 await loadFixture(deployYieldManagerHarness);
             const { stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
@@ -2416,7 +2416,7 @@ describe("SafeYieldManager", function () {
             expect((await usdc.balanceOf(safeAddr)) - safeUsdcBefore).to.equal(40_000n);
         });
 
-        it("L-5: skims the collect fee from a no-return token, and still waives it on a real failure", async function () {
+        it("skims the collect fee from a no-return token, and still waives it on a real failure", async function () {
             const { manager, operatorEOA, safeAddr, treasury, usdcAddr, uniNpm } =
                 await loadFixture(deployYieldManagerHarness);
             const NoReturn = await ethers.getContractFactory("MockNoReturnERC20");

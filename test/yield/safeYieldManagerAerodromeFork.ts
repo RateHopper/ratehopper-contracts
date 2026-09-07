@@ -663,7 +663,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         expect(await stakePool.earned(safeAddress, tokenId)).to.be.greaterThan(0n);
     });
 
-    it("M-3: skips the restake on a partial close once governance has killed the real gauge", async function () {
+    it("skips the restake on a partial close once governance has killed the real gauge", async function () {
         const { operator, safeAddress, manager } = await deployAeroStack();
         const { poolAddress, sqrtPriceX96, alignedTick } = await readAeroPool();
         const spotUsdcToWeth = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);

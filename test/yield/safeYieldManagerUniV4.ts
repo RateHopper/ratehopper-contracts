@@ -495,7 +495,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             ).to.emit(manager, "PositionClosed");
         });
 
-        it("L-3: allow-lists a native pool only when both the native and the WETH reference answer", async function () {
+        it("allow-lists a native pool only when both the native and the WETH reference answer", async function () {
             const f = await loadFixture(deployUniV4Harness);
             const Manager = await ethers.getContractFactory("SafeYieldManager");
             const deployWith = async (seeds: { token: string; config: any }[], allowed: string[]) =>
@@ -902,7 +902,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 .withArgs(60);
         });
 
-        it("M-1: keeps the V4 USDC exit working after the swap leg's pool key is de-listed", async function () {
+        it("keeps the V4 USDC exit working after the swap leg's pool key is de-listed", async function () {
             const ctx = await openedFixture();
             const { manager, operatorEOA, deployer, safeAddr, v4Pm } = ctx;
             await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V4, V4_KEY, false)).wait();
@@ -923,7 +923,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             );
         });
 
-        it("L-1: leaves a V4 close delta in kind when its floor rounds to zero instead of reverting", async function () {
+        it("leaves a V4 close delta in kind when its floor rounds to zero instead of reverting", async function () {
             const ctx = await openedFixture();
             const { manager, operatorEOA, safeAddr, v4Pm, universalRouter, weth, wethAddr, usdcAddr } = ctx;
             const key = { currency0: wethAddr, currency1: usdcAddr, fee: 500, tickSpacing: 10, hooks: ZERO };
