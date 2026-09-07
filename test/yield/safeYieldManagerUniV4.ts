@@ -798,6 +798,26 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 "PositionClosed",
             );
         });
+
+        it("L-1: leaves a V4 close delta in kind when its floor rounds to zero instead of reverting", async function () {
+            const ctx = await openedFixture();
+            const { manager, operatorEOA, safeAddr, v4Pm, universalRouter, weth, wethAddr, usdcAddr } = ctx;
+            const key = { currency0: wethAddr, currency1: usdcAddr, fee: 500, tickSpacing: 10, hooks: ZERO };
+            await (await v4Pm.seedPosition(1, safeAddr, key, 1_000_000n, 1n, 500_000n)).wait();
+            const callsBefore = await universalRouter.callCount();
+            const wethBefore = await weth.balanceOf(safeAddr);
+
+            const tx = manager
+                .connect(operatorEOA)
+                .closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(0, V4_KEY) }));
+            await expect(tx)
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, 500_000n, 0n, 10_000, 0n);
+            await expect(tx).to.emit(manager, "SwapSkippedBelowFloor").withArgs(safeAddr, wethAddr, 1n);
+
+            expect(await universalRouter.callCount()).to.equal(callsBefore);
+            expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore + 1n);
+        });
     });
 
     describe("closeLp (native ETH pair)", function () {

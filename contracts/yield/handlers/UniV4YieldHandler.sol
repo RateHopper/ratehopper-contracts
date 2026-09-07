@@ -251,7 +251,9 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             );
         }
 
-        // Swap the non-USDC legs this close produced back to USDC.
+        // Swap the non-USDC legs this close produced back to USDC. The deltas
+        // are dynamic (principal + harvested fees), so a residue whose floor
+        // rounds to zero stays in kind rather than failing the whole exit.
         _swapDeltaToUsdc(
             p.onBehalfOf,
             key.currency0,
@@ -260,7 +262,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             p.deadline,
             p.slippageBps,
             SwapSteps(63, 64, 65, 66, 67),
-            false
+            true
         );
         _swapDeltaToUsdc(
             p.onBehalfOf,
@@ -270,7 +272,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             p.deadline,
             p.slippageBps,
             SwapSteps(68, 69, 70, 71, 72),
-            false
+            true
         );
 
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
@@ -640,7 +642,10 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         // Single funnel for every UniversalRouter call in this handler.
         amountOutMin = _twapMinOut(currencyIn, currencyOut, amountIn, amountOutMin, slippageBps);
         if (amountOutMin == 0) {
-            if (leaveZeroFloorInKind) return;
+            if (leaveZeroFloorInKind) {
+                emit SwapSkippedBelowFloor(_onBehalfOf, currencyIn, amountIn);
+                return;
+            }
             revert InvalidSwapAmountOutMin();
         }
         PoolKey memory key = _decodePoolParam(poolParam);

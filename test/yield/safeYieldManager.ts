@@ -785,6 +785,27 @@ describe("SafeYieldManager", function () {
                 "PositionClosed",
             );
         });
+
+        it("L-1: leaves a close delta in kind when its floor rounds to zero instead of reverting", async function () {
+            const { manager, operatorEOA, safeAddr, weth, wethAddr, uniNpm, uniRouter } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniNpm.setPrincipal(1, 1n, 500_000n)).wait();
+            const callsBefore = await uniRouter.callCount();
+            const wethBefore = await weth.balanceOf(safeAddr);
+
+            const tx = manager
+                .connect(operatorEOA)
+                .closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER, { swap0: leg(0, FEE_TIER) }));
+            await expect(tx)
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 500_000n, 0n, 10_000, 0n);
+            await expect(tx).to.emit(manager, "SwapSkippedBelowFloor").withArgs(safeAddr, wethAddr, 1n);
+
+            expect(await uniRouter.callCount()).to.equal(callsBefore);
+            expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore + 1n);
+            expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.equal(ZERO);
+        });
     });
 
     describe("collectLp", function () {

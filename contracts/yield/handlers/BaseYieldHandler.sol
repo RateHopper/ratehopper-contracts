@@ -380,9 +380,11 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             }
         }
 
-        // Swap the non-USDC legs this close produced back to USDC.
-        _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, p.slippageBps, 26, 10, 27, false);
-        _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, p.slippageBps, 34, 35, 36, false);
+        // Swap the non-USDC legs this close produced back to USDC. The deltas
+        // are dynamic (principal + harvested fees), so a residue whose floor
+        // rounds to zero stays in kind rather than failing the whole exit.
+        _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, p.slippageBps, 26, 10, 27, true);
+        _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, p.slippageBps, 34, 35, 36, true);
 
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
         // Caller's final-value guard on gross realized USDC.
@@ -676,13 +678,17 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         // Every router call in this handler funnels through here, so the floor
         // is enforced structurally rather than by remembering to call it.
         amountOutMin = _twapMinOut(tokenIn, tokenOut, amountIn, amountOutMin, slippageBps);
-        // Dynamic harvest/reward deltas can be non-zero while their quoted
-        // output rounds to zero in raw token units. There is no enforceable
-        // price boundary in that case, so keep the dust on the Safe instead of
-        // either making an unprotected router call or reverting the harvest.
-        // Known-input swaps (open legs) pass false and remain fail-closed.
+        // Dynamic harvest/reward/close deltas can be non-zero while their
+        // quoted output rounds to zero in raw token units. There is no
+        // enforceable price boundary in that case, so keep the dust on the Safe
+        // instead of either making an unprotected router call or reverting the
+        // harvest or exit. Known-input swaps (open legs) pass false and remain
+        // fail-closed.
         if (amountOutMin == 0) {
-            if (leaveZeroFloorInKind) return;
+            if (leaveZeroFloorInKind) {
+                emit SwapSkippedBelowFloor(_onBehalfOf, tokenIn, amountIn);
+                return;
+            }
             revert InvalidSwapAmountOutMin();
         }
         bytes memory swapData = _buildSwapCalldata(
