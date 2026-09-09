@@ -112,6 +112,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     error HandlerProtocolMismatch(uint8 expected, uint8 actual);
     error InvalidTimelock();
     error TokenNotWhitelisted(address token);
+    error HookedPoolParamNeedsTimelock();
 
     /// @notice Allows only the registry operator or the Safe itself.
     modifier onlyOperatorOrSafe(address _onBehalfOf) {
@@ -211,6 +212,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             emit MinPositionLiquidityUpdated(_protocols[i], 0, _minPositionLiquidity[i]);
 
             for (uint256 j = 0; j < _allowedPoolParams[i].length; j++) {
+                if (_poolParamHasHooks(_handlers[i], _allowedPoolParams[i][j])) revert HookedPoolParamNeedsTimelock();
                 _requirePoolParamTwapReferences($, _handlers[i], _allowedPoolParams[i][j]);
                 _storePoolParamAllowed($, _protocols[i], _allowedPoolParams[i][j], true);
             }
@@ -592,15 +594,27 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         address handler,
         bytes memory lpPoolParam
     ) internal view returns (address token0, address token1) {
-        // Same revert convention as _delegateToHandler: bubble reasoned
-        // reverts (e.g. a malformed pool param failing the handler's decode),
-        // wrap empty ones in HandlerCallFailed.
-        (bool ok, bytes memory ret) = handler.staticcall(abi.encodeCall(IYieldHandler.poolTokens, (lpPoolParam)));
+        bytes memory ret = _staticcallHandler(handler, abi.encodeCall(IYieldHandler.poolTokens, (lpPoolParam)));
+        return abi.decode(ret, (address, address));
+    }
+
+    function _poolParamHasHooks(address handler, bytes memory poolParam) internal view returns (bool) {
+        bytes memory ret = _staticcallHandler(handler, abi.encodeCall(IYieldHandler.poolParamHasHooks, (poolParam)));
+        return abi.decode(ret, (bool));
+    }
+
+    /// @dev Handler view call (staticcall, not delegatecall — the handler never
+    ///      runs in its own storage context). Same revert convention as
+    ///      _delegateToHandler: bubble reasoned reverts (e.g. a malformed pool
+    ///      param failing the handler's decode), wrap empty ones in
+    ///      HandlerCallFailed.
+    function _staticcallHandler(address handler, bytes memory data) internal view returns (bytes memory ret) {
+        bool ok;
+        (ok, ret) = handler.staticcall(data);
         if (!ok) {
             if (ret.length > 0) Address.verifyCallResult(ok, ret);
             revert HandlerCallFailed();
         }
-        return abi.decode(ret, (address, address));
     }
 
     function _requirePoolParamTwapReferences(
@@ -610,6 +624,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ) internal view {
         (address token0, address token1) = _decodePoolTokens(handler, poolParam);
         _requireTwapReference($, token0);
+        // A native side comes back from `withdrawLp` wrapped, so a switch out
+        // of this pool values its residue under the WETH key: both must answer.
+        if (token0 == address(0)) _requireTwapReference($, address(WETH));
         if (token1 != token0) _requireTwapReference($, token1);
     }
 
@@ -811,7 +828,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     }
 
     /// @notice Allow or disallow a protocol-specific pool param (ABI-encoded
-    ///         feeTier / tickSpacing / future pool key).
+    ///         feeTier / tickSpacing / V4 pool key). Refuses to ADMIT a pool
+    ///         that runs hook code — that is `allowHookedPoolParam`'s job —
+    ///         while de-listing stays a routine action for every pool.
     function setPoolParamAllowed(
         uint8 protocol,
         bytes calldata poolParam,
@@ -821,9 +840,24 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         if (allowed) {
             address handler = yieldHandlers[protocol];
             if (handler == address(0)) revert HandlerNotSet();
+            if (_poolParamHasHooks(handler, poolParam)) revert HookedPoolParamNeedsTimelock();
             _requirePoolParamTwapReferences($, handler, poolParam);
         }
         _storePoolParamAllowed($, protocol, poolParam, allowed);
+    }
+
+    /// @notice Admit a pool param whose pool runs third-party hook code
+    ///         (Uniswap V4). A hook runs on every liquidity and swap path,
+    ///         including the oracle-free `withdrawLp` exit, so admitting one is
+    ///         a critical change: the hook must be reviewed first, and the
+    ///         timelock gives operators and Safe owners time to inspect it.
+    ///         Removal goes through `setPoolParamAllowed(…, false)` as usual.
+    function allowHookedPoolParam(uint8 protocol, bytes calldata poolParam) external onlyTimelockCriticalRole {
+        address handler = yieldHandlers[protocol];
+        if (handler == address(0)) revert HandlerNotSet();
+        YieldLayout storage $ = _yieldStorage();
+        _requirePoolParamTwapReferences($, handler, poolParam);
+        _storePoolParamAllowed($, protocol, poolParam, true);
     }
 
     function _storePoolParamAllowed(

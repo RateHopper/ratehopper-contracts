@@ -573,6 +573,16 @@ describe("SafeYieldManager", function () {
             expect(await uniRouter.lastAmountOutMinimum()).to.equal((HALF_USDC * 9_700n) / 10_000n);
         });
 
+        it("refuses an open leg whose reference floor rounds to zero", async function () {
+            const { manager, operatorEOA, safeAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
+            await (await uniPool.setTwapTick(800_000)).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER, { swap0: leg(0, FEE_TIER) })),
+            ).to.be.revertedWithCustomError(manager, "InvalidSwapAmountOutMin");
+        });
+
         it("refuses to swap a token with no price reference", async function () {
             const { manager, operatorEOA, safeAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
             await (await uniPool.setObserveReverts(true)).wait();
@@ -754,6 +764,57 @@ describe("SafeYieldManager", function () {
                 .to.emit(manager, "FeeTransferFailed")
                 .withArgs(safeAddr, 1n, 10_000n);
             expect(await usdc.balanceOf(treasury.address)).to.equal(0);
+        });
+
+        it("keeps the USDC exit working after the swap leg's pool param is de-listed", async function () {
+            const { manager, operatorEOA, deployer, safeAddr, uniNpm, uniRouter } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, BAD_FEE_TIER, true)).wait();
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V3, FEE_TIER, false)).wait();
+            expect(await manager.isPoolParamAllowed(UNISWAP_V3, FEE_TIER)).to.equal(false);
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .openLp(UNISWAP_V3, openParams(safeAddr, BAD_FEE_TIER, { swap0: leg(WETH_OUT, FEE_TIER) })),
+            ).to.be.revertedWithCustomError(manager, "PoolParamNotAllowed");
+
+            await (await uniNpm.setOwed(1, 100_000n, 0)).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .collectLp(
+                        UNISWAP_V3,
+                        collectParams(safeAddr, 1, FEE_TIER, { swapFeesToUsdc: true, swap0: leg(0, FEE_TIER) }),
+                    ),
+            ).to.emit(manager, "FeesCollected");
+            await (await uniRouter.setOutput(600_000n)).wait();
+            await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER))).to.emit(
+                manager,
+                "PositionClosed",
+            );
+        });
+
+        it("leaves a close delta in kind when its floor rounds to zero instead of reverting", async function () {
+            const { manager, operatorEOA, safeAddr, weth, wethAddr, uniNpm, uniRouter } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniNpm.setPrincipal(1, 1n, 500_000n)).wait();
+            const callsBefore = await uniRouter.callCount();
+            const wethBefore = await weth.balanceOf(safeAddr);
+
+            const tx = manager
+                .connect(operatorEOA)
+                .closeLp(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER, { swap0: leg(0, FEE_TIER) }));
+            await expect(tx)
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, UNISWAP_V3, 1n, USDC_AMOUNT, 500_000n, 0n, 10_000, 0n);
+            await expect(tx).to.emit(manager, "SwapSkippedBelowFloor").withArgs(safeAddr, wethAddr, 1n);
+
+            expect(await uniRouter.callCount()).to.equal(callsBefore);
+            expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore + 1n);
+            expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.equal(ZERO);
         });
     });
 
@@ -1316,10 +1377,9 @@ describe("SafeYieldManager", function () {
             expect(await clNpm.ownerOf(1)).to.equal(stakePoolAddr);
         });
 
-        it("swaps the claimed stakePool reward to USDC when swapRewardToUsdc is set", async function () {
+        it("swaps the claimed stakePool reward to USDC through a pool param that is not allow-listed", async function () {
             const {
                 manager,
-                deployer,
                 timelock,
                 operatorEOA,
                 safeAddr,
@@ -1335,7 +1395,8 @@ describe("SafeYieldManager", function () {
             const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
 
             // Arm the stakePool with a mock AERO payout and give the reward its own
-            // allowed AERO/USDC pool so the swap leg validates.
+            // AERO/USDC pool: exit legs need a route and a reference, not an
+            // allow-list entry.
             const ERC = await ethers.getContractFactory("MockERC20");
             const aero = await ERC.deploy("Mock Aero", "AERO", 18);
             await aero.waitForDeployment();
@@ -1364,7 +1425,7 @@ describe("SafeYieldManager", function () {
                     TWAP_CARDINALITY,
                 ])
             ).wait();
-            await (await manager.connect(deployer).setPoolParamAllowed(AERODROME, AERO_PARAM, true)).wait();
+            expect(await manager.isPoolParamAllowed(AERODROME, AERO_PARAM)).to.equal(false);
             await (await clRouter.setOutputFor(usdcAddr, 123_456n)).wait();
 
             await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
@@ -1392,6 +1453,56 @@ describe("SafeYieldManager", function () {
             expect(await aero.balanceOf(await clRouter.getAddress())).to.equal(500_000n - rewardFee);
             expect((await usdc.balanceOf(safeAddr)) - safeUsdcBefore).to.equal(123_456n);
             expect(await clNpm.ownerOf(1)).to.equal(stakePoolAddr);
+        });
+
+        it("enforces the deadline on the staked-reward swap path", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, voter } =
+                await loadFixture(deployYieldManagerHarness);
+            await deployStakePool(clNpm, clPool, voter);
+            await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .collectLp(
+                        AERODROME,
+                        collectParams(safeAddr, 1, TICK_SPACING, { swapRewardToUsdc: true, deadline: 1 }),
+                    ),
+            ).to.be.revertedWithCustomError(manager, "DeadlineExpired");
+        });
+
+        it("refuses to swap a claimed reward whose token has no price reference", async function () {
+            const { manager, operatorEOA, safeAddr, usdc, clNpm, clPool, clFactory, voter } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+
+            const ERC = await ethers.getContractFactory("MockERC20");
+            const aero = await ERC.deploy("Mock Aero", "AERO", 18);
+            await aero.waitForDeployment();
+            const aeroAddr = await aero.getAddress();
+            const usdcAddr = await usdc.getAddress();
+            await (await aero.mint(stakePoolAddr, 10n ** 24n)).wait();
+            await (await stakePool.setReward(aeroAddr, 500_000n)).wait();
+            const [r0, r1] =
+                aeroAddr.toLowerCase() < usdcAddr.toLowerCase() ? [aeroAddr, usdcAddr] : [usdcAddr, aeroAddr];
+            const AERO_PARAM = encodeAerodromePoolParam(r0, r1, 50);
+            const CLPool = await ethers.getContractFactory("MockCLPool");
+            const aeroPool = await CLPool.deploy(r0, r1, Q96, 10n ** 18n);
+            await aeroPool.waitForDeployment();
+            await (await clFactory.setPoolFor(r0, r1, 50, aeroPool)).wait();
+
+            await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
+            await expect(
+                manager.connect(operatorEOA).collectLp(
+                    AERODROME,
+                    collectParams(safeAddr, 1, TICK_SPACING, {
+                        swapRewardToUsdc: true,
+                        rewardSwap: leg(0, AERO_PARAM),
+                    }),
+                ),
+            )
+                .to.be.revertedWithCustomError(manager, "TwapNotConfigured")
+                .withArgs(aeroAddr);
         });
 
         it("collectLp on an unstaked Aerodrome position runs the normal fee collect", async function () {
@@ -1568,6 +1679,54 @@ describe("SafeYieldManager", function () {
             expect((await clNpm.positionsData(1))[4]).to.equal(liquidityBefore);
             expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(basisBefore);
             expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(stakePoolAddr);
+        });
+
+        it("skips the restake and clears the pin when the gauge was killed", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, clRouter, voter } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePool, stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+
+            await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true }));
+            const liquidityBefore = (await clNpm.positionsData(1))[4];
+            await (await clRouter.setOutput(300_000n)).wait();
+            await (await voter.killGauge(stakePoolAddr)).wait();
+            await (await stakePool.setDepositFails(true)).wait();
+
+            await expect(
+                manager.connect(operatorEOA).closeLp(
+                    AERODROME,
+                    closeParams(safeAddr, 1, TICK_SPACING, {
+                        exitBps: 5_000,
+                        swap0: leg(300_000n, TICK_SPACING),
+                    }),
+                ),
+            )
+                .to.emit(manager, "RestakeSkipped")
+                .withArgs(safeAddr, AERODROME, 1n, stakePoolAddr);
+
+            expect(await clNpm.ownerOf(1)).to.equal(safeAddr);
+            expect(await manager.stakePoolOf(AERODROME, 1)).to.equal(ZERO);
+            expect((await clNpm.positionsData(1))[4]).to.equal(liquidityBefore / 2n);
+
+            await expect(
+                manager.connect(operatorEOA).collectLp(AERODROME, collectParams(safeAddr, 1, TICK_SPACING)),
+            ).to.emit(manager, "FeesCollected");
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .closeLp(AERODROME, closeParams(safeAddr, 1, TICK_SPACING, { swap0: leg(300_000n, TICK_SPACING) })),
+            ).to.emit(manager, "PositionClosed");
+        });
+
+        it("refuses to stake into a killed gauge at open", async function () {
+            const { manager, operatorEOA, safeAddr, clNpm, clPool, voter, aeroHandler } =
+                await loadFixture(deployYieldManagerHarness);
+            const { stakePoolAddr } = await deployStakePool(clNpm, clPool, voter);
+            await (await voter.killGauge(stakePoolAddr)).wait();
+
+            await expect(
+                manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING, { stake: true })),
+            ).to.be.revertedWithCustomError(aeroHandler, "StakingNotSupported");
         });
 
         // M-03: emissions are fee-bearing yield on EVERY route that can claim them
@@ -1850,6 +2009,30 @@ describe("SafeYieldManager", function () {
             await expect(deployWith(11, MAX_FEE_BPS + 1)).to.be.revertedWithCustomError(f.manager, "FeeAboveMax");
         });
 
+        it("rejects WETH equal to USDC and a timelock that is codeless or delay-free", async function () {
+            const f = await loadFixture(deployYieldManagerHarness);
+            const Manager = await ethers.getContractFactory("SafeYieldManager");
+            const base = await baseArgs(f);
+            const deployWith = (index: number, value: any) => {
+                const args = [...base];
+                args[index] = value;
+                return (Manager as any).deploy(...args);
+            };
+            const ZeroDelay = await ethers.getContractFactory("MockZeroDelayTimelock");
+            const zeroDelay = await ZeroDelay.deploy();
+            await zeroDelay.waitForDeployment();
+
+            await expect(deployWith(2, f.usdcAddr)).to.be.revertedWithCustomError(f.manager, "ZeroAddress");
+            await expect(deployWith(14, f.stranger.address)).to.be.revertedWithCustomError(
+                f.manager,
+                "InvalidTimelock",
+            );
+            await expect(deployWith(14, await zeroDelay.getAddress())).to.be.revertedWithCustomError(
+                f.manager,
+                "InvalidTimelock",
+            );
+        });
+
         // The invariant the seeded references exist to hold: a deployment
         // cannot allow-list a pool param whose non-USDC side has no live
         // reference. Without this the constructor would be the one path into
@@ -2096,6 +2279,28 @@ describe("SafeYieldManager", function () {
             ).to.be.revertedWithCustomError(manager, "HandlerCallFailed");
         });
 
+        it("bubbles a handler view's own revert reason when allow-listing", async function () {
+            const { manager, deployer, timelock } = await loadFixture(deployYieldManagerHarness);
+            const Loud = await ethers.getContractFactory("MockLoudYieldHandler");
+            const loud = await Loud.deploy(3);
+            await loud.waitForDeployment();
+            await (await timelockCall(timelock, manager, "setYieldHandler", [3, await loud.getAddress()])).wait();
+            await expect(manager.connect(deployer).setPoolParamAllowed(3, FEE_TIER, true)).to.be.revertedWith(
+                "loud handler",
+            );
+        });
+
+        it("wraps an empty poolTokens revert in HandlerCallFailed when allow-listing", async function () {
+            const { manager, deployer, timelock } = await loadFixture(deployYieldManagerHarness);
+            const Blind = await ethers.getContractFactory("MockBlindYieldHandler");
+            const blind = await Blind.deploy(3);
+            await blind.waitForDeployment();
+            await (await timelockCall(timelock, manager, "setYieldHandler", [3, await blind.getAddress()])).wait();
+            await expect(
+                manager.connect(deployer).setPoolParamAllowed(3, FEE_TIER, true),
+            ).to.be.revertedWithCustomError(manager, "HandlerCallFailed");
+        });
+
         it("reverts HandlerNotSet when the pinned handler is missing (defensive invariant)", async function () {
             const { manager, operatorEOA, safeAddr } = await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
@@ -2220,6 +2425,34 @@ describe("SafeYieldManager", function () {
                 .withArgs(safeAddr, 1n, await weth.getAddress(), 2_500n);
             expect(await usdc.balanceOf(treasury.address)).to.equal(0);
             expect((await usdc.balanceOf(safeAddr)) - safeUsdcBefore).to.equal(40_000n);
+        });
+
+        it("skims the collect fee from a no-return token, and still waives it on a real failure", async function () {
+            const { manager, operatorEOA, safeAddr, treasury, usdcAddr, uniNpm } =
+                await loadFixture(deployYieldManagerHarness);
+            const NoReturn = await ethers.getContractFactory("MockNoReturnERC20");
+            const usdt = await NoReturn.deploy();
+            await usdt.waitForDeployment();
+            const usdtAddr = await usdt.getAddress();
+            await (await usdt.mint(await uniNpm.getAddress(), 10n ** 12n)).wait();
+
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await uniNpm.setTokens(1, usdtAddr, usdcAddr)).wait();
+            await (await uniNpm.setOwed(1, 100_000n, 0)).wait();
+
+            await expect(manager.connect(operatorEOA).collectLp(UNISWAP_V3, collectParams(safeAddr, 1, FEE_TIER)))
+                .to.emit(manager, "FeesCollected")
+                .withArgs(safeAddr, UNISWAP_V3, 1n, usdtAddr, 100_000n, 2_500n, usdcAddr, 0n, 0n);
+            expect(await usdt.balanceOf(treasury.address)).to.equal(2_500n);
+            expect(await usdt.balanceOf(safeAddr)).to.equal(97_500n);
+
+            await (await uniNpm.setOwed(1, 100_000n, 0)).wait();
+            await (await usdt.setRevertTransferTo(treasury.address)).wait();
+            await expect(manager.connect(operatorEOA).collectLp(UNISWAP_V3, collectParams(safeAddr, 1, FEE_TIER)))
+                .to.emit(manager, "CollectFeeTransferFailed")
+                .withArgs(safeAddr, 1n, usdtAddr, 2_500n);
+            expect(await usdt.balanceOf(treasury.address)).to.equal(2_500n);
+            expect(await usdt.balanceOf(safeAddr)).to.equal(197_500n);
         });
 
         it("forwards nothing to the Safe when feeCollectBps consumes the whole harvest", async function () {
@@ -3719,6 +3952,20 @@ describe("SafeYieldManager", function () {
             // Waived, not collected — and the waiver is on the record.
             expect(await usdc.balanceOf(treasury.address)).to.equal(treasuryBefore);
             expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(0);
+        });
+
+        it("blocks reentrant withdrawLp through a position-manager callback", async function () {
+            const { manager, operatorEOA, safeAddr, uniNpm } = await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (
+                await uniNpm.setCallback(
+                    await manager.getAddress(),
+                    manager.interface.encodeFunctionData("withdrawLp", [UNISWAP_V3, withdrawParams(safeAddr, 1)]),
+                )
+            ).wait();
+            await expect(
+                manager.connect(operatorEOA).withdrawLp(UNISWAP_V3, withdrawParams(safeAddr, 1)),
+            ).to.be.revertedWithCustomError(manager, "ReentrancyGuardReentrantCall");
         });
 
         it("honours the same gates as every other exit", async function () {

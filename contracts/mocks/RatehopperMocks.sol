@@ -89,6 +89,28 @@ contract MockERC20 is IERC20 {
     }
 }
 
+/// @notice USDT-shaped ERC20: `transfer` returns NO data. Only the surface the
+///         collect-fee skim touches.
+contract MockNoReturnERC20 {
+    mapping(address => uint256) public balanceOf;
+    address public revertTransferTo;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+    }
+
+    function setRevertTransferTo(address account) external {
+        revertTransferTo = account;
+    }
+
+    function transfer(address to, uint256 amount) external {
+        require(to != revertTransferTo, "blacklisted");
+        require(balanceOf[msg.sender] >= amount, "ERC20: balance");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+    }
+}
+
 /// @notice WETH9-shaped MockERC20: payable `deposit` mints against received
 ///         ETH, `withdraw` burns and sends ETH back — the wrap/unwrap surface
 ///         the V4 handler's in-kind switch legs use.
@@ -173,8 +195,9 @@ contract MockSafeHarness {
 
 /// @notice Handler stand-in whose every entry point reverts with EMPTY
 ///         returndata, driving SafeYieldManager's `HandlerCallFailed`
-///         fallback branch in `_delegateToHandler`. `PROTOCOL()` is real so
-///         `setYieldHandler`'s validation accepts it.
+///         fallback branch in `_delegateToHandler`. `PROTOCOL()` and the two
+///         pool-param views are real so `setYieldHandler` and allow-listing
+///         accept it.
 contract MockRevertingYieldHandler {
     uint8 public immutable PROTOCOL;
 
@@ -186,8 +209,42 @@ contract MockRevertingYieldHandler {
         (token0, token1, ) = abi.decode(poolParam, (address, address, uint24));
     }
 
+    function poolParamHasHooks(bytes calldata) external pure returns (bool) {
+        return false;
+    }
+
     fallback() external {
         revert();
+    }
+}
+
+/// @notice Handler stand-in whose `poolTokens` reverts with EMPTY returndata,
+///         driving SafeYieldManager's `HandlerCallFailed` fallback in the
+///         staticcall path (`_decodePoolTokens`).
+contract MockBlindYieldHandler {
+    uint8 public immutable PROTOCOL;
+
+    constructor(uint8 _protocol) {
+        PROTOCOL = _protocol;
+    }
+
+    function poolTokens(bytes calldata) external pure returns (address, address) {
+        revert();
+    }
+}
+
+/// @notice Handler stand-in whose pool-param views revert WITH a reason,
+///         proving the manager bubbles a handler's own revert data instead of
+///         masking it as `HandlerCallFailed`.
+contract MockLoudYieldHandler {
+    uint8 public immutable PROTOCOL;
+
+    constructor(uint8 _protocol) {
+        PROTOCOL = _protocol;
+    }
+
+    function poolParamHasHooks(bytes calldata) external pure returns (bool) {
+        revert("loud handler");
     }
 }
 
@@ -483,8 +540,16 @@ contract MockNonfungiblePositionManager {
         amount1 = p.owed1;
         p.owed0 = 0;
         p.owed1 = 0;
-        if (amount0 > 0) IERC20(p.token0).transfer(params.recipient, amount0);
-        if (amount1 > 0) IERC20(p.token1).transfer(params.recipient, amount1);
+        if (amount0 > 0) _pay(p.token0, params.recipient, amount0);
+        if (amount1 > 0) _pay(p.token1, params.recipient, amount1);
+    }
+
+    /// @dev Raw transfer so a no-return token (MockNoReturnERC20) can be paid
+    ///      out like the real position manager does; the return value was
+    ///      never inspected here anyway.
+    function _pay(address token, address to, uint256 amount) internal {
+        (bool ok, ) = token.call(abi.encodeCall(IERC20.transfer, (to, amount)));
+        require(ok, "mock transfer failed");
     }
 
     function decreaseLiquidity(
@@ -537,6 +602,15 @@ contract MockERC721 {
 /// accepts a contract exposing a non-zero getMinDelay; tests use this helper
 /// to exercise the caller-is-timelock boundary without waiting for wall-clock
 /// delay in every setter test.
+/// @notice A "timelock" that reports no delay at all, for the constructor's
+///         `minDelay == 0` rejection (MockTimelockController refuses to be
+///         built with zero).
+contract MockZeroDelayTimelock {
+    function getMinDelay() external pure returns (uint256) {
+        return 0;
+    }
+}
+
 contract MockTimelockController {
     uint256 public immutable minDelay;
 

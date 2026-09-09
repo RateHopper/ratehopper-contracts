@@ -5,6 +5,7 @@ import "../dependencies/uniswapV3/CallbackValidation.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {PoolAddress} from "../dependencies/uniswapV3/PoolAddress.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "../common/Types.sol";
@@ -264,23 +265,19 @@ contract SafeDebtManager is Ownable, ReentrancyGuard, Pausable {
         uint8 fromAssetDecimals = IERC20Metadata(decoded.fromAsset).decimals();
         uint8 toAssetDecimals = IERC20Metadata(decoded.toAsset).decimals();
         int256 decimalDifference = int256(uint256(fromAssetDecimals)) - int256(uint256(toAssetDecimals));
-        uint flashloanFee;
-        if (decimalDifference > 0) {
-            // Round up: (a + b - 1) / b
-            uint divisor = 10 ** uint256(decimalDifference);
-            flashloanFee = (flashloanFeeOriginal + divisor - 1) / divisor;
-        } else if (decimalDifference < 0) {
-            flashloanFee = flashloanFeeOriginal * (10 ** uint256(-decimalDifference));
-        } else {
-            flashloanFee = flashloanFeeOriginal;
-        }
-
-        // Convert decoded.amount to toAsset decimals (used for protocolFee and amountInMax calculations)
+        // The principal (used for protocolFee and amountInMax) is converted alongside,
+        // rounding UP like the fee: rounding it down would size the auto swap
+        // (srcAmount == 0) below what the exact flash repayment needs.
+        uint256 flashloanFee = flashloanFeeOriginal;
         uint256 amountInToAssetDecimals = decoded.amount;
         if (decimalDifference > 0) {
-            amountInToAssetDecimals = decoded.amount / (10 ** uint256(decimalDifference));
+            uint256 divisor = 10 ** uint256(decimalDifference);
+            flashloanFee = Math.ceilDiv(flashloanFeeOriginal, divisor);
+            amountInToAssetDecimals = Math.ceilDiv(decoded.amount, divisor);
         } else if (decimalDifference < 0) {
-            amountInToAssetDecimals = decoded.amount * (10 ** uint256(-decimalDifference));
+            uint256 multiplier = 10 ** uint256(-decimalDifference);
+            flashloanFee = flashloanFeeOriginal * multiplier;
+            amountInToAssetDecimals = decoded.amount * multiplier;
         }
 
         // Use ceiling division for fee calculation to prevent fee abuse through transaction splitting

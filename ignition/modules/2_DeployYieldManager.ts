@@ -50,16 +50,19 @@ const NATIVE = "0x0000000000000000000000000000000000000000";
 // Every non-USDC side of every seeded pool param needs an entry: WETH, the
 // native `address(0)` key used by V4 native pools (both point at the same
 // WETH/USDC pool — WETH is substituted only for tick math), and AERO so staked
-// Aerodrome emissions can be sold without waiting on the timelock. A seeded
-// reference is validated live, so the deploy reverts rather than installing one
-// that cannot answer — if the AERO pool happens to be quiet at deploy time, drop
-// that entry and add it later by timelock; only WETH and NATIVE are load-bearing
-// for the pool params seeded below.
+// Aerodrome emissions can be sold without waiting on the timelock. A native V4
+// pool param requires BOTH the NATIVE and the WETH key (its withdraw leg hands
+// the native side back wrapped). A seeded reference is validated live, so the
+// deploy reverts rather than installing one that cannot answer — if the AERO
+// pool happens to be quiet at deploy time, drop that entry and add it later by
+// timelock; only WETH and NATIVE are load-bearing for the pool params seeded
+// below.
 //
 // Additional pairs are allow-listed post-deploy via setPoolParamAllowed only
 // after every non-USDC side has a live TWAP reference — which now means a
-// timelock proposal for the reference first. Hooked V4 pools remain restricted
-// to audited hooks (the allow-list is the sole hook gate).
+// timelock proposal for the reference first. Hooked V4 pool keys are admitted
+// only through the timelocked allowHookedPoolParam, after the hook has been
+// reviewed; routine setPoolParamAllowed (and this constructor) refuse them.
 const UNIV3_POOL_PARAMS = [100, 500, 3000].map((feeTier) => encodeUniV3PoolParam(WETH_ADDRESS, USDC_ADDRESS, feeTier));
 const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) =>
     encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, tickSpacing),
