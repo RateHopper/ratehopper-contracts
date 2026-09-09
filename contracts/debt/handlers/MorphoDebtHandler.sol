@@ -32,13 +32,16 @@ contract MorphoDebtHandler is BaseDebtHandler {
     ///      cover every share once `switchFrom` repays.
     function getDebtAmount(
         address /* asset */,
-        address /* onBehalfOf */,
+        address onBehalfOf,
         bytes calldata fromExtraData
     ) external returns (uint256) {
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(fromExtraData, (MarketParams, uint256));
         morpho.accrueInterest(marketParams);
-        Market memory m = morpho.market(marketParams.id());
-        return borrowShares.toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares) + 1;
+        Id marketId = marketParams.id();
+        uint256 shares = _closeShares(marketId, onBehalfOf, borrowShares);
+        if (shares == 0) return 0;
+        Market memory m = morpho.market(marketId);
+        return shares.toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares) + 1;
     }
 
     function switchIn(
@@ -73,18 +76,13 @@ contract MorphoDebtHandler is BaseDebtHandler {
         require(marketParams.loanToken == fromAsset, "fromAsset mismatch with marketParams in extraData");
         Id marketId = marketParams.id();
 
-        // Repay by shares (the exact, dust-free full close) only when `amount` —
-        // all the flash loan delivered — covers every share after accrual;
-        // otherwise this is a partial migration and repays exactly `amount`.
-        bool fullClose = false;
-        if (borrowShares > 0) {
-            morpho.accrueInterest(marketParams);
-            Market memory m = morpho.market(marketId);
-            fullClose = amount >= borrowShares.toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares);
-        }
+        morpho.accrueInterest(marketParams);
+        (uint256 repayShares, uint256 repayAssets) = _sizeRepayment(marketId, onBehalfOf, borrowShares, amount);
 
         IERC20(fromAsset).forceApprove(address(morpho), amount);
-        morpho.repay(marketParams, fullClose ? 0 : amount, fullClose ? borrowShares : 0, onBehalfOf, "");
+        if (repayShares > 0 || repayAssets > 0) {
+            morpho.repay(marketParams, repayAssets, repayShares, onBehalfOf, "");
+        }
 
         uint256 withdrawAmount = collateralAssets[0].amount;
         if (withdrawAmount == type(uint256).max) {
@@ -162,26 +160,19 @@ contract MorphoDebtHandler is BaseDebtHandler {
 
         (MarketParams memory marketParams, uint256 borrowShares) = abi.decode(extraData, (MarketParams, uint256));
 
-        uint256 approvalAmount;
-        if (borrowShares > 0) {
-            // Calculate exact amount needed from shares with 20% buffer
-            // https://docs.morpho.org/build/borrow/concepts/market-mechanics#full-repayment-shares-first
-            Id marketId = marketParams.id();
-            Market memory m = morpho.market(marketId);
-            approvalAmount = (borrowShares.toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares) * 120) / 100;
-        } else {
-            approvalAmount = amount;
-        }
+        morpho.accrueInterest(marketParams);
+        (uint256 repayShares, uint256 repayAssets) = _sizeRepayment(
+            marketParams.id(),
+            onBehalfOf,
+            borrowShares,
+            amount
+        );
+        if (repayShares == 0 && repayAssets == 0) return;
 
-        IERC20(asset).forceApprove(address(morpho), approvalAmount);
-
-        // If borrowShares > 0, repay by shares (for full repayment), otherwise repay by amount
-        if (borrowShares > 0) {
-            morpho.repay(marketParams, 0, borrowShares, onBehalfOf, "");
-        } else {
-            morpho.repay(marketParams, amount, 0, onBehalfOf, "");
-        }
-
+        // Accruing first makes the share leg's cost exact, so `amount` — which the
+        // branch below already covers it with — is approval enough; no buffer.
+        IERC20(asset).forceApprove(address(morpho), amount);
+        morpho.repay(marketParams, repayAssets, repayShares, onBehalfOf, "");
         IERC20(asset).forceApprove(address(morpho), 0);
     }
 
@@ -204,6 +195,38 @@ contract MorphoDebtHandler is BaseDebtHandler {
 
         // Withdraw collateral from user's position to this contract
         morpho.withdrawCollateral(marketParams, withdrawAmount, onBehalfOf, address(this));
+    }
+
+    /// @dev The share count travels in calldata built before execution, and by then
+    ///      it can only be stale high: anyone may repay someone else's Morpho
+    ///      position, and Morpho burns shares with a checked subtraction, so passing
+    ///      a stale count through lets a dust repayment revert the whole migration.
+    ///      Clamp it to the live balance. A smaller count stays the explicit partial
+    ///      cap the caller asked for; zero — the repay-by-assets marker — reads as
+    ///      the whole live position, which is what a max close is sized against.
+    function _closeShares(Id marketId, address onBehalfOf, uint256 borrowShares) internal view returns (uint256) {
+        uint256 liveShares = uint256(morpho.position(marketId, onBehalfOf).borrowShares);
+        return (borrowShares == 0 || borrowShares > liveShares) ? liveShares : borrowShares;
+    }
+
+    /// @dev Splits one repayment into the (shares, assets) pair `morpho.repay` takes,
+    ///      given `amount` on hand. Call only after accruing interest. Repaying by
+    ///      shares is the exact, dust-free close but needs every asset those shares
+    ///      are worth; short of that this is a partial repayment by assets. Both legs
+    ///      come back zero when there is nothing left to repay, which `morpho.repay`
+    ///      itself rejects as inconsistent input.
+    function _sizeRepayment(
+        Id marketId,
+        address onBehalfOf,
+        uint256 borrowShares,
+        uint256 amount
+    ) internal view returns (uint256 repayShares, uint256 repayAssets) {
+        uint256 closeShares = _closeShares(marketId, onBehalfOf, borrowShares);
+        if (closeShares == 0) return (0, 0);
+
+        Market memory m = morpho.market(marketId);
+        if (amount >= closeShares.toAssetsUp(m.totalBorrowAssets, m.totalBorrowShares)) return (closeShares, 0);
+        return (0, amount);
     }
 
     function _calculateMaxWithdrawAmount(
