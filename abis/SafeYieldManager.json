@@ -188,6 +188,11 @@
     },
     {
         "inputs": [],
+        "name": "HookedPoolParamNeedsTimelock",
+        "type": "error"
+    },
+    {
+        "inputs": [],
         "name": "InvalidExitBps",
         "type": "error"
     },
@@ -1451,6 +1456,24 @@
             }
         ],
         "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint8",
+                "name": "protocol",
+                "type": "uint8"
+            },
+            {
+                "internalType": "bytes",
+                "name": "poolParam",
+                "type": "bytes"
+            }
+        ],
+        "name": "allowHookedPoolParam",
+        "outputs": [],
+        "stateMutability": "nonpayable",
         "type": "function"
     },
     {
