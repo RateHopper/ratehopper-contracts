@@ -1,3 +1,5 @@
+import { AbiCoder } from "ethers";
+
 // Token addresses
 export const WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
 export const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"; // Circle
@@ -26,6 +28,43 @@ export const UNISWAP_V3_FACTORY_ADDRESS = "0x33128a8fC17869897dcE68Ed026d694621f
 export const UNISWAP_V3_NPM_ADDRESS = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
 export const UNISWAP_V3_SWAP_ROUTER_ADDRESS = "0x2626664c2603336E57B271c5C0b26F421741e481";
 
+// Aerodrome Slipstream (CL) — the concentrated-liquidity product (NOT the V2
+// AMM `IRouter`). Used by AerodromeYieldHandler for WETH/USDC LPs. The
+// canonical contracts and live WETH/USDC spacing-100 pool are also
+// exercised by test/yield/safeYieldManagerAerodromeFork.ts on a pinned Base fork.
+export const AERODROME_CL_FACTORY_ADDRESS = "0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A";
+
+// Uniswap V3 price references for SafeYieldManager's swap floor (H-01).
+// Chosen for observation history, not for where a swap executes: both carry
+// observationCardinality 2000, while other Base pools on the same pairs sit at
+// cardinality 1 and answer a 30-minute query with nothing but live spot.
+export const TWAP_REF_WETH_USDC_POOL = "0xb4CB800910B228ED3d0834cF79D697127BBB00e5"; // 0.01% fee
+export const TWAP_REF_AERO_USDC_POOL = "0xE5B5f522E98B5a2baAe212d4dA66b865B781DB97"; // 0.05% fee
+export const TWAP_WINDOW = 1800;
+export const TWAP_CARDINALITY = 60;
+
+export const AERODROME_SLIPSTREAM_NPM_ADDRESS = "0x827922686190790b37229fd06084350E74485b72";
+export const AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS = "0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5";
+// Aerodrome Voter — canonical pool -> stake pool registry. AerodromeYieldHandler
+// resolves the stakePool to stake into (open) / withdraw from (close) via
+// `VOTER.gauges(pool)` (verified: gauges(WETH/USDC spacing-100 pool) is live).
+export const AERODROME_VOTER_ADDRESS = "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5";
+
+// Uniswap V4 — singleton architecture: pools live inside the PoolManager and
+// are identified by PoolId = keccak256(abi.encode(PoolKey)), not by a pool
+// address. Reads go through StateView; LP through the V4 PositionManager
+// (ERC-721, pulls ERC20s via Permit2); swaps through the UniversalRouter.
+// Native ETH pools use currency0 == address(0). Addresses verified against
+// the official Uniswap deployments page and live on-chain reads.
+export const UNISWAP_V4_POOL_MANAGER_ADDRESS = "0x498581fF718922c3f8e6A244956aF099B2652b2b";
+export const UNISWAP_V4_POSITION_MANAGER_ADDRESS = "0x7C5f5A4bBd8fD63184577525326123B519429bDc";
+export const UNISWAP_V4_STATE_VIEW_ADDRESS = "0xA3c0c9b65baD0b08107Aa264b0f3dB444b867A71";
+export const UNISWAP_V4_QUOTER_ADDRESS = "0x0d5e0F971ED27FBfF6c2837bf31316121532048D";
+export const UNIVERSAL_ROUTER_ADDRESS = "0x6fF5693b99212Da76ad316178A184AB56D299b43";
+// NOTE: Base uses this Permit2 deployment (verified on-chain via
+// PositionManager.permit2()), NOT the older 0x...72F4d96f8 address.
+export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+
 // Paraswap
 export const PARASWAP_V6_CONTRACT_ADDRESS = "0x6a000f20005980200259b80c5102003040001068";
 
@@ -46,8 +85,8 @@ export const COMPTROLLER_ADDRESS = "0xfbb21d0380bee3312b33c4353c8936a0f13ef26c";
 export const ADMIN_ADDRESS = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
 
 // RateHopper canonical Base deployments — referenced by downstream deploys
-// (e.g. 2_DeployUniV3Helper reads PROTOCOL_REGISTRY_ADDRESS to wire RHP
-// to the existing registry).
+// (e.g. 2_DeployYieldManager reads PROTOCOL_REGISTRY_ADDRESS to wire
+// SafeYieldManager to the existing registry).
 //
 // AUTO-MANAGED: registry/core deploy scripts run scripts/syncRegistryAddress.js,
 // rewriting the address below to the configured
@@ -55,13 +94,47 @@ export const ADMIN_ADDRESS = "0xc74fc973A0740Ca1ED6f8F31Ed56003A13D4F5F1";
 // a registry deployed outside this repo's Ignition flow.
 export const PROTOCOL_REGISTRY_ADDRESS = "0x2f1331Df43E2f63e01298f570F9e467375077d7d";
 
-// Protocol enum
-export enum Protocol {
+// DebtProtocol enum
+export enum DebtProtocol {
     AAVE_V3,
     COMPOUND,
     MORPHO,
     FLUID,
     MOONWELL,
+}
+
+// Mirrors the YIELD_PROTOCOL_* uint8 id constants in contracts/Types.sol (append-only)
+export enum YieldProtocol {
+    UNISWAP_V3,
+    AERODROME,
+    UNISWAP_V4,
+}
+
+// SafeYieldManager pool params carry the pair: abi.encode(token0, token1, key).
+// These are THE encoding points — ignition, scripts, and tests must all agree
+// with the handlers' _decodePoolParam, so never hand-roll the encode elsewhere.
+export function encodeUniV3PoolParam(token0: string, token1: string, feeTier: number | bigint): string {
+    return AbiCoder.defaultAbiCoder().encode(["address", "address", "uint24"], [token0, token1, feeTier]);
+}
+
+export function encodeAerodromePoolParam(token0: string, token1: string, tickSpacing: number | bigint): string {
+    return AbiCoder.defaultAbiCoder().encode(["address", "address", "int24"], [token0, token1, tickSpacing]);
+}
+
+// Uniswap V4 pool param is the full PoolKey tuple, so keccak256 of it IS the
+// V4 PoolId. Native ETH pools use currency0 = ZeroAddress; hookless pools use
+// hooks = ZeroAddress (hooked pools are gated by the admin allow-list only).
+export function encodeUniV4PoolParam(
+    currency0: string,
+    currency1: string,
+    fee: number | bigint,
+    tickSpacing: number | bigint,
+    hooks: string,
+): string {
+    return AbiCoder.defaultAbiCoder().encode(
+        ["address", "address", "uint24", "int24", "address"],
+        [currency0, currency1, fee, tickSpacing, hooks],
+    );
 }
 
 export const USDC_COMET_ADDRESS = "0xb125E6687d4313864e53df431d5425969c15Eb2F";
@@ -97,7 +170,6 @@ export function getCTokenMappingArrays(): [string[], string[]] {
 // https://docs.moonwell.fi/moonwell/protocol-information/contracts#token-contract-addresses
 export const mDAI = "0x73b06d8d18de422e269645eace15400de7462417";
 export const mUSDC = "0xedc817a28e8b93b03976fbd4a3ddbc9f7d176c22";
-export const mUSDbC = "0x703843C3379b52F9FF486c9f5892218d2a065cC8";
 export const mWETH = "0x628ff693426583D9a7FB391E54366292F509D457";
 export const mcbETH = "0x3bf93770f2d4a794c3d9ebefbaebae2a8f09a5e5";
 export const mwstETH = "0x627Fe393Bc6EdDA28e99AE648fD6fF362514304b";

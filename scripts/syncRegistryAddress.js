@@ -2,7 +2,7 @@
 // to the ProtocolRegistry address deployed by 0_DeployRegistryOnly.ts.
 //
 // Runs automatically after registry/core deploys so the
-// `yarn deploy:2_univ3_helper` fallback (which reads PROTOCOL_REGISTRY_ADDRESS)
+// `yarn deploy:2_yield_manager` fallback (which reads PROTOCOL_REGISTRY_ADDRESS)
 // always points at the configured registry — a dev can't forget to bump
 // it manually.
 //

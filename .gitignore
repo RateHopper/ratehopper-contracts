@@ -21,6 +21,12 @@ node_modules
 
 # Hardhat Ignition default folder for deployments against a local node
 ignition/deployments/chain-*
+ignition/deployments/local-operator-v1/
+ignition/deployments/yield-v2/
+
+# Local deployment records (keep the stable Base manifest reviewable)
+/deployments/*
+!/deployments/base.json
 /.vscode
 yarn-error.log
 eth-sdk/abis/*

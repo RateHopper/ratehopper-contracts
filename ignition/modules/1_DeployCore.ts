@@ -6,7 +6,7 @@ import {
     AAVE_V3_DATA_PROVIDER_ADDRESS,
     MORPHO_ADDRESS,
     COMPTROLLER_ADDRESS,
-    Protocol,
+    DebtProtocol,
 } from "../../contractAddresses";
 
 /**
@@ -45,29 +45,35 @@ export default buildModule("DeployCore", (m) => {
 
     // ── 1. Handlers (sequential) ──────────────────────────────────────
     const aaveV3Handler = m.contract(
-        "AaveV3Handler",
+        "AaveV3DebtHandler",
         [AAVE_V3_POOL_ADDRESS, AAVE_V3_DATA_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry],
         { after: [registryConfigured] },
     );
 
-    const compoundHandler = m.contract("CompoundHandler", [registry, UNISWAP_V3_FACTORY_ADDRESS], {
+    const compoundHandler = m.contract("CompoundDebtHandler", [registry, UNISWAP_V3_FACTORY_ADDRESS], {
         after: [aaveV3Handler],
     });
 
-    const morphoHandler = m.contract("MorphoHandler", [MORPHO_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry], {
+    const morphoHandler = m.contract("MorphoDebtHandler", [MORPHO_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry], {
         after: [compoundHandler],
     });
 
-    const fluidSafeHandler = m.contract("FluidSafeHandler", [UNISWAP_V3_FACTORY_ADDRESS, registry], {
+    const fluidSafeHandler = m.contract("FluidSafeDebtHandler", [UNISWAP_V3_FACTORY_ADDRESS, registry], {
         after: [morphoHandler],
     });
 
-    const moonwellHandler = m.contract("MoonwellHandler", [COMPTROLLER_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry], {
+    const moonwellHandler = m.contract("MoonwellDebtHandler", [COMPTROLLER_ADDRESS, UNISWAP_V3_FACTORY_ADDRESS, registry], {
         after: [fluidSafeHandler],
     });
 
     // ── 2. SafeDebtManager ─────────────────────────────────────────────
-    const protocols = [Protocol.AAVE_V3, Protocol.COMPOUND, Protocol.MORPHO, Protocol.FLUID, Protocol.MOONWELL];
+    const protocols = [
+        DebtProtocol.AAVE_V3,
+        DebtProtocol.COMPOUND,
+        DebtProtocol.MORPHO,
+        DebtProtocol.FLUID,
+        DebtProtocol.MOONWELL,
+    ];
     const handlers = [aaveV3Handler, compoundHandler, morphoHandler, fluidSafeHandler, moonwellHandler];
 
     const safeDebtManager = m.contract("SafeDebtManager", [registry, protocols, handlers, pauserAddress], {

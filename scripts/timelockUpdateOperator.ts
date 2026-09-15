@@ -6,7 +6,7 @@ import { ethers } from "hardhat";
  * `setOperator` is a CRITICAL_ROLE function that can ONLY be called by the timelock,
  * so it must go through the two-step process:
  * 1. Schedule the operation (requires PROPOSER_ROLE)
- * 2. Wait for the timelock delay (8 hours by default)
+ * 2. Wait for the timelock delay (2 days by default)
  * 3. Execute the operation (requires EXECUTOR_ROLE)
  *
  * Usage:
@@ -30,9 +30,7 @@ async function main() {
     const OPERATION_ID = process.env.OPERATION_ID || "operator-update-" + Date.now();
 
     if (!TIMELOCK_ADDRESS || !PROTOCOL_REGISTRY_ADDRESS || !NEW_OPERATOR_ADDRESS) {
-        throw new Error(
-            "Please set TIMELOCK_ADDRESS, PROTOCOL_REGISTRY_ADDRESS, and NEW_OPERATOR_ADDRESS"
-        );
+        throw new Error("Please set TIMELOCK_ADDRESS, PROTOCOL_REGISTRY_ADDRESS, and NEW_OPERATOR_ADDRESS");
     }
 
     if (!ethers.isAddress(NEW_OPERATOR_ADDRESS)) {
@@ -103,7 +101,6 @@ async function main() {
         console.log(`   NEW_OPERATOR_ADDRESS=${NEW_OPERATOR_ADDRESS} \\`);
         console.log(`   OPERATION_ID="${OPERATION_ID}" \\`);
         console.log("   npx hardhat run scripts/timelockUpdateOperator.ts --network base");
-
     } else {
         // STEP 2: Execute the operation
         console.log("\n=== EXECUTING OPERATION ===\n");
@@ -115,9 +112,7 @@ async function main() {
             if (isPending) {
                 const timestamp = await timelock.getTimestamp(operationId);
                 const readyAt = new Date(Number(timestamp) * 1000);
-                throw new Error(
-                    `Operation is not ready yet. Please wait until ${readyAt.toISOString()}`
-                );
+                throw new Error(`Operation is not ready yet. Please wait until ${readyAt.toISOString()}`);
             } else {
                 throw new Error("Operation not found. Please schedule it first (run without EXECUTE=true)");
             }

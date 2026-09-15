@@ -27,6 +27,7 @@ contract MockERC20 is IERC20 {
 
     address public falseTransferTo;
     address public revertTransferTo;
+    bool public falseApproveZero;
 
     constructor(string memory _name, string memory _symbol, uint8 _decimals) {
         name = _name;
@@ -42,6 +43,10 @@ contract MockERC20 is IERC20 {
         revertTransferTo = account;
     }
 
+    function setFalseApproveZero(bool value) external {
+        falseApproveZero = value;
+    }
+
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
         totalSupply += amount;
@@ -49,6 +54,7 @@ contract MockERC20 is IERC20 {
     }
 
     function approve(address spender, uint256 amount) external override returns (bool) {
+        if (amount == 0 && falseApproveZero) return false;
         allowance[msg.sender][spender] = amount;
         emit Approval(msg.sender, spender, amount);
         return true;
@@ -83,12 +89,42 @@ contract MockERC20 is IERC20 {
     }
 }
 
-/// @notice Stand-in for `IProtocolRegistry` exposing only `safeOperator`.
+/// @notice WETH9-shaped MockERC20: payable `deposit` mints against received
+///         ETH, `withdraw` burns and sends ETH back — the wrap/unwrap surface
+///         the V4 handler's in-kind switch legs use.
+contract MockWETH is MockERC20 {
+    constructor() MockERC20("Wrapped Ether", "WETH", 18) {}
+
+    receive() external payable {}
+
+    function deposit() external payable {
+        balanceOf[msg.sender] += msg.value;
+        totalSupply += msg.value;
+        emit Transfer(address(0), msg.sender, msg.value);
+    }
+
+    function withdraw(uint256 amount) external {
+        require(balanceOf[msg.sender] >= amount, "WETH: balance");
+        balanceOf[msg.sender] -= amount;
+        totalSupply -= amount;
+        emit Transfer(msg.sender, address(0), amount);
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        require(sent, "WETH: send");
+    }
+}
+
+/// @notice Stand-in for `IProtocolRegistry` exposing `safeOperator` and the
+///         token whitelist.
 contract MockRegistry {
     address public safeOperator;
+    mapping(address => bool) public whitelistedTokens;
 
     function setOperator(address operator) external {
         safeOperator = operator;
+    }
+
+    function setWhitelisted(address token, bool whitelisted) external {
+        whitelistedTokens[token] = whitelisted;
     }
 }
 
@@ -98,11 +134,20 @@ contract MockRegistry {
 ///         let tests exercise the `ModuleCallFailed` (typed) and revert-bubble
 ///         branches of `_safeApprove` / `_safeExec` / `_safeMintLp`.
 contract MockSafeHarness {
-    // 0 = execute normally, 1 = fail with empty returndata, 2 = fail with `failData`.
+    // 0 = execute normally, 1 = fail with empty returndata, 2 = fail with
+    // `failData`, 3 = report success with `failData` as returndata without
+    // executing (drives the returndata-shape branches of `_trySafeTransfer`).
     mapping(address => uint8) public failMode;
     bytes public failData;
 
     receive() external payable {}
+
+    /// @dev Real deployed Safes accept ERC721 transfers via the default
+    ///      fallback handler's `onERC721Received`. Needed so a stakePool's
+    ///      `safeTransferFrom` back to the Safe on unstake succeeds here too.
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
+    }
 
     function setFail(address target, uint8 mode) external {
         failMode[target] = mode;
@@ -121,7 +166,28 @@ contract MockSafeHarness {
         uint8 mode = failMode[to];
         if (mode == 1) return (false, "");
         if (mode == 2) return (false, failData);
+        if (mode == 3) return (true, failData);
         (success, returnData) = to.call{value: value}(data);
+    }
+}
+
+/// @notice Handler stand-in whose every entry point reverts with EMPTY
+///         returndata, driving SafeYieldManager's `HandlerCallFailed`
+///         fallback branch in `_delegateToHandler`. `PROTOCOL()` is real so
+///         `setYieldHandler`'s validation accepts it.
+contract MockRevertingYieldHandler {
+    uint8 public immutable PROTOCOL;
+
+    constructor(uint8 _protocol) {
+        PROTOCOL = _protocol;
+    }
+
+    function poolTokens(bytes calldata poolParam) external pure returns (address token0, address token1) {
+        (token0, token1, ) = abi.decode(poolParam, (address, address, uint24));
+    }
+
+    fallback() external {
+        revert();
     }
 }
 
@@ -141,12 +207,26 @@ contract MockSwapRouter {
     }
 
     uint256 public output;
-    bool public pullInput = true;
+    mapping(address => uint256) public outputFor;
+    bool public enforceMinOut;
+    uint256 public callCount;
     address public callbackTarget;
     bytes public callbackData;
+    /// @dev Last min-out the caller actually handed the router — the value a
+    ///      TWAP-floored handler is supposed to have raised.
+    uint256 public lastAmountOutMinimum;
+    uint256 public lastAmountIn;
 
     function setOutput(uint256 newOutput) external {
         output = newOutput;
+    }
+
+    function setOutputFor(address tokenOut, uint256 newOutput) external {
+        outputFor[tokenOut] = newOutput;
+    }
+
+    function setEnforceMinOut(bool value) external {
+        enforceMinOut = value;
     }
 
     function setCallback(address target, bytes calldata data) external {
@@ -154,11 +234,10 @@ contract MockSwapRouter {
         callbackData = data;
     }
 
-    function setPullInput(bool enabled) external {
-        pullInput = enabled;
-    }
-
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut) {
+        callCount++;
+        lastAmountOutMinimum = params.amountOutMinimum;
+        lastAmountIn = params.amountIn;
         if (callbackTarget != address(0)) {
             (bool success, bytes memory ret) = callbackTarget.call(callbackData);
             if (!success) {
@@ -167,10 +246,11 @@ contract MockSwapRouter {
                 }
             }
         }
-        if (pullInput && params.amountIn > 0) {
+        if (params.amountIn > 0) {
             IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
         }
-        amountOut = output;
+        amountOut = outputFor[params.tokenOut] != 0 ? outputFor[params.tokenOut] : output;
+        if (enforceMinOut) require(amountOut >= params.amountOutMinimum, "router: too little received");
         if (amountOut > 0) {
             IERC20(params.tokenOut).transfer(params.recipient, amountOut);
         }
@@ -184,6 +264,18 @@ contract MockUniswapV3Pool {
     uint160 public sqrtPriceX96;
     uint128 public liquidity;
 
+    // Oracle surface. Defaults describe a deep, actively-observed pool whose
+    // average equals its spot tick, so a fixture that sets a realistic
+    // `sqrtPriceX96` gets a realistic TWAP without extra wiring. Each
+    // degradation the real world produces is separately settable.
+    int24 public twapTick;
+    int56 public cumulativeDelta;
+    bool public useCumulativeDelta;
+    uint16 public observationIndex;
+    uint16 public observationCardinality = 3000;
+    uint32 public observationAge;
+    bool public observeReverts;
+
     constructor(address _token0, address _token1, uint160 _sqrtPriceX96, uint128 _liquidity) {
         token0 = _token0;
         token1 = _token1;
@@ -191,21 +283,70 @@ contract MockUniswapV3Pool {
         liquidity = _liquidity;
     }
 
+    function setTwapTick(int24 newTick) external {
+        twapTick = newTick;
+        useCumulativeDelta = false;
+    }
+
+    /// @dev Drive `observe` by raw cumulative delta so a test can produce a
+    ///      non-integer mean and exercise the rounding direction.
+    function setCumulativeDelta(int56 newDelta) external {
+        cumulativeDelta = newDelta;
+        useCumulativeDelta = true;
+    }
+
+    function setObservationCardinality(uint16 newCardinality) external {
+        observationCardinality = newCardinality;
+    }
+
+    /// @dev Seconds by which the newest observation trails now.
+    function setObservationAge(uint32 newAge) external {
+        observationAge = newAge;
+    }
+
+    function setObserveReverts(bool newValue) external {
+        observeReverts = newValue;
+    }
+
     function slot0() external view returns (uint160, int24, uint16, uint16, uint16, uint8, bool) {
-        return (sqrtPriceX96, 0, 0, 0, 0, 0, true);
+        return (sqrtPriceX96, twapTick, observationIndex, observationCardinality, observationCardinality, 0, true);
+    }
+
+    function observations(uint256) external view returns (uint32, int56, uint160, bool) {
+        return (uint32(block.timestamp) - observationAge, 0, 0, true);
+    }
+
+    function observe(
+        uint32[] calldata secondsAgos
+    ) external view returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidity) {
+        // The real pool reverts `OLD` when the window predates its oldest
+        // observation. Nothing catches this — that is the point.
+        require(!observeReverts, "OLD");
+        tickCumulatives = new int56[](2);
+        secondsPerLiquidity = new uint160[](2);
+        tickCumulatives[0] = 0;
+        tickCumulatives[1] = useCumulativeDelta ? cumulativeDelta : int56(twapTick) * int56(uint56(secondsAgos[0]));
     }
 }
 
-/// @notice Factory stub returning a single configurable pool for any lookup.
+/// @notice Factory stub returning a single configurable default pool for any
+///         lookup, with optional per-(pair, fee) overrides for multi-pool
+///         tests (arbitrary-pair support).
 contract MockUniswapV3Factory {
     address public pool;
+    mapping(bytes32 => address) public keyedPools;
 
     function setPool(address newPool) external {
         pool = newPool;
     }
 
-    function getPool(address, address, uint24) external view returns (address) {
-        return pool;
+    function setPoolFor(address token0, address token1, uint24 fee, address newPool) external {
+        keyedPools[keccak256(abi.encode(token0, token1, fee))] = newPool;
+    }
+
+    function getPool(address token0, address token1, uint24 fee) external view returns (address) {
+        address keyed = keyedPools[keccak256(abi.encode(token0, token1, fee))];
+        return keyed != address(0) ? keyed : pool;
     }
 }
 
@@ -233,7 +374,11 @@ contract MockNonfungiblePositionManager {
     // Config applied to the next `mint`.
     uint128 public mintLiquidity = 1_000_000;
     address public mintOwnerOverride;
-    bool public pullOnMint = true;
+
+    // Reentrancy vector: called at the top of `decreaseLiquidity` when set,
+    // mirroring an NFT/pool callback re-entering the manager mid-flow.
+    address public callbackTarget;
+    bytes public callbackData;
 
     function setMintLiquidity(uint128 value) external {
         mintLiquidity = value;
@@ -243,8 +388,9 @@ contract MockNonfungiblePositionManager {
         mintOwnerOverride = account;
     }
 
-    function setPullOnMint(bool enabled) external {
-        pullOnMint = enabled;
+    function setCallback(address target, bytes calldata data) external {
+        callbackTarget = target;
+        callbackData = data;
     }
 
     /// @dev Seed a position directly (for collectLp/closeLp tests that bypass
@@ -267,6 +413,11 @@ contract MockNonfungiblePositionManager {
         positionsData[tokenId].owed1 = owed1;
     }
 
+    function setPrincipal(uint256 tokenId, uint128 principal0, uint128 principal1) external {
+        positionsData[tokenId].principal0 = principal0;
+        positionsData[tokenId].principal1 = principal1;
+    }
+
     function setTokens(uint256 tokenId, address token0, address token1) external {
         positionsData[tokenId].token0 = token0;
         positionsData[tokenId].token1 = token1;
@@ -276,16 +427,23 @@ contract MockNonfungiblePositionManager {
         positionsData[tokenId].owner = owner;
     }
 
+    /// @dev Fraction of each desired amount the mint actually consumes, so a
+    ///      test can leave residue behind the way a real range does.
+    uint16 public mintUsageBps = 10_000;
+
+    function setMintUsageBps(uint16 value) external {
+        require(value <= 10_000, "usage bps");
+        mintUsageBps = value;
+    }
+
     function mint(
         INonfungiblePositionManager.MintParams calldata params
     ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
         tokenId = nextId++;
-        amount0 = params.amount0Desired;
-        amount1 = params.amount1Desired;
-        if (pullOnMint) {
-            if (amount0 > 0) IERC20(params.token0).transferFrom(msg.sender, address(this), amount0);
-            if (amount1 > 0) IERC20(params.token1).transferFrom(msg.sender, address(this), amount1);
-        }
+        amount0 = (params.amount0Desired * mintUsageBps) / 10_000;
+        amount1 = (params.amount1Desired * mintUsageBps) / 10_000;
+        if (amount0 > 0) IERC20(params.token0).transferFrom(msg.sender, address(this), amount0);
+        if (amount1 > 0) IERC20(params.token1).transferFrom(msg.sender, address(this), amount1);
         liquidity = mintLiquidity;
         address owner = mintOwnerOverride == address(0) ? params.recipient : mintOwnerOverride;
         positionsData[tokenId] = Position(
@@ -332,12 +490,21 @@ contract MockNonfungiblePositionManager {
     function decreaseLiquidity(
         INonfungiblePositionManager.DecreaseLiquidityParams calldata params
     ) external payable returns (uint256 amount0, uint256 amount1) {
+        if (callbackTarget != address(0)) {
+            (bool success, bytes memory ret) = callbackTarget.call(callbackData);
+            if (!success) {
+                assembly {
+                    revert(add(ret, 32), mload(ret))
+                }
+            }
+        }
         Position storage p = positionsData[params.tokenId];
         require(params.liquidity <= p.liquidity, "liquidity");
         if (p.liquidity > 0) {
             amount0 = (uint256(p.principal0) * params.liquidity) / p.liquidity;
             amount1 = (uint256(p.principal1) * params.liquidity) / p.liquidity;
         }
+        require(amount0 >= params.amount0Min && amount1 >= params.amount1Min, "Price slippage check");
         p.principal0 -= uint128(amount0);
         p.principal1 -= uint128(amount1);
         p.owed0 += uint128(amount0);
@@ -363,5 +530,32 @@ contract MockERC721 {
     function safeTransferFrom(address from, address to, uint256 tokenId) external {
         require(ownerOf[tokenId] == from, "not owner");
         ownerOf[tokenId] = to;
+    }
+}
+
+/// @notice Test-only timelock-shaped forwarder. The production manager only
+/// accepts a contract exposing a non-zero getMinDelay; tests use this helper
+/// to exercise the caller-is-timelock boundary without waiting for wall-clock
+/// delay in every setter test.
+contract MockTimelockController {
+    uint256 public immutable minDelay;
+
+    constructor(uint256 delay_) {
+        require(delay_ > 0, "delay");
+        minDelay = delay_;
+    }
+
+    function getMinDelay() external view returns (uint256) {
+        return minDelay;
+    }
+
+    function execute(address target, bytes calldata data) external returns (bytes memory result) {
+        (bool ok, bytes memory ret) = target.call(data);
+        if (!ok) {
+            assembly ("memory-safe") {
+                revert(add(ret, 0x20), mload(ret))
+            }
+        }
+        return ret;
     }
 }

@@ -103,6 +103,11 @@
     },
     {
         "inputs": [],
+        "name": "FailedCall",
+        "type": "error"
+    },
+    {
+        "inputs": [],
         "name": "FeeAboveMax",
         "type": "error"
     },
@@ -948,6 +953,36 @@
             {
                 "internalType": "uint256",
                 "name": "tokenId",
+                "type": "uint256"
+            },
+            {
+                "internalType": "bool",
+                "name": "swapWethToUsdc",
+                "type": "bool"
+            },
+            {
+                "internalType": "uint24",
+                "name": "swapPoolFeeTier",
+                "type": "uint24"
+            },
+            {
+                "internalType": "uint256",
+                "name": "swapAmountOutMin",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "expectedSwapOut",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint16",
+                "name": "slippageBps",
+                "type": "uint16"
+            },
+            {
+                "internalType": "uint256",
+                "name": "deadline",
                 "type": "uint256"
             }
         ],

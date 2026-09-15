@@ -28,17 +28,9 @@ import {
     wrsETH_ADDRESS,
     wstETH_ADDRESS,
 } from "../../contractAddresses";
+import { makeRequireAddress } from "./deployHelpers";
 
-const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
-
-function requireAddress(label: string, value: string): void {
-    if (!ADDRESS_RE.test(value)) {
-        throw new Error(
-            `DeployRegistryOnly: ${label} must be a valid address but got "${value}". ` +
-                "Set the corresponding env var in your .env before deploying.",
-        );
-    }
-}
+const requireAddress = makeRequireAddress("DeployRegistryOnly");
 
 /**
  * Deploys and configures ProtocolRegistry.
@@ -53,7 +45,7 @@ function requireAddress(label: string, value: string): void {
  *  - TIMELOCK_ADMIN:         Used by TimelockControllerModule when REGISTRY_TIMELOCK is unset.
  *                            Falls back to ADMIN_ADDRESS.
  *  - TIMELOCK_DELAY:         Used by TimelockControllerModule when REGISTRY_TIMELOCK is unset.
- *                            Defaults to 28800 seconds.
+ *                            Defaults to 172800 seconds (2 days).
  *  - DEPLOYER_PRIVATE_KEY:   Deployer key (set in hardhat.config.ts).
  *
  * Usage:
