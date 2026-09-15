@@ -29,8 +29,12 @@ import "../../common/Types.sol";
 ///         PoolKey tuple `abi.encode(currency0, currency1, fee, tickSpacing,
 ///         hooks)`, so `keccak256(poolParam)` IS the V4 PoolId and the
 ///         manager's `allowedPoolKey` allow-list pins exactly one pool per
-///         param. Native ETH pools (`currency0 == address(0)`) are supported;
-///         hooked pools are gated exclusively by the admin allow-list.
+///         param. Native ETH pools (`currency0 == address(0)`) are supported.
+///         Hooked pools are admitted only through the manager's timelocked
+///         `allowHookedPoolParam` after the hook has been reviewed — a hook
+///         runs on every liquidity and swap path, including the oracle-free
+///         `withdrawLp` exit — and an exit swap leg may route through a
+///         hooked pool only if it is allow-listed.
 /// @dev    STATELESS: MUST NOT declare storage variables — all mutable state
 ///         lives in the ERC-7201 `YieldStorage` namespace (delegatecall from
 ///         the manager is layout-safe). Immutables are fine.
@@ -149,6 +153,11 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     }
 
     /// @inheritdoc IYieldHandler
+    function poolParamHasHooks(bytes calldata lpPoolParam) external pure returns (bool) {
+        return _decodePoolParam(lpPoolParam).hooks != address(0);
+    }
+
+    /// @inheritdoc IYieldHandler
     function openLp(
         OpenLpParams calldata p
     ) external onlyDelegatecall returns (uint256 tokenId, uint128 basisUsd6, uint128 used0, uint128 used1) {
@@ -251,7 +260,9 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             );
         }
 
-        // Swap the non-USDC legs this close produced back to USDC.
+        // Swap the non-USDC legs this close produced back to USDC. The deltas
+        // are dynamic (principal + harvested fees), so a residue whose floor
+        // rounds to zero stays in kind rather than failing the whole exit.
         _swapDeltaToUsdc(
             p.onBehalfOf,
             key.currency0,
@@ -260,7 +271,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             p.deadline,
             p.slippageBps,
             SwapSteps(63, 64, 65, 66, 67),
-            false
+            true
         );
         _swapDeltaToUsdc(
             p.onBehalfOf,
@@ -270,7 +281,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             p.deadline,
             p.slippageBps,
             SwapSteps(68, 69, 70, 71, 72),
-            false
+            true
         );
 
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
@@ -470,6 +481,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     ) internal returns (uint256 received) {
         if (currency == address(USDC)) return halfUsdc;
 
+        // Allow-list membership is an open-side check only (see `_validateSwapLeg`).
+        _validatePoolParamAllowed(leg.poolParam);
         _validateSwapLeg(currency, leg, p.slippageBps);
         // Only consume tokens produced by this call, never pre-existing ones.
         uint256 balanceBefore = _balanceOf(currency, p.onBehalfOf);
@@ -638,7 +651,10 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         // Single funnel for every UniversalRouter call in this handler.
         amountOutMin = _twapMinOut(currencyIn, currencyOut, amountIn, amountOutMin, slippageBps);
         if (amountOutMin == 0) {
-            if (leaveZeroFloorInKind) return;
+            if (leaveZeroFloorInKind) {
+                emit SwapSkippedBelowFloor(_onBehalfOf, currencyIn, amountIn);
+                return;
+            }
             revert InvalidSwapAmountOutMin();
         }
         PoolKey memory key = _decodePoolParam(poolParam);
@@ -734,20 +750,26 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         if (floor > 0 && STATE_VIEW.getLiquidity(poolId) < floor) revert PoolTooThin();
     }
 
-    /// @dev Route checks only: allow-listed pool param, resolving to a pool
+    /// @dev Route checks only: an initialized pool above the liquidity floor
     ///      that actually trades {currency, USDC} (native ETH sorts first:
     ///      address(0) < any token). The USDC side of a pair has no swap, so
-    ///      its (ignored) leg is not validated. The PRICE check needs the input
-    ///      amount and so lives in `_swapV4ViaSafe`.
+    ///      its (ignored) leg is not validated. Allow-list membership is
+    ///      checked by opens only (`_acquireSide`): exits must survive a
+    ///      de-listing, and the price is protected by the TWAP floor, not the
+    ///      allow-list (SECURITY_MODEL.md). A HOOKED pool is the exception —
+    ///      its hook code runs inside the swap, so an exit may route through
+    ///      it only once the timelock has admitted it; a hookless route for
+    ///      the same pair is always available instead. The PRICE check needs
+    ///      the input amount and so lives in `_swapV4ViaSafe`.
     function _validateSwapLeg(address currency, SwapLeg calldata leg, uint16 slippageBps) internal view {
         if (currency == address(USDC)) return;
         if (slippageBps == 0) revert SlippageTooLow();
         if (slippageBps > _yieldStorage().maxSlippageBps) revert SlippageAboveMax();
-        _validatePoolParamAllowed(leg.poolParam);
         (address expect0, address expect1) = currency < address(USDC)
             ? (currency, address(USDC))
             : (address(USDC), currency);
         (PoolKey memory key, ) = _validatePoolReady(leg.poolParam);
+        if (key.hooks != address(0)) _validatePoolParamAllowed(leg.poolParam);
         if (key.currency0 != expect0 || key.currency1 != expect1) revert WrongTokenPair();
     }
 

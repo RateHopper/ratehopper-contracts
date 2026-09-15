@@ -188,6 +188,11 @@
     },
     {
         "inputs": [],
+        "name": "HookedPoolParamNeedsTimelock",
+        "type": "error"
+    },
+    {
+        "inputs": [],
         "name": "InvalidExitBps",
         "type": "error"
     },
@@ -1012,6 +1017,37 @@
         "inputs": [
             {
                 "indexed": true,
+                "internalType": "address",
+                "name": "onBehalfOf",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "uint8",
+                "name": "protocol",
+                "type": "uint8"
+            },
+            {
+                "indexed": true,
+                "internalType": "uint256",
+                "name": "tokenId",
+                "type": "uint256"
+            },
+            {
+                "indexed": false,
+                "internalType": "address",
+                "name": "stakePool",
+                "type": "address"
+            }
+        ],
+        "name": "RestakeSkipped",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
                 "internalType": "bytes32",
                 "name": "role",
                 "type": "bytes32"
@@ -1123,6 +1159,31 @@
             }
         ],
         "name": "StakedRewardCollected",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "onBehalfOf",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "SwapSkippedBelowFloor",
         "type": "event"
     },
     {
@@ -1395,6 +1456,24 @@
             }
         ],
         "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint8",
+                "name": "protocol",
+                "type": "uint8"
+            },
+            {
+                "internalType": "bytes",
+                "name": "poolParam",
+                "type": "bytes"
+            }
+        ],
+        "name": "allowHookedPoolParam",
+        "outputs": [],
+        "stateMutability": "nonpayable",
         "type": "function"
     },
     {

@@ -63,8 +63,9 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
     error OnlyDelegatecall();
     error TokenApprovalFailed(address token);
-    /// @notice Thrown when `OpenLpParams.stake` is set for a protocol
-    ///         whose handler has no stakePool (e.g. Uniswap V3).
+    /// @notice Thrown when `OpenLpParams.stake` is set for a protocol whose
+    ///         handler has no stakePool (e.g. Uniswap V3) or whose stakePool
+    ///         no longer accepts deposits (`_stakePoolAcceptsDeposits`).
     error StakingNotSupported();
 
     /// @dev Inputs for `_mintFromAmounts`, the mint half shared by `openLp`
@@ -113,6 +114,11 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @inheritdoc IYieldHandler
     function poolTokens(bytes calldata lpPoolParam) external pure returns (address token0, address token1) {
         return _poolTokens(lpPoolParam);
+    }
+
+    /// @inheritdoc IYieldHandler
+    function poolParamHasHooks(bytes calldata) external pure returns (bool) {
+        return false;
     }
 
     /// @dev Read `sqrtPriceX96` from a pool (slot0 arity differs per protocol).
@@ -170,6 +176,16 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     ///      staked. Only reached for protocols that staked in the first place.
     function _restakeInto(address /* _onBehalfOf */, uint256 /* tokenId */, address /* stakePool */) internal virtual {
         revert StakingNotSupported();
+    }
+
+    /// @dev Whether `stakePool` still takes deposits. A gauge that governance
+    ///      has killed keeps honouring withdrawals but rejects deposits, so a
+    ///      partial close must not try to put the surviving NFT back — the
+    ///      restake would revert and strand the position behind the very exit
+    ///      meant to free it. Default: always. Aerodrome overrides it with the
+    ///      Voter's liveness flag.
+    function _stakePoolAcceptsDeposits(address /* stakePool */) internal view virtual returns (bool) {
+        return true;
     }
 
     /// @dev Forget which pool a position was staked in. Full close only — the NFT
@@ -356,17 +372,24 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         // matching reality. A full close burned the NFT, so the pin is dropped.
         // A restake failure reverts the whole close — a half-closed, unstaked
         // position with a live pin is exactly the divergence this guards against.
+        // A pool that no longer takes deposits (`_stakePoolAcceptsDeposits`) is
+        // the one exception: nothing to restake into, so the pin is dropped.
         if (unstakedFrom != address(0)) {
             if (p.exitBps == 10_000) {
                 _clearStakePin(p.tokenId);
-            } else {
+            } else if (_stakePoolAcceptsDeposits(unstakedFrom)) {
                 _restakeInto(p.onBehalfOf, p.tokenId, unstakedFrom);
+            } else {
+                _clearStakePin(p.tokenId);
+                emit RestakeSkipped(p.onBehalfOf, PROTOCOL, p.tokenId, unstakedFrom);
             }
         }
 
-        // Swap the non-USDC legs this close produced back to USDC.
-        _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, p.slippageBps, 26, 10, 27, false);
-        _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, p.slippageBps, 34, 35, 36, false);
+        // Swap the non-USDC legs this close produced back to USDC. The deltas
+        // are dynamic (principal + harvested fees), so a residue whose floor
+        // rounds to zero stays in kind rather than failing the whole exit.
+        _swapDeltaToUsdc(p.onBehalfOf, token0, t0Before, p.swap0, p.deadline, p.slippageBps, 26, 10, 27, true);
+        _swapDeltaToUsdc(p.onBehalfOf, token1, t1Before, p.swap1, p.deadline, p.slippageBps, 34, 35, 36, true);
 
         currentValueUsd6 = (USDC.balanceOf(p.onBehalfOf) - usdcBefore).toUint128();
         // Caller's final-value guard on gross realized USDC.
@@ -533,6 +556,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     ) internal returns (uint256 received) {
         if (token == address(USDC)) return halfUsdc;
 
+        // Allow-list membership is an open-side check only (see `_validateSwapLeg`).
+        _validatePoolParamAllowed(leg.poolParam);
         _validateSwapLeg(token, leg, p.slippageBps);
         // Only consume tokens produced by this call, never pre-existing ones.
         uint256 balanceBefore = IERC20(token).balanceOf(p.onBehalfOf);
@@ -613,6 +638,10 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev Skim `feeCollectBps` to the treasury, forward the rest to the
     ///      Safe. Treasury transfer failure waives the fee instead of
     ///      blocking users (e.g. USDC blacklist on the treasury).
+    ///      The skim uses SafeERC20's non-reverting variant rather than a typed
+    ///      `try`: a no-return token (USDT-style) makes the typed call's
+    ///      returndata decode fail, and THAT failure is not caught by `catch` —
+    ///      it reverts the harvest after the treasury was already paid.
     function _chargeCollectFee(
         address token,
         uint256 amount,
@@ -622,20 +651,11 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         if (amount == 0) return 0;
         YieldLayout storage $ = _yieldStorage();
         fee = (amount * $.feeCollectBps) / 10_000;
-        uint256 toSafe = amount;
-        if (fee > 0) {
-            try IERC20(token).transfer($.treasury, fee) returns (bool ok) {
-                if (ok) {
-                    toSafe = amount - fee;
-                } else {
-                    emit CollectFeeTransferFailed(_onBehalfOf, tokenId, token, fee);
-                    fee = 0;
-                }
-            } catch {
-                emit CollectFeeTransferFailed(_onBehalfOf, tokenId, token, fee);
-                fee = 0;
-            }
+        if (fee > 0 && !IERC20(token).trySafeTransfer($.treasury, fee)) {
+            emit CollectFeeTransferFailed(_onBehalfOf, tokenId, token, fee);
+            fee = 0;
         }
+        uint256 toSafe = amount - fee;
         if (toSafe > 0) IERC20(token).safeTransfer(_onBehalfOf, toSafe);
     }
 
@@ -658,13 +678,17 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         // Every router call in this handler funnels through here, so the floor
         // is enforced structurally rather than by remembering to call it.
         amountOutMin = _twapMinOut(tokenIn, tokenOut, amountIn, amountOutMin, slippageBps);
-        // Dynamic harvest/reward deltas can be non-zero while their quoted
-        // output rounds to zero in raw token units. There is no enforceable
-        // price boundary in that case, so keep the dust on the Safe instead of
-        // either making an unprotected router call or reverting the harvest.
-        // Known-input swaps (open legs) pass false and remain fail-closed.
+        // Dynamic harvest/reward/close deltas can be non-zero while their
+        // quoted output rounds to zero in raw token units. There is no
+        // enforceable price boundary in that case, so keep the dust on the Safe
+        // instead of either making an unprotected router call or reverting the
+        // harvest or exit. Known-input swaps (open legs) pass false and remain
+        // fail-closed.
         if (amountOutMin == 0) {
-            if (leaveZeroFloorInKind) return;
+            if (leaveZeroFloorInKind) {
+                emit SwapSkippedBelowFloor(_onBehalfOf, tokenIn, amountIn);
+                return;
+            }
             revert InvalidSwapAmountOutMin();
         }
         bytes memory swapData = _buildSwapCalldata(
@@ -716,16 +740,18 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         }
     }
 
-    /// @dev Route checks only: the leg's pool param must be allow-listed and
-    ///      must resolve to a pool that actually trades {token, USDC}. The USDC
-    ///      side of a pair has no swap, so its (ignored) leg is not validated.
+    /// @dev Route checks only: the leg's pool param must resolve to a pool that
+    ///      actually trades {token, USDC} and clears the liquidity floor. The
+    ///      USDC side of a pair has no swap, so its (ignored) leg is not
+    ///      validated. Allow-list membership is checked by opens only
+    ///      (`_acquireSide`): exits must survive a de-listing, and the price is
+    ///      protected by the TWAP floor, not the allow-list (SECURITY_MODEL.md).
     ///      The PRICE check is not here — it needs the input amount, which is
     ///      only known at the swap itself, so it lives in `_swapViaSafe`.
     function _validateSwapLeg(address token, SwapLeg calldata leg, uint16 slippageBps) internal view {
         if (token == address(USDC)) return;
         if (slippageBps == 0) revert SlippageTooLow();
         if (slippageBps > _yieldStorage().maxSlippageBps) revert SlippageAboveMax();
-        _validatePoolParamAllowed(leg.poolParam);
         (address expect0, address expect1) = token < address(USDC) ? (token, address(USDC)) : (address(USDC), token);
         _validatePool(_getPool(leg.poolParam), expect0, expect1);
     }

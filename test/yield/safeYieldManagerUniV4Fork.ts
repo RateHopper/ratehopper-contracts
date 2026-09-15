@@ -140,6 +140,10 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
                     token: ethers.ZeroAddress,
                     config: { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
                 },
+                {
+                    token: WETH_ADDRESS,
+                    config: { pool: TWAP_REF_WETH_USDC_POOL, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+                },
             ],
             treasury.address,
             1_000,

@@ -37,6 +37,11 @@ function timelockCall(timelock: any, manager: any, functionName: string, args: a
     return timelock.execute(manager.target, manager.interface.encodeFunctionData(functionName, args));
 }
 
+const twapSeed = (token: string, pool: string) => ({
+    token,
+    config: { pool, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
+});
+
 const UNISWAP_V3 = YieldProtocol.UNISWAP_V3;
 const AERODROME = YieldProtocol.AERODROME;
 const UNISWAP_V4 = YieldProtocol.UNISWAP_V4;
@@ -260,10 +265,6 @@ async function deployUniV4Harness() {
     await tokenCRef.waitForDeployment();
     const uniPoolAddr = await uniPool.getAddress();
     const tokenCRefAddr = await tokenCRef.getAddress();
-    const twapSeed = (token: string, pool: string) => ({
-        token,
-        config: { pool, window: TWAP_WINDOW, minCardinality: TWAP_CARDINALITY },
-    });
 
     const manager = await Manager.deploy(
         await reg.getAddress(),
@@ -314,6 +315,7 @@ async function deployUniV4Harness() {
         usdcAddr,
         tokenCAddr,
         uniPool,
+        uniPoolAddr,
         uniFactory,
         uniNpm,
         uniRouter,
@@ -418,6 +420,124 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                     deadline: DEADLINE,
                 }),
             ).to.be.revertedWithCustomError(v4Handler, "OnlyDelegatecall");
+        });
+
+        it("admits a hooked pool key only through the timelock", async function () {
+            const f = await loadFixture(deployUniV4Harness);
+            const hooked = encodeUniV4PoolParam(f.wethAddr, f.usdcAddr, 500, 10, f.safeAddr);
+            await (await f.stateView.setPool(ethers.keccak256(hooked), Q96, 10n ** 18n)).wait();
+            expect(await f.v4Handler.poolParamHasHooks(hooked)).to.equal(true);
+            expect(await f.v4Handler.poolParamHasHooks(V4_KEY)).to.equal(false);
+            expect(await f.uniHandler.poolParamHasHooks(FEE_TIER)).to.equal(false);
+
+            await expect(
+                f.manager.connect(f.deployer).setPoolParamAllowed(UNISWAP_V4, hooked, true),
+            ).to.be.revertedWithCustomError(f.manager, "HookedPoolParamNeedsTimelock");
+            const Manager = await ethers.getContractFactory("SafeYieldManager");
+            await expect(
+                Manager.deploy(
+                    await f.reg.getAddress(),
+                    f.usdcAddr,
+                    f.wethAddr,
+                    [UNISWAP_V4],
+                    [await f.v4Handler.getAddress()],
+                    [[hooked]],
+                    [0],
+                    [0],
+                    [twapSeed(f.wethAddr, f.uniPoolAddr)],
+                    f.treasury.address,
+                    Number(PERF_FEE_BPS),
+                    Number(COLLECT_FEE_BPS),
+                    MAX_FEE_BPS,
+                    f.deployer.address,
+                    await f.timelock.getAddress(),
+                    f.pauser.address,
+                ),
+            ).to.be.revertedWithCustomError(f.manager, "HookedPoolParamNeedsTimelock");
+            await expect(
+                f.manager.connect(f.deployer).allowHookedPoolParam(UNISWAP_V4, hooked),
+            ).to.be.revertedWithCustomError(f.manager, "OnlyTimelock");
+            await expect(
+                timelockCall(f.timelock, f.manager, "allowHookedPoolParam", [99, hooked]),
+            ).to.be.revertedWithCustomError(f.manager, "HandlerNotSet");
+
+            await expect(timelockCall(f.timelock, f.manager, "allowHookedPoolParam", [UNISWAP_V4, hooked]))
+                .to.emit(f.manager, "PoolParamAllowedUpdated")
+                .withArgs(UNISWAP_V4, hooked, false, true);
+            expect(await f.manager.isPoolParamAllowed(UNISWAP_V4, hooked)).to.equal(true);
+
+            await (await f.manager.connect(f.deployer).setPoolParamAllowed(UNISWAP_V4, hooked, false)).wait();
+            expect(await f.manager.isPoolParamAllowed(UNISWAP_V4, hooked)).to.equal(false);
+        });
+
+        it("routes an exit through a hooked pool only once the timelock has admitted it", async function () {
+            const {
+                manager,
+                operatorEOA,
+                safeAddr,
+                v4Handler,
+                stateView,
+                universalRouter,
+                timelock,
+                wethAddr,
+                usdcAddr,
+            } = await loadFixture(deployUniV4Harness);
+            const hooked = encodeUniV4PoolParam(wethAddr, usdcAddr, 500, 10, safeAddr);
+            await (await stateView.setPool(ethers.keccak256(hooked), Q96, 10n ** 18n)).wait();
+            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            await (await universalRouter.setOutputFor(usdcAddr, CLOSE_OUT)).wait();
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(CLOSE_OUT, hooked) })),
+            ).to.be.revertedWithCustomError(v4Handler, "PoolParamNotAllowed");
+
+            await (await timelockCall(timelock, manager, "allowHookedPoolParam", [UNISWAP_V4, hooked])).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(CLOSE_OUT, hooked) })),
+            ).to.emit(manager, "PositionClosed");
+        });
+
+        it("allow-lists a native pool only when both the native and the WETH reference answer", async function () {
+            const f = await loadFixture(deployUniV4Harness);
+            const Manager = await ethers.getContractFactory("SafeYieldManager");
+            const deployWith = async (seeds: { token: string; config: any }[], allowed: string[]) =>
+                Manager.deploy(
+                    await f.reg.getAddress(),
+                    f.usdcAddr,
+                    f.wethAddr,
+                    [UNISWAP_V4],
+                    [await f.v4Handler.getAddress()],
+                    [allowed],
+                    [0],
+                    [0],
+                    seeds,
+                    f.treasury.address,
+                    Number(PERF_FEE_BPS),
+                    Number(COLLECT_FEE_BPS),
+                    MAX_FEE_BPS,
+                    f.deployer.address,
+                    await f.timelock.getAddress(),
+                    f.pauser.address,
+                );
+
+            await expect(deployWith([twapSeed(ZERO, f.uniPoolAddr)], [V4_NATIVE_KEY]))
+                .to.be.revertedWithCustomError(f.manager, "TwapNotConfigured")
+                .withArgs(f.wethAddr);
+            await expect(deployWith([twapSeed(f.wethAddr, f.uniPoolAddr)], [V4_NATIVE_KEY]))
+                .to.be.revertedWithCustomError(f.manager, "TwapNotConfigured")
+                .withArgs(ZERO);
+
+            const nativeOnly = await deployWith([twapSeed(ZERO, f.uniPoolAddr)], []);
+            await nativeOnly.waitForDeployment();
+            await expect(nativeOnly.connect(f.deployer).setPoolParamAllowed(UNISWAP_V4, V4_NATIVE_KEY, true))
+                .to.be.revertedWithCustomError(f.manager, "TwapNotConfigured")
+                .withArgs(f.wethAddr);
+
+            expect(await f.manager.isPoolParamAllowed(UNISWAP_V4, V4_NATIVE_KEY)).to.equal(true);
         });
     });
 
@@ -604,6 +724,16 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             expect(await universalRouter.lastAmountOutMinimum()).to.equal(floor);
         });
 
+        it("refuses an open leg whose reference floor rounds to zero", async function () {
+            const { manager, operatorEOA, safeAddr, uniPool, v4Handler } = await loadFixture(deployUniV4Harness);
+            await (await uniPool.setTwapTick(800_000)).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(0, V4_KEY) })),
+            ).to.be.revertedWithCustomError(v4Handler, "InvalidSwapAmountOutMin");
+        });
+
         it("maps module-call failures to their step codes", async function () {
             const { manager, operatorEOA, safeAddr, safe, usdcAddr, permit2, universalRouter, v4Pm, v4Handler } =
                 await loadFixture(deployUniV4Harness);
@@ -776,6 +906,47 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY)))
                 .to.be.revertedWithCustomError(v4Handler, "ModuleCallFailed")
                 .withArgs(60);
+        });
+
+        it("keeps the V4 USDC exit working after the swap leg's pool key is de-listed", async function () {
+            const ctx = await openedFixture();
+            const { manager, operatorEOA, deployer, safeAddr, v4Pm } = ctx;
+            await (await manager.connect(deployer).setPoolParamAllowed(UNISWAP_V4, V4_KEY, false)).wait();
+            expect(await manager.isPoolParamAllowed(UNISWAP_V4, V4_KEY)).to.equal(false);
+
+            await (await v4Pm.setOwed(1, 40_000n, 0n)).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .collectLp(
+                        UNISWAP_V4,
+                        collectParams(safeAddr, 1, V4_KEY, { swapFeesToUsdc: true, swap0: leg(0, V4_KEY) }),
+                    ),
+            ).to.emit(manager, "FeesCollected");
+            await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY))).to.emit(
+                manager,
+                "PositionClosed",
+            );
+        });
+
+        it("leaves a V4 close delta in kind when its floor rounds to zero instead of reverting", async function () {
+            const ctx = await openedFixture();
+            const { manager, operatorEOA, safeAddr, v4Pm, universalRouter, weth, wethAddr, usdcAddr } = ctx;
+            const key = { currency0: wethAddr, currency1: usdcAddr, fee: 500, tickSpacing: 10, hooks: ZERO };
+            await (await v4Pm.seedPosition(1, safeAddr, key, 1_000_000n, 1n, 500_000n)).wait();
+            const callsBefore = await universalRouter.callCount();
+            const wethBefore = await weth.balanceOf(safeAddr);
+
+            const tx = manager
+                .connect(operatorEOA)
+                .closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(0, V4_KEY) }));
+            await expect(tx)
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, 500_000n, 0n, 10_000, 0n);
+            await expect(tx).to.emit(manager, "SwapSkippedBelowFloor").withArgs(safeAddr, wethAddr, 1n);
+
+            expect(await universalRouter.callCount()).to.equal(callsBefore);
+            expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore + 1n);
         });
     });
 

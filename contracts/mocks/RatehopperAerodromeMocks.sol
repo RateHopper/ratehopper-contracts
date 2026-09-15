@@ -302,11 +302,18 @@ contract MockCLNonfungiblePositionManager {
 
 /// @notice Settable pool -> stakePool registry stub for `IVoter`, driving
 ///         AerodromeYieldHandler's `_stake` / `_unstakeIfStaked` hooks.
+///         `killGauge` flips `isAlive` like governance killing a gauge.
 contract MockVoter {
     mapping(address => address) private _stakePools;
+    mapping(address => bool) public isAlive;
 
     function setStakePool(address pool, address stakePool) external {
         _stakePools[pool] = stakePool;
+        isAlive[stakePool] = true;
+    }
+
+    function killGauge(address stakePool) external {
+        isAlive[stakePool] = false;
     }
 
     function gauges(address pool) external view returns (address) {

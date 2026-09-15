@@ -55,6 +55,7 @@ import {
 } from "../helpers/protocolsDebt/fluid";
 import { cometAddressMap, CompoundHelper, USDC_COMET_ADDRESS } from "../helpers/protocolsDebt/compound";
 import {
+    marketParamsMap,
     MORPHO_ADDRESS,
     morphoMarket1Id,
     morphoMarket2Id,
@@ -469,6 +470,77 @@ describe("Safe wallet should debtSwap", function () {
                     {
                         morphoFromMarketId: morphoMarket1Id,
                         morphoToMarketId: morphoMarket2Id,
+                    },
+                );
+            });
+
+            it("from market 1 to market 2 with a partial amount", async function () {
+                await supplyAndBorrow(DebtProtocols.MORPHO);
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    DebtProtocols.MORPHO,
+                    DebtProtocols.MORPHO,
+                    cbETH_ADDRESS,
+                    {
+                        morphoFromMarketId: morphoMarket1Id,
+                        morphoToMarketId: morphoMarket2Id,
+                        debtAmountBps: 5_000,
+                        collateralBps: 5_000,
+                    },
+                );
+            });
+
+            it("from market 1 to market 2 with a partial amount repaid by assets (no shares in extraData)", async function () {
+                await supplyAndBorrow(DebtProtocols.MORPHO);
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    DebtProtocols.MORPHO,
+                    DebtProtocols.MORPHO,
+                    cbETH_ADDRESS,
+                    {
+                        morphoFromMarketId: morphoMarket1Id,
+                        morphoToMarketId: morphoMarket2Id,
+                        debtAmountBps: 5_000,
+                        collateralBps: 5_000,
+                        morphoRepayByAssets: true,
+                    },
+                );
+            });
+
+            it("from market 1 to market 2 in full after a stranger repaid part of the position", async function () {
+                await supplyAndBorrow(DebtProtocols.MORPHO);
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    DebtProtocols.MORPHO,
+                    DebtProtocols.MORPHO,
+                    cbETH_ADDRESS,
+                    {
+                        morphoFromMarketId: morphoMarket1Id,
+                        morphoToMarketId: morphoMarket2Id,
+                        morphoStrangerRepayUnits: "0.000001",
+                    },
+                );
+            });
+
+            it("from market 1 to market 2 in full after a day of unaccrued interest", async function () {
+                await supplyAndBorrow(DebtProtocols.MORPHO);
+                await executeDebtSwap(
+                    ETH_USDC_POOL,
+                    USDC_ADDRESS,
+                    USDC_ADDRESS,
+                    DebtProtocols.MORPHO,
+                    DebtProtocols.MORPHO,
+                    cbETH_ADDRESS,
+                    {
+                        morphoFromMarketId: morphoMarket1Id,
+                        morphoToMarketId: morphoMarket2Id,
+                        idleSeconds: 86_400,
                     },
                 );
             });
@@ -1794,7 +1866,12 @@ describe("Safe wallet should debtSwap", function () {
             fromFluidVaultAddress?: string;
             tofluidVaultAddress?: string;
             randomizeDebtAmount?: boolean;
+            debtAmountBps?: number;
             useMaxCollateral?: boolean;
+            collateralBps?: number;
+            morphoRepayByAssets?: boolean;
+            morphoStrangerRepayUnits?: string;
+            idleSeconds?: number;
             preferredDEX?: string;
         } = {
             useMaxAmount: true,
@@ -1841,12 +1918,13 @@ describe("Safe wallet should debtSwap", function () {
             // Keep the fuzzed amount non-zero and quote the same amount that will be swapped.
             actualDebtAmount = 1n + BigInt(Math.floor(Math.random() * Number(srcDebtBefore - 1n)));
         }
+        if (options.debtAmountBps !== undefined) {
+            actualDebtAmount = (srcDebtBefore * BigInt(options.debtAmountBps)) / 10_000n;
+        }
 
+        const useMaxAmount = options.useMaxAmount !== false && options.debtAmountBps === undefined;
         // Add 0.001% of initial amount (rounded up) for non-max amounts
-        const debtAmount =
-            options.useMaxAmount !== false
-                ? MaxUint256
-                : actualDebtAmount + (actualDebtAmount * 1n + 9_999n) / 1_000_000n;
+        const debtAmount = useMaxAmount ? MaxUint256 : actualDebtAmount + (actualDebtAmount * 1n + 9_999n) / 1_000_000n;
 
         // get paraswap data
         let paraswapData = {
@@ -1935,7 +2013,9 @@ describe("Safe wallet should debtSwap", function () {
             case DebtProtocols.MORPHO:
                 await helpers.morphoAuthorizeTxBySafe();
 
-                const borrowShares = await fromHelper.getBorrowShares(options!.morphoFromMarketId!, safeAddress);
+                const borrowShares = options.morphoRepayByAssets
+                    ? 0n
+                    : await fromHelper.getBorrowShares(options!.morphoFromMarketId!, safeAddress);
 
                 fromExtraData = fromHelper.encodeExtraData(options!.morphoFromMarketId!, borrowShares);
                 break;
@@ -2029,7 +2109,11 @@ describe("Safe wallet should debtSwap", function () {
         }
 
         // Build collateralArray (supports multiple collaterals)
-        const finalCollateralAmount = options.useMaxCollateral ? MaxUint256 : collateralAmount;
+        const finalCollateralAmount = options.useMaxCollateral
+            ? MaxUint256
+            : options.collateralBps !== undefined
+              ? (collateralAmount * BigInt(options.collateralBps)) / 10_000n
+              : collateralAmount;
         const collateralArray = options.anotherCollateralTokenAddress
             ? [
                   { asset: collateralTokenAddress, amount: finalCollateralAmount },
@@ -2041,7 +2125,17 @@ describe("Safe wallet should debtSwap", function () {
             : [{ asset: collateralTokenAddress, amount: finalCollateralAmount }];
 
         // simulate waiting for user's confirmation
-        await time.increaseTo((await time.latest()) + 60);
+        await time.increaseTo((await time.latest()) + (options.idleSeconds ?? 60));
+
+        // Anyone may repay a Morpho position, so the share count fromExtraData was
+        // built from can be stale by the time the swap runs.
+        if (options.morphoStrangerRepayUnits !== undefined && fromProtocol === DebtProtocols.MORPHO) {
+            await repayMorphoAsStranger(
+                options.morphoFromMarketId!,
+                fromTokenAddress,
+                options.morphoStrangerRepayUnits,
+            );
+        }
 
         // Create Safe transaction for executeDebtSwap
         const executeDebtSwapTxData: MetaTransactionData = {
@@ -2113,6 +2207,26 @@ describe("Safe wallet should debtSwap", function () {
             expect(srcDebtAfter).to.be.lt(srcDebtBefore);
             expect(dstDebtAfter).to.be.gt(dstDebtBefore);
         }
+        if (options.debtAmountBps !== undefined) {
+            expect(srcDebtAfter).to.be.closeTo(srcDebtBefore - actualDebtAmount, actualDebtAmount / 100n);
+        }
+        if (useMaxAmount && fromProtocol === DebtProtocols.MORPHO) {
+            expect(srcDebtAfter).to.equal(0n);
+        }
+    }
+
+    async function repayMorphoAsStranger(marketId: string, loanToken: string, units: string) {
+        const stranger = (await ethers.getSigners())[5];
+        await fundSignerWithETH(stranger.address);
+        await dealTokenAmount(loanToken, stranger.address, units);
+
+        const amount = ethers.parseUnits(units, await getDecimals(loanToken));
+        const token = new ethers.Contract(loanToken, ERC20_ABI, stranger);
+        await (await token.approve(MORPHO_ADDRESS, amount)).wait();
+
+        const morpho = new ethers.Contract(MORPHO_ADDRESS, morphoAbi, stranger);
+        await (await morpho.repay(marketParamsMap.get(marketId)!, amount, 0, safeAddress, "0x")).wait();
+        console.log(`Stranger repaid ${units} on Morpho for the Safe`);
     }
 
     describe("Protocol Enable/Disable", function () {
