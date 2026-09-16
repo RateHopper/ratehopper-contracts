@@ -2,9 +2,19 @@
   "chainId": 8453,
   "network": "base",
   "contracts": {
-    "DeployYieldManager#AerodromeYieldHandler": "0x942c5A46570F31236a6560aDE8Fd740A5163e303",
-    "DeployYieldManager#UniV3YieldHandler": "0x057790539471b103012df78e5A923E0b41d86168",
-    "DeployYieldManager#UniV4YieldHandler": "0x748b064A61f30E41b0904f91e5874f59714777d3",
-    "DeployYieldManager#SafeYieldManager": "0x93281e160181B8EBdEB8a8d9493BcD34dE5fA1b8"
+    "TimelockControllerModule#TimelockController": "0x5c92c997CB8E4EC529005586Ec73D0a617016CFB",
+    "DeployRegistryOnly#ProtocolRegistry": "0xfD8d7D6F2992362C67517b4D677d4F5b02BA85a2",
+    "DeployCore#AaveV3DebtHandler": "0x336Ec346281c16b22424B747563Da344CDC73326",
+    "DeployCore#CompoundDebtHandler": "0x3370b8184b8b6723d1d459c8223E0FC8Bd4E0a7f",
+    "DeployCore#MorphoDebtHandler": "0x181C352aA33092EE4A1c6e12a2305CA83E5099D2",
+    "DeployCore#FluidSafeDebtHandler": "0x7F900FA0Ddb5944c747AB7666365CEe4E4936798",
+    "DeployCore#MoonwellDebtHandler": "0x15e44bC5Bfe931559abb702eb51E5F2C0b647490",
+    "DeployCore#SafeDebtManager": "0x01442908D719FAac386Cd02527B51887389CBbF5",
+    "DeployCore#LeveragedPosition": "0x9b96462B20Ee71aA42c87b84d06a95d1f6316319",
+    "DeployCore#SafeExecTransactionWrapper": "0x0e1450DF577001dBD31C4b6025D97F46Ba48F44f",
+    "DeployYieldManager#AerodromeYieldHandler": "0xa413081aeA40f0aD46E05374533efC92D6316A34",
+    "DeployYieldManager#UniV3YieldHandler": "0x8E85b45534eD7bcA1D0DaC1c3976d83106A44F7b",
+    "DeployYieldManager#UniV4YieldHandler": "0x36c6825fE8122Dc1859f7dB6Cb5c3cB532ad0c35",
+    "DeployYieldManager#SafeYieldManager": "0x8a569BffA5141D6551383F8575Ce4C03dfdBD1Bc"
   }
 }
