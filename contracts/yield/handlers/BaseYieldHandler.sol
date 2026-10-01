@@ -12,6 +12,7 @@ import {INonfungiblePositionManager} from "../../interfaces/uniswapV3/INonfungib
 import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, WithdrawLpParams, OpenLpInKindParams, SwapLeg} from "../../interfaces/IYieldHandler.sol";
 import {TokenReturnLib} from "../libraries/TokenReturnLib.sol";
 import {TwapOracle} from "../libraries/TwapOracle.sol";
+import {MintPriceGuard} from "../libraries/MintPriceGuard.sol";
 import {YieldStorage} from "./YieldStorage.sol";
 import "../../common/Types.sol";
 
@@ -55,6 +56,11 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     address public immutable POSITION_MANAGER;
     IERC20 public immutable USDC;
     address public immutable SWAP_ROUTER;
+    /// @notice Largest allowed distance, in ticks (~1 bp each), between the LP
+    ///         pool's spot price at mint time and the reference TWAP. See
+    ///         MintPriceGuard. Retuning it is a new handler deployment, i.e. a
+    ///         timelocked `setYieldHandler`.
+    uint24 public immutable MAX_MINT_DEVIATION_TICKS;
 
     /// @dev Own deployment address, captured at construction to enforce
     ///      delegatecall-only entry (a direct call would run against the
@@ -90,15 +96,25 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         _;
     }
 
-    constructor(uint8 _protocol, address _positionManager, IERC20 _usdc, address _swapRouter) {
+    constructor(
+        uint8 _protocol,
+        address _positionManager,
+        IERC20 _usdc,
+        address _swapRouter,
+        uint24 _maxMintDeviationTicks
+    ) {
         if (_positionManager == address(0)) revert ZeroAddress();
         if (address(_usdc) == address(0)) revert ZeroAddress();
         if (_swapRouter == address(0)) revert ZeroAddress();
+        if (_maxMintDeviationTicks == 0 || _maxMintDeviationTicks > MAX_SETTABLE_MINT_DEVIATION_TICKS) {
+            revert InvalidMintDeviation();
+        }
 
         PROTOCOL = _protocol;
         POSITION_MANAGER = _positionManager;
         USDC = _usdc;
         SWAP_ROUTER = _swapRouter;
+        MAX_MINT_DEVIATION_TICKS = _maxMintDeviationTicks;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -784,6 +800,21 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         return callerMinOut > floor ? callerMinOut : floor;
     }
 
+    /// @dev Mint-time spot-vs-reference check (MintPriceGuard). V3-style pools
+    ///      never carry native ETH, so each side is its own reference key.
+    function _requireMintPriceNearReference(address token0, address token1, uint160 sqrtPriceX96) internal view {
+        YieldLayout storage $ = _yieldStorage();
+        MintPriceGuard.requireNearReference(
+            $.twapConfigOf[token0],
+            token0,
+            $.twapConfigOf[token1],
+            token1,
+            address(USDC),
+            sqrtPriceX96,
+            MAX_MINT_DEVIATION_TICKS
+        );
+    }
+
     function _validatePoolParamAllowed(bytes memory poolParam) internal view {
         if (!_yieldStorage().allowedPoolKey[PROTOCOL][keccak256(poolParam)]) revert PoolParamNotAllowed();
     }
@@ -840,6 +871,9 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         address token1,
         MintArgs memory a
     ) internal returns (uint256 tokenId, uint128 used0, uint128 used1) {
+        // Read at mint time, after any open-leg swaps have moved the pool.
+        _requireMintPriceNearReference(token0, token1, _poolSqrtPriceX96(_getPool(a.lpPoolParam)));
+
         _safeApprove(a.onBehalfOf, token0, POSITION_MANAGER, a.amount0, 22);
         _safeApprove(a.onBehalfOf, token1, POSITION_MANAGER, a.amount1, 23);
 

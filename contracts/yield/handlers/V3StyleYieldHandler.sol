@@ -24,8 +24,9 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
         address _positionManager,
         IERC20 _usdc,
         address _swapRouter,
-        IUniswapV3Factory _factory
-    ) BaseYieldHandler(_protocol, _positionManager, _usdc, _swapRouter) {
+        IUniswapV3Factory _factory,
+        uint24 _maxMintDeviationTicks
+    ) BaseYieldHandler(_protocol, _positionManager, _usdc, _swapRouter, _maxMintDeviationTicks) {
         if (address(_factory) == address(0)) revert ZeroAddress();
         FACTORY = _factory;
     }

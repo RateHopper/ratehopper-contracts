@@ -10,6 +10,8 @@ import {
 } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
 
+const MAX_MINT_DEVIATION_TICKS = 200;
+
 // ─────────────────────────────────────────────────────────────────────────
 //  Mock-driven suite for UniV4YieldHandler behind SafeYieldManager.
 //
@@ -32,6 +34,10 @@ const MAX_FEE_BPS = 2000;
 const Q96 = 1n << 96n;
 const TWAP_WINDOW = 1800;
 const TWAP_CARDINALITY = 60;
+
+function sqrtPriceAtTick(tick: number): bigint {
+    return BigInt(Math.floor(Math.sqrt(1.0001 ** tick) * 2 ** 96));
+}
 
 function timelockCall(timelock: any, manager: any, functionName: string, args: any[]) {
     return timelock.execute(manager.target, manager.interface.encodeFunctionData(functionName, args));
@@ -225,6 +231,7 @@ async function deployUniV4Harness() {
         usdcAddr,
         await uniRouter.getAddress(),
         await uniFactory.getAddress(),
+        MAX_MINT_DEVIATION_TICKS,
     );
     await uniHandler.waitForDeployment();
 
@@ -235,6 +242,7 @@ async function deployUniV4Harness() {
         await clRouter.getAddress(),
         await clFactory.getAddress(),
         await voter.getAddress(),
+        MAX_MINT_DEVIATION_TICKS,
     );
     await aeroHandler.waitForDeployment();
 
@@ -246,6 +254,7 @@ async function deployUniV4Harness() {
         await stateView.getAddress(),
         usdcAddr,
         wethAddr,
+        MAX_MINT_DEVIATION_TICKS,
     );
     await v4Handler.waitForDeployment();
 
@@ -377,7 +386,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 const bad = [...args];
                 bad[i] = ZERO;
                 await expect(
-                    V4Handler.deploy(bad[0], bad[1], bad[2], bad[3], bad[4], bad[5]),
+                    V4Handler.deploy(bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], MAX_MINT_DEVIATION_TICKS),
                 ).to.be.revertedWithCustomError(v4Handler, "ZeroAddress");
             }
         });
@@ -1244,6 +1253,51 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(USDC_AMOUNT);
             expect(await v4Pm.ownerOf(1)).to.equal(safeAddr);
             expect(await weth.balanceOf(safeAddr)).to.equal(0n);
+        });
+
+        it("guards a native destination mint against its WETH reference, oriented as ETH", async function () {
+            const { manager, operatorEOA, safeAddr, uniPool, stateView, v4Handler, wethAddr, usdcAddr } =
+                await loadFixture(deployUniV4Harness);
+            await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
+            await (await uniPool.setTwapTick(500)).wait();
+            const usdcPerEthTick = BigInt(wethAddr) < BigInt(usdcAddr) ? 500 : -500;
+            const poolId = ethers.keccak256(V4_NATIVE_KEY);
+            const params = switchParams(safeAddr, 1, V4_NATIVE_KEY, { tickLower: -1000, tickUpper: 1000 });
+
+            await (await stateView.setPool(poolId, sqrtPriceAtTick(-usdcPerEthTick + 0.5), 10n ** 18n)).wait();
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, params),
+            ).to.be.revertedWithCustomError(v4Handler, "MintPriceDeviation");
+
+            await (await stateView.setPool(poolId, sqrtPriceAtTick(usdcPerEthTick + 0.5), 10n ** 18n)).wait();
+            await expect(manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, params)).to.emit(
+                manager,
+                "PositionSwitched",
+            );
+        });
+
+        it("refuses a V4 open into a pool pushed past the reference", async function () {
+            const { manager, operatorEOA, safeAddr, stateView, v4Handler } = await loadFixture(deployUniV4Harness);
+            await (await stateView.setPool(ethers.keccak256(V4_KEY), sqrtPriceAtTick(250.5), 10n ** 18n)).wait();
+            await expect(manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY)))
+                .to.be.revertedWithCustomError(v4Handler, "MintPriceDeviation")
+                .withArgs(250, 0, MAX_MINT_DEVIATION_TICKS);
+        });
+
+        it("bounds the mint deviation tolerance in the V4 handler constructor", async function () {
+            const { v4Handler, v4Pm, universalRouter, permit2, stateView, usdcAddr, wethAddr } =
+                await loadFixture(deployUniV4Harness);
+            const V4Handler = await ethers.getContractFactory("UniV4YieldHandler");
+            const pm = await v4Pm.getAddress();
+            const router = await universalRouter.getAddress();
+            const p2 = await permit2.getAddress();
+            const sv = await stateView.getAddress();
+            const deployWith = (deviation: number) =>
+                V4Handler.deploy(pm, router, p2, sv, usdcAddr, wethAddr, deviation);
+
+            expect(await v4Handler.MAX_MINT_DEVIATION_TICKS()).to.equal(MAX_MINT_DEVIATION_TICKS);
+            await expect(deployWith(0)).to.be.revertedWithCustomError(v4Handler, "InvalidMintDeviation");
+            await expect(deployWith(1001)).to.be.revertedWithCustomError(v4Handler, "InvalidMintDeviation");
         });
 
         it("switches V4 -> V3, wrapping the native side of the withdrawal", async function () {

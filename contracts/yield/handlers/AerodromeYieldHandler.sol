@@ -27,8 +27,9 @@ contract AerodromeYieldHandler is BaseYieldHandler {
         IERC20 _usdc,
         address _swapRouter,
         ICLFactory _clFactory,
-        IVoter _voter
-    ) BaseYieldHandler(YIELD_PROTOCOL_AERODROME, _positionManager, _usdc, _swapRouter) {
+        IVoter _voter,
+        uint24 _maxMintDeviationTicks
+    ) BaseYieldHandler(YIELD_PROTOCOL_AERODROME, _positionManager, _usdc, _swapRouter, _maxMintDeviationTicks) {
         if (address(_clFactory) == address(0)) revert ZeroAddress();
         if (address(_voter) == address(0)) revert ZeroAddress();
         CL_FACTORY = _clFactory;

@@ -115,6 +115,14 @@ const TWAP_SEEDS = [
  *  - SYM_PERMIT2 / PERMIT2:                               Permit2 (Base uses
  *                                                         0x...B43aC78BA3).
  *  - SYM_UNIV4_STATE_VIEW / UNIV4_STATE_VIEW:             StateView lens.
+ *  - SYM_MAX_MINT_DEVIATION_TICKS / MAX_MINT_DEVIATION_TICKS: Largest
+ *                                            |LP pool spot - reference TWAP| a
+ *                                            mint accepts, in ticks (~1 bp each),
+ *                                            all three handlers. Default 200 (~2%).
+ *                                            Max 1000. Too tight and mints revert
+ *                                            while ETH moves faster than the 30-min
+ *                                            TWAP; too loose and a pushed pool can
+ *                                            take that much of a mint.
  *
  * Usage:
  *   npx hardhat ignition deploy ignition/modules/2_DeployYieldManager.ts \
@@ -176,6 +184,11 @@ export default buildModule("DeployYieldManager", (m) => {
         envBigInt(0n, "SYM_UNIV4_MIN_POOL_LIQUIDITY", "MIN_POOL_LIQUIDITY"),
     );
 
+    const maxMintDeviationTicks = m.getParameter<number>(
+        "maxMintDeviationTicks",
+        envNumber(200, "SYM_MAX_MINT_DEVIATION_TICKS", "MAX_MINT_DEVIATION_TICKS"),
+    );
+
     const uniV4PositionManagerAddr =
         envString("SYM_UNIV4_POSITION_MANAGER", "UNIV4_POSITION_MANAGER") || UNISWAP_V4_POSITION_MANAGER_ADDRESS;
     const universalRouterAddr = envString("SYM_UNIVERSAL_ROUTER", "UNIVERSAL_ROUTER") || UNIVERSAL_ROUTER_ADDRESS;
@@ -197,6 +210,7 @@ export default buildModule("DeployYieldManager", (m) => {
         USDC_ADDRESS,
         UNISWAP_V3_SWAP_ROUTER_ADDRESS,
         UNISWAP_V3_FACTORY_ADDRESS,
+        maxMintDeviationTicks,
     ]);
 
     const aerodromeYieldHandler = m.contract("AerodromeYieldHandler", [
@@ -205,6 +219,7 @@ export default buildModule("DeployYieldManager", (m) => {
         AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
         AERODROME_CL_FACTORY_ADDRESS,
         AERODROME_VOTER_ADDRESS,
+        maxMintDeviationTicks,
     ]);
 
     const uniV4YieldHandler = m.contract("UniV4YieldHandler", [
@@ -214,6 +229,7 @@ export default buildModule("DeployYieldManager", (m) => {
         stateView,
         USDC_ADDRESS,
         WETH_ADDRESS,
+        maxMintDeviationTicks,
     ]);
 
     const safeYieldManager = m.contract(

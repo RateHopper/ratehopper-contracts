@@ -14,6 +14,8 @@ import { encodeUniV3PoolParam } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
 import { deployRealSafe, enableModuleOnSafe } from "../helpers/deployRealSafe";
 
+const MAX_MINT_DEVIATION_TICKS = 200;
+
 const UNISWAP_V3 = 0;
 const FEE_TIER = 500;
 // Uniswap V3 tick spacing for the 0.05% fee tier.
@@ -83,6 +85,7 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
             USDC_ADDRESS,
             UNISWAP_V3_SWAP_ROUTER_ADDRESS,
             UNISWAP_V3_FACTORY_ADDRESS,
+            MAX_MINT_DEVIATION_TICKS,
         );
         await handler.waitForDeployment();
 

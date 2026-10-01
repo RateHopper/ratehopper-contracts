@@ -17,6 +17,16 @@ contract UniV3YieldHandler is V3StyleYieldHandler {
         address _positionManager,
         IERC20 _usdc,
         address _swapRouter,
-        IUniswapV3Factory _uniswapV3Factory
-    ) V3StyleYieldHandler(YIELD_PROTOCOL_UNISWAP_V3, _positionManager, _usdc, _swapRouter, _uniswapV3Factory) {}
+        IUniswapV3Factory _uniswapV3Factory,
+        uint24 _maxMintDeviationTicks
+    )
+        V3StyleYieldHandler(
+            YIELD_PROTOCOL_UNISWAP_V3,
+            _positionManager,
+            _usdc,
+            _swapRouter,
+            _uniswapV3Factory,
+            _maxMintDeviationTicks
+        )
+    {}
 }

@@ -17,6 +17,8 @@ import { encodeAerodromePoolParam } from "../../contractAddresses";
 import { ZERO_LEG, leg, pokeTwapPool } from "../helpers/utils";
 import { deployRealSafe, enableModuleOnSafe } from "../helpers/deployRealSafe";
 
+const MAX_MINT_DEVIATION_TICKS = 200;
+
 const AERODROME = 1;
 const TICK_SPACING = 100;
 const AERO_TICK_SPACING = 50; // tick spacing of the live USDC/AERO CL pool
@@ -69,6 +71,7 @@ async function deployAeroStack() {
         AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
         AERODROME_CL_FACTORY_ADDRESS,
         AERODROME_VOTER_ADDRESS,
+        MAX_MINT_DEVIATION_TICKS,
     );
     await handler.waitForDeployment();
 

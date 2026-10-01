@@ -226,4 +226,10 @@ abstract contract YieldStorage {
     error TwapPoolPairMismatch();
     error InvalidTwapReferencePool(address pool);
     error TwapReferenceRemovalNotAllowed(address token);
+    error InvalidMintDeviation();
+
+    /// @dev Ceiling on a handler's mint-time spot-vs-reference tolerance
+    ///      (~10%, the same order as MAX_SETTABLE_SLIPPAGE_BPS). A constant, not
+    ///      storage, so handlers stay stateless.
+    uint24 internal constant MAX_SETTABLE_MINT_DEVIATION_TICKS = 1000;
 }

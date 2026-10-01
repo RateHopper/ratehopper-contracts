@@ -19,6 +19,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {TokenReturnLib} from "../libraries/TokenReturnLib.sol";
 import {TwapOracle} from "../libraries/TwapOracle.sol";
+import {MintPriceGuard} from "../libraries/MintPriceGuard.sol";
 import {YieldStorage} from "./YieldStorage.sol";
 import "../../common/Types.sol";
 
@@ -73,6 +74,11 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     ///         so a native pool side is wrapped on withdraw / unwrapped on
     ///         open (1:1, no price exposure).
     IWETH9 public immutable WETH;
+    /// @notice Largest allowed distance, in ticks (~1 bp each), between the LP
+    ///         pool's spot price at mint time and the reference TWAP. See
+    ///         MintPriceGuard. Retuning it is a new handler deployment, i.e. a
+    ///         timelocked `setYieldHandler`.
+    uint24 public immutable MAX_MINT_DEVIATION_TICKS;
 
     /// @dev Own deployment address, captured at construction to enforce
     ///      delegatecall-only entry (a direct call would run against the
@@ -125,7 +131,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         IAllowanceTransfer _permit2,
         IStateView _stateView,
         IERC20 _usdc,
-        IWETH9 _weth
+        IWETH9 _weth,
+        uint24 _maxMintDeviationTicks
     ) {
         if (address(_positionManager) == address(0)) revert ZeroAddress();
         if (_universalRouter == address(0)) revert ZeroAddress();
@@ -133,6 +140,9 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         if (address(_stateView) == address(0)) revert ZeroAddress();
         if (address(_usdc) == address(0)) revert ZeroAddress();
         if (address(_weth) == address(0)) revert ZeroAddress();
+        if (_maxMintDeviationTicks == 0 || _maxMintDeviationTicks > MAX_SETTABLE_MINT_DEVIATION_TICKS) {
+            revert InvalidMintDeviation();
+        }
 
         POSITION_MANAGER = _positionManager;
         UNIVERSAL_ROUTER = _universalRouter;
@@ -140,6 +150,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         STATE_VIEW = _stateView;
         USDC = _usdc;
         WETH = _weth;
+        MAX_MINT_DEVIATION_TICKS = _maxMintDeviationTicks;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -392,6 +403,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         if (liquidity == 0 || liquidity < _yieldStorage().minPositionLiquidity[PROTOCOL]) {
             revert PositionLiquidityTooLow();
         }
+        _requireMintPriceNearReference(key, sqrtPriceX96);
 
         bool native0 = key.currency0 == NATIVE;
         if (!native0) {
@@ -730,6 +742,22 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
 
     function _decodePoolParam(bytes memory poolParam) internal pure returns (PoolKey memory) {
         return abi.decode(poolParam, (PoolKey));
+    }
+
+    /// @dev Mint-time spot-vs-reference check (MintPriceGuard). A native side
+    ///      keeps its own `address(0)` reference key but is oriented as WETH,
+    ///      the token its reference pool actually trades.
+    function _requireMintPriceNearReference(PoolKey memory key, uint160 sqrtPriceX96) internal view {
+        YieldLayout storage $ = _yieldStorage();
+        MintPriceGuard.requireNearReference(
+            $.twapConfigOf[key.currency0],
+            key.currency0 == NATIVE ? address(WETH) : key.currency0,
+            $.twapConfigOf[key.currency1],
+            key.currency1,
+            address(USDC),
+            sqrtPriceX96,
+            MAX_MINT_DEVIATION_TICKS
+        );
     }
 
     function _validatePoolParamAllowed(bytes memory poolParam) internal view {

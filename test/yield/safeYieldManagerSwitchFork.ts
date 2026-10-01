@@ -22,6 +22,8 @@ import { encodeAerodromePoolParam, encodeUniV3PoolParam, encodeUniV4PoolParam } 
 import { ZERO_LEG, leg } from "../helpers/utils";
 import { deployRealSafe, enableModuleOnSafe } from "../helpers/deployRealSafe";
 
+const MAX_MINT_DEVIATION_TICKS = 200;
+
 const UNISWAP_V3 = 0;
 const AERODROME = 1;
 const UNISWAP_V4 = 2;
@@ -107,6 +109,7 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
         USDC_ADDRESS,
         UNISWAP_V3_SWAP_ROUTER_ADDRESS,
         UNISWAP_V3_FACTORY_ADDRESS,
+        MAX_MINT_DEVIATION_TICKS,
     );
     await uniHandler.waitForDeployment();
 
@@ -117,6 +120,7 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
         AERODROME_SLIPSTREAM_SWAP_ROUTER_ADDRESS,
         AERODROME_CL_FACTORY_ADDRESS,
         AERODROME_VOTER_ADDRESS,
+        MAX_MINT_DEVIATION_TICKS,
     );
     await aeroHandler.waitForDeployment();
 
@@ -128,6 +132,7 @@ async function deployStack(uniPoolParams: string[], aeroPoolParams: string[]) {
         UNISWAP_V4_STATE_VIEW_ADDRESS,
         USDC_ADDRESS,
         WETH_ADDRESS,
+        MAX_MINT_DEVIATION_TICKS,
     );
     await v4Handler.waitForDeployment();
 

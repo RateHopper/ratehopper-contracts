@@ -5,6 +5,8 @@ import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { YieldProtocol, encodeAerodromePoolParam, encodeUniV3PoolParam } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
 
+const MAX_MINT_DEVIATION_TICKS = 200;
+
 // ─────────────────────────────────────────────────────────────────────────
 //  Mock-driven suite for SafeYieldManager + UniV3YieldHandler /
 //  AerodromeYieldHandler (AP-4817 adapter pattern).
@@ -40,6 +42,17 @@ const HALF = USDC_AMOUNT / 2n;
 const WETH_OUT = 2_000_000n; // WETH produced by the openLp swap
 const TWAP_WINDOW = 1800;
 const TWAP_CARDINALITY = 60;
+
+function sqrtPriceAtTick(tick: number): bigint {
+    return BigInt(Math.floor(Math.sqrt(1.0001 ** tick) * 2 ** 96));
+}
+
+async function deployClPoolAtTick(wethAddr: string, usdcAddr: string, tick: number) {
+    const CLPool = await ethers.getContractFactory("MockCLPool");
+    const pool = await CLPool.deploy(wethAddr, usdcAddr, sqrtPriceAtTick(tick), 10n ** 18n);
+    await pool.waitForDeployment();
+    return pool.getAddress();
+}
 
 function timelockCall(timelock: any, manager: any, functionName: string, args: any[]) {
     return timelock.execute(manager.target, manager.interface.encodeFunctionData(functionName, args));
@@ -185,6 +198,7 @@ async function deployYieldManagerHarness() {
         usdcAddr,
         await uniRouter.getAddress(),
         await uniFactory.getAddress(),
+        MAX_MINT_DEVIATION_TICKS,
     );
     await uniHandler.waitForDeployment();
 
@@ -195,6 +209,7 @@ async function deployYieldManagerHarness() {
         await clRouter.getAddress(),
         await clFactory.getAddress(),
         await voter.getAddress(),
+        MAX_MINT_DEVIATION_TICKS,
     );
     await aeroHandler.waitForDeployment();
 
@@ -591,6 +606,34 @@ describe("SafeYieldManager", function () {
             ).to.be.revertedWith("OLD");
         });
 
+        it("refuses to mint into a pool pushed past the reference", async function () {
+            const { manager, operatorEOA, safeAddr, clFactory, aeroHandler, wethAddr, usdcAddr } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await clFactory.setPool(await deployClPoolAtTick(wethAddr, usdcAddr, 300.5))).wait();
+            await expect(manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING)))
+                .to.be.revertedWithCustomError(aeroHandler, "MintPriceDeviation")
+                .withArgs(300, 0, MAX_MINT_DEVIATION_TICKS);
+        });
+
+        it("mints when the pool is within the reference tolerance", async function () {
+            const { manager, operatorEOA, safeAddr, clFactory, wethAddr, usdcAddr } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await clFactory.setPool(await deployClPoolAtTick(wethAddr, usdcAddr, -150.5))).wait();
+            await expect(manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING))).to.emit(
+                manager,
+                "PositionOpened",
+            );
+        });
+
+        it("refuses to mint when the reference itself has moved away from the pool", async function () {
+            const { manager, operatorEOA, safeAddr, uniPool, aeroHandler } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await uniPool.setTwapTick(-250)).wait();
+            await expect(
+                manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING)),
+            ).to.be.revertedWithCustomError(aeroHandler, "MintPriceDeviation");
+        });
+
         it("reverts SwapFailed when the swap produces no WETH", async function () {
             const { manager, operatorEOA, safeAddr, uniRouter } = await loadFixture(deployYieldManagerHarness);
             await (await uniRouter.setOutput(0)).wait();
@@ -653,6 +696,7 @@ describe("SafeYieldManager", function () {
                 usdcAddr,
                 await uniRouter.getAddress(),
                 await uniFactory.getAddress(),
+                MAX_MINT_DEVIATION_TICKS,
             );
             await newHandler.waitForDeployment();
             await (
@@ -1130,6 +1174,7 @@ describe("SafeYieldManager", function () {
                 usdcAddr,
                 await uniRouter.getAddress(),
                 await uniFactory.getAddress(),
+                MAX_MINT_DEVIATION_TICKS,
             );
             await nextHandler.waitForDeployment();
             const nextHandlerAddr = await nextHandler.getAddress();
@@ -1236,24 +1281,27 @@ describe("SafeYieldManager", function () {
             const factory = await uniFactory.getAddress();
             const voterAddr = await voter.getAddress();
 
-            await expect(UniHandler.deploy(ZERO, usdcAddr, router, factory)).to.be.revertedWithCustomError(
-                uniHandler,
-                "ZeroAddress",
-            );
-            await expect(UniHandler.deploy(npm, ZERO, router, factory)).to.be.revertedWithCustomError(
-                uniHandler,
-                "ZeroAddress",
-            );
-            await expect(UniHandler.deploy(npm, usdcAddr, ZERO, factory)).to.be.revertedWithCustomError(
-                uniHandler,
-                "ZeroAddress",
-            );
-            await expect(UniHandler.deploy(npm, usdcAddr, router, ZERO)).to.be.revertedWithCustomError(
-                uniHandler,
-                "ZeroAddress",
-            );
             await expect(
-                AeroHandler.deploy(await clNpm.getAddress(), usdcAddr, await clRouter.getAddress(), ZERO, voterAddr),
+                UniHandler.deploy(ZERO, usdcAddr, router, factory, MAX_MINT_DEVIATION_TICKS),
+            ).to.be.revertedWithCustomError(uniHandler, "ZeroAddress");
+            await expect(
+                UniHandler.deploy(npm, ZERO, router, factory, MAX_MINT_DEVIATION_TICKS),
+            ).to.be.revertedWithCustomError(uniHandler, "ZeroAddress");
+            await expect(
+                UniHandler.deploy(npm, usdcAddr, ZERO, factory, MAX_MINT_DEVIATION_TICKS),
+            ).to.be.revertedWithCustomError(uniHandler, "ZeroAddress");
+            await expect(
+                UniHandler.deploy(npm, usdcAddr, router, ZERO, MAX_MINT_DEVIATION_TICKS),
+            ).to.be.revertedWithCustomError(uniHandler, "ZeroAddress");
+            await expect(
+                AeroHandler.deploy(
+                    await clNpm.getAddress(),
+                    usdcAddr,
+                    await clRouter.getAddress(),
+                    ZERO,
+                    voterAddr,
+                    MAX_MINT_DEVIATION_TICKS,
+                ),
             ).to.be.revertedWithCustomError(uniHandler, "ZeroAddress");
             await expect(
                 AeroHandler.deploy(
@@ -1262,8 +1310,40 @@ describe("SafeYieldManager", function () {
                     await clRouter.getAddress(),
                     await clFactory.getAddress(),
                     ZERO,
+                    MAX_MINT_DEVIATION_TICKS,
                 ),
             ).to.be.revertedWithCustomError(uniHandler, "ZeroAddress");
+        });
+
+        it("bounds the mint deviation tolerance in handler constructors", async function () {
+            const { uniHandler, uniNpm, uniRouter, uniFactory, clNpm, clRouter, clFactory, voter, usdcAddr } =
+                await loadFixture(deployYieldManagerHarness);
+            const UniHandler = await ethers.getContractFactory("UniV3YieldHandler");
+            const AeroHandler = await ethers.getContractFactory("AerodromeYieldHandler");
+            const npm = await uniNpm.getAddress();
+            const router = await uniRouter.getAddress();
+            const factory = await uniFactory.getAddress();
+
+            expect(await uniHandler.MAX_MINT_DEVIATION_TICKS()).to.equal(MAX_MINT_DEVIATION_TICKS);
+            await expect(UniHandler.deploy(npm, usdcAddr, router, factory, 0)).to.be.revertedWithCustomError(
+                uniHandler,
+                "InvalidMintDeviation",
+            );
+            await expect(UniHandler.deploy(npm, usdcAddr, router, factory, 1001)).to.be.revertedWithCustomError(
+                uniHandler,
+                "InvalidMintDeviation",
+            );
+            await expect(UniHandler.deploy(npm, usdcAddr, router, factory, 1000)).to.not.be.reverted;
+            await expect(
+                AeroHandler.deploy(
+                    await clNpm.getAddress(),
+                    usdcAddr,
+                    await clRouter.getAddress(),
+                    await clFactory.getAddress(),
+                    await voter.getAddress(),
+                    0,
+                ),
+            ).to.be.revertedWithCustomError(uniHandler, "InvalidMintDeviation");
         });
     });
 
@@ -3167,17 +3247,39 @@ describe("SafeYieldManager", function () {
         });
 
         it("needs no price at all when the switch redeploys everything", async function () {
+            const { manager, operatorEOA, safeAddr } = await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
+            )
+                .to.emit(manager, "SwitchResidueSettled")
+                .withArgs(safeAddr, AERODROME, 1, 0, 0, 0, USDC_AMOUNT, 0);
+            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(USDC_AMOUNT);
+            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(0);
+        });
+
+        it("refuses the destination mint when the reference cannot answer", async function () {
             const { manager, operatorEOA, safeAddr, uniPool } = await loadFixture(deployYieldManagerHarness);
             await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
             await (await uniPool.setObserveReverts(true)).wait();
 
-            await (
-                await manager
-                    .connect(operatorEOA)
-                    .switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING))
-            ).wait();
-            expect(await manager.residualBasisUsd6Of(AERODROME, 1)).to.equal(USDC_AMOUNT);
-            expect(await manager.carryProfitUsd6Of(AERODROME, 1)).to.equal(0);
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
+            ).to.be.revertedWith("OLD");
+        });
+
+        it("refuses to switch into a pool pushed past the reference", async function () {
+            const { manager, operatorEOA, safeAddr, clFactory, aeroHandler, wethAddr, usdcAddr } =
+                await loadFixture(deployYieldManagerHarness);
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+            await (await clFactory.setPool(await deployClPoolAtTick(wethAddr, usdcAddr, -400.5))).wait();
+
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
+            )
+                .to.be.revertedWithCustomError(aeroHandler, "MintPriceDeviation")
+                .withArgs(-401, 0, MAX_MINT_DEVIATION_TICKS);
         });
 
         it("refuses to guess at a residue it cannot price", async function () {

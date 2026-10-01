@@ -16,6 +16,8 @@ import {
 import { ZERO_LEG, leg } from "../helpers/utils";
 import { deployRealSafe, enableModuleOnSafe } from "../helpers/deployRealSafe";
 
+const MAX_MINT_DEVIATION_TICKS = 200;
+
 // ─────────────────────────────────────────────────────────────────────────
 //  Base-fork integration for UniV4YieldHandler against the REAL Uniswap V4
 //  stack (PoolManager-backed PositionManager, UniversalRouter, Permit2,
@@ -118,6 +120,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             UNISWAP_V4_STATE_VIEW_ADDRESS,
             USDC_ADDRESS,
             WETH_ADDRESS,
+            MAX_MINT_DEVIATION_TICKS,
         );
         await handler.waitForDeployment();
 
@@ -318,6 +321,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             UNISWAP_V4_STATE_VIEW_ADDRESS,
             USDC_ADDRESS,
             WETH_ADDRESS,
+            MAX_MINT_DEVIATION_TICKS,
         );
         await handler.waitForDeployment();
 

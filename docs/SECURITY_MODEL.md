@@ -206,8 +206,10 @@ than the basis.
 
 The valuation uses the H-01 reference TWAP, never spot: spot would let anyone
 able to nudge a pool under-report the residue and shrink the fee the eventual
-close charges. A switch that redeploys everything reads no price at all, and a
-switch that cannot price its residue reverts rather than guessing.
+close charges. A switch that redeploys everything needs no residue price, and a
+switch that cannot price its residue reverts rather than guessing. (The
+destination mint itself always reads the reference since the mint-time price
+guard below, so a switch with an unusable reference reverts either way.)
 
 `withdrawLp` releases any carry without charging it, and says so in
 `PositionWithdrawn.releasedCarryUsd6`. That is the same fee-free-exit property
@@ -240,6 +242,39 @@ The existing inverse guard remains: a partial close reverts when
 `basisForExit > 0 && liquidityToRemove == 0`, preventing a basis reduction with
 no liquidity removed. Full closes consume the entire remaining basis and
 liquidity. L-2 is therefore **acknowledged / accepted**, not reported as fixed.
+
+## Mint-time price guard — no liquidity is added at a pushed price
+
+H-01 floors every swap, but a mint does not swap: it adds liquidity at the
+pool's own spot price, and its only native protection is the caller's
+`mintAmount0Min` / `mintAmount1Min`. Those, and the tick range, are chosen by
+the same caller H-01 stopped trusting. A compromised operator or gateway caller
+could therefore push an allow-listed pool, mint a Safe's funds (`openLp`, or the
+destination leg of `switchLp`) into a range between the true and pushed price
+with 1-wei minimums, and trade the price back through the Safe's liquidity. The
+loss scales with how far the pool was pushed, not with `maxSlippageBps`, and a
+gateway cannot size the minimums without a price of its own.
+
+Both handlers' `_mintFromAmounts` now refuse the mint unless the pool's spot
+tick is within `MAX_MINT_DEVIATION_TICKS` of the tick implied by the reference
+TWAPs (`MintPriceGuard`). The expected tick of a token0/token1 pool is
+`t(token0) - t(token1)`, where `t(X)` is the reference tick of "USDC per X" and
+`t(USDC) = 0`, so any pair whose sides have references is covered, and a native
+V4 side is oriented as WETH (its reference pool's token) while keeping its own
+`address(0)` key.
+
+- The tolerance is a handler immutable (default 200 ticks, about 2%; at most
+  `MAX_SETTABLE_MINT_DEVIATION_TICKS` = 1000). Changing it is a new handler
+  deployment registered through the timelocked `setYieldHandler`, so it cannot
+  be loosened quickly by any single role.
+- It fails closed: an unusable reference, or a market that moves faster than
+  the 30-minute TWAP by more than the tolerance, makes opens and switches revert
+  until the two agree again. Exits are untouched — they mint nothing — and
+  `withdrawLp` still needs no price at all.
+- Rolling it out needs no new manager: deploy the handlers
+  (`ignition/modules/3_DeployYieldHandlers.ts`) and register them
+  (`scripts/timelockSetYieldHandlers.ts`). Positions opened earlier keep closing
+  through the handler pinned at their open.
 
 ## M-01 — No router call is left without a floor
 
