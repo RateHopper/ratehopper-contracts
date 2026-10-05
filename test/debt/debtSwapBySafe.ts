@@ -605,6 +605,24 @@ describe("Safe wallet should debtSwap", function () {
             );
         });
 
+        it("keeps owner and its storage slot unchanged after a swap", async function () {
+            const [deployer] = await ethers.getSigners();
+            const slot0Before = await ethers.provider.getStorage(safeModuleAddress, 0);
+            expect(await safeModuleContract.owner()).to.equal(deployer.address);
+
+            await supplyAndBorrow(DebtProtocols.AAVE_V3);
+            await executeDebtSwap(
+                ETH_USDC_POOL,
+                USDC_ADDRESS,
+                USDC_ADDRESS,
+                DebtProtocols.AAVE_V3,
+                DebtProtocols.COMPOUND,
+            );
+
+            expect(await safeModuleContract.owner()).to.equal(deployer.address);
+            expect(await ethers.provider.getStorage(safeModuleAddress, 0)).to.equal(slot0Before);
+        });
+
         describe("with type(uint256).max collateral amount", function () {
             it("from Aave to Compound", async function () {
                 await supplyAndBorrow(DebtProtocols.AAVE_V3);
