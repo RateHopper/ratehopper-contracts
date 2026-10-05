@@ -6,6 +6,8 @@ chosen to authorize. Most of what follows is a consequence of that one fact.
 
 This document records the accepted properties of that design (audit items H-01,
 I-01, I-02 and I-03, and Shred September 2026 item L-2) and the decisions behind them.
+The last section reads two third-party Safe-module incidents from September and
+October 2026 against the same properties.
 
 ## I-01 — The performance fee is cooperative, by construction
 
@@ -301,3 +303,137 @@ position.**
 `CRITICAL_ROLE` is the timelock and is its own role admin
 (`_setRoleAdmin(CRITICAL_ROLE, CRITICAL_ROLE)`), so `DEFAULT_ADMIN_ROLE` cannot
 self-grant it and skip the 2-day delay on timelock-only setters.
+
+## Safe-module incidents, September–October 2026 — why neither pattern reaches these contracts
+
+A Safe module is an executor the Safe has authorized, so its whole security
+reduces to two questions: **who** can make it execute, and **what** it can be
+made to execute. Two third-party modules were drained within three weeks of
+each other, each by failing one of those questions.
+
+| Date       | Module                                                        | Failure                                                                                                                                                                                                                                                                                                                                                 | Loss                      |
+| ---------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| 2026-09-15 | third-party rsETH module                                      | Forwarded caller-supplied `to` / `data` / `operation` into `execTransactionFromModuleReturnData` with `operation = 1` (DelegateCall), and did not gate the caller. Anyone could run arbitrary code in the Safe's own context.                                                                                                                              | ~$7.8M                    |
+| 2026-10-01 | FlashLoopAdapter, Ethereum `0x16bb8B912da187870C23eC6756bB3FAd061283d8` | `_start` authenticated with `ISafe(msg.sender).isModuleEnabled(address(this))`, asking the caller to vouch for itself. `_swap` then did `router.call(data)` with a caller-supplied router and calldata. A fake Safe returned `true`; `router` was set to a real victim Safe and `data` to `execTransactionFromModule(...)`, so the adapter's module privilege ran the attacker's call as the victim. | ~114 ETH from two Safes   |
+
+The first was reviewed against the then-live deployment on 2026-09-18
+(internal review AP-4844); the second against `main` on 2026-10-05. Both
+reduce to the four properties below, and each is structural — it holds because
+of how the code is shaped, not because of a configuration value.
+
+### 1. Authorization is bound to the target Safe, never to the caller's word
+
+Every user-facing entry point names the Safe it acts on as `onBehalfOf`, and
+the modifier compares that name with `msg.sender`:
+
+```solidity
+// SafeDebtManager
+modifier onlyOwnerOrOperator(address onBehalfOf) {
+    require(onBehalfOf != address(0), "onBehalfOf cannot be zero address");
+    require(msg.sender == registry.safeOperator() || msg.sender == onBehalfOf, "Caller is not authorized");
+    _;
+}
+
+// SafeYieldManager
+modifier onlyOperatorOrSafe(address _onBehalfOf) {
+    if (_onBehalfOf == address(0)) revert ZeroAddress();
+    if (msg.sender != _onBehalfOf && msg.sender != REGISTRY.safeOperator()) revert NotAuthorized();
+    _;
+}
+```
+
+The contracts never call `isModuleEnabled`. A contract pretending to be a Safe
+gains nothing by lying: the only Safe it can name is itself, and every
+`execTransactionFromModule` that follows lands on `onBehalfOf`. The other
+accepted caller is the registry operator, a single address set by the
+registry's admin — the operator-trust surface the rest of this document
+already assumes.
+
+### 2. The Safe only ever executes `Call`, to a target and selector the contract chose
+
+Every `execTransactionFromModule*` call site in this repository (33 at the
+time of writing, including the legacy module) hard-codes
+`ISafe.Operation.Call`; `DelegateCall` does not appear in contract code. Each
+site builds its calldata with `abi.encodeCall` on a fixed selector and sends it
+to an address the contract, not the caller, decided on: an immutable
+(`POSITION_MANAGER`, `SWAP_ROUTER`, `UNIVERSAL_ROUTER`, Permit2, WETH), a
+registry entry, or the protocol contract a position already lives in. The yield
+handlers funnel through one function:
+
+```solidity
+function _safeExec(address _onBehalfOf, address target, bytes memory data, uint8 step) internal returns (bytes memory ret) {
+    bool ok;
+    (ok, ret) = ISafe(_onBehalfOf).execTransactionFromModuleReturnData(target, 0, data, ISafe.Operation.Call);
+    ...
+```
+
+The one caller-influenced target is Fluid's `vaultAddress`, decoded from
+`extraData` in `FluidSafeDebtHandler`. The selector is still fixed (`approve`,
+`operate`) and the executing Safe is still `onBehalfOf`, so it cannot be aimed
+at another Safe. It remains an operator-trust item (AP-4844 F-2), not an
+unauthenticated one.
+
+`SafeExecTransactionWrapper` does accept a caller-supplied `operation`, but it is
+not a module. It calls `execTransaction`, which the Safe authorizes with its
+owners' signatures, so it can do nothing those owners did not sign.
+
+### 3. No raw call to a caller-supplied address
+
+The FlashLoopAdapter drain needed `router.call(data)` with both values chosen
+by the caller. Here the debt swap's aggregator call pins the target:
+
+```solidity
+IERC20(srcAsset).forceApprove(registry.paraswapV6(), amount);
+(bool success, ) = registry.paraswapV6().call(_txParams);
+```
+
+The calldata is caller-supplied — Paraswap routes are quoted off-chain — but
+the destination is the registry's Augustus address. Even if that calldata
+encoded `execTransactionFromModule`, the Safe would see Augustus as
+`msg.sender`, not the module, and refuse. The yield side exposes no calldata at
+all: `_swapViaSafe` / `_swapV4ViaSafe` build `exactInputSingle` / `execute`
+themselves against immutable routers, under the H-01 floor.
+
+### 4. The flash-loan callback is authenticated by pool derivation
+
+`uniswapV3FlashCallback` is the one entry whose `data` carries `onBehalfOf`
+without an `onlyOwnerOrOperator` check, so a spoofed caller here would be the
+FlashLoopAdapter shape exactly. Two facts close it:
+
+```solidity
+IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
+PoolAddress.PoolKey memory poolKey = PoolAddress.getPoolKey(pool.token0(), pool.token1(), pool.fee());
+CallbackValidation.verifyCallback(registry.uniswapV3Factory(), poolKey);
+```
+
+`verifyCallback` recomputes the CREATE2 address of the pool for that key under
+the registry's factory and requires `msg.sender` to equal it, so the caller
+must be a genuine factory pool. A genuine pool calls `uniswapV3FlashCallback`
+only on whoever called `flash()`, and the only path to `flash()` is the gated
+`executeDebtSwap`. The debt handlers repeat the derivation in
+`onlyAuthorizedCaller` inside the delegatecall, so a handler reached by any
+other route also rejects.
+
+### Where the delegatecall is, and why it is not the Safe's
+
+These contracts do use `delegatecall` — manager to handler — which is the
+opposite direction from the rsETH module. The target is `protocolHandlers[enum]`
+/ `yieldHandlers[uint8]` / the handler pinned at open time, settable only
+through the timelock with `CRITICAL_ROLE`; a caller supplies at most a protocol
+id. The Safe itself is never asked to delegatecall anything.
+
+### History: the April 2025 builds had both FlashLoopAdapter defects
+
+The first `SafeModuleDebtSwap` builds (three contracts deployed on Base,
+2025-04-07 to 2025-04-10) shipped with the callback check commented out and a
+`swapByParaswap` that called a caller-supplied `router` — the same two defects,
+in the same order. Commit `3de2979` (2025-05-05) added
+`CallbackValidation.verifyCallback`; commit `908306c` (2025-05-07) pinned the
+router to an owner-set `paraswapRouter`, which `948e3fe` (2026-09-16) moved into
+the registry. The first production deployment (2025-05-12) and every later
+`SafeModuleDebtSwap` / `LeveragedPosition` deployment carry both fixes: their
+verified sources on Base show one live `verifyCallback` call and the pinned
+router, and the two unverified builds post-date both commits and expose the
+pinned-router setter. The three April contracts predate the product; no user
+Safe has one enabled, and the remaining internal test-Safe enablements are
+scheduled for removal under AP-4844.
