@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISSRRateProvider} from "../interfaces/spark/ISSRRateProvider.sol";
 import {IIdleSavingsRateProvider} from "../yield/idleSavings/IIdleSavingsRateProvider.sol";
 import {OpenLpInKindParams} from "../interfaces/IYieldHandler.sol";
+import {BaseIdleSavingsHandler} from "../yield/handlers/BaseIdleSavingsHandler.sol";
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Mocks for the idle savings handler stack (BaseIdleSavingsHandler,
@@ -220,5 +221,132 @@ contract MockUnderAdoptingYieldHandler {
 
     function openLpInKind(OpenLpInKindParams calldata p) external pure returns (uint256, uint128, uint128) {
         return (uint256(uint160(p.onBehalfOf)), 0, uint128(p.amount1 - 1));
+    }
+}
+
+/// @notice Rate provider with no oracle logic, for proving BaseIdleSavingsHandler
+///         behaviour in isolation from ChainlinkSsrRateProvider.
+contract MockIdleSavingsRateProvider is IIdleSavingsRateProvider {
+    address public immutable token;
+    uint256 public rate18;
+    bool public reverting;
+
+    error WrongShareToken(address token);
+
+    constructor(address _token) {
+        token = _token;
+    }
+
+    function set(uint256 _rate18) external {
+        rate18 = _rate18;
+    }
+
+    function setReverting(bool value) external {
+        reverting = value;
+    }
+
+    function rate(address shareToken_) external view returns (uint256) {
+        require(!reverting, "provider down");
+        if (shareToken_ != token) revert WrongShareToken(shareToken_);
+        return rate18;
+    }
+
+    function shareToken() external view returns (address) {
+        return token;
+    }
+}
+
+interface IMintableShare {
+    function mint(address to, uint256 amount) external;
+}
+
+/// @notice A trivial idle savings venue: deposit mints shares at a settable
+///         rate, redeem pays USDC at that rate and can be told to short-pay
+///         (ignoring the minimum, the way a vault with a withdrawal fee might)
+///         or to revert.
+contract MockIdleSavingsVenue {
+    IERC20 public immutable usdc;
+    IERC20 public immutable share;
+    uint256 public rate18;
+    uint256 public shortPay;
+    bool public reverting;
+
+    constructor(IERC20 _usdc, IERC20 _share) {
+        usdc = _usdc;
+        share = _share;
+    }
+
+    function setRate(uint256 _rate18) external {
+        rate18 = _rate18;
+    }
+
+    function setShortPay(uint256 usdc6) external {
+        shortPay = usdc6;
+    }
+
+    function setReverting(bool value) external {
+        reverting = value;
+    }
+
+    function deposit(uint256 usdc6, uint256 minShares, address receiver) external returns (uint256 shares) {
+        require(!reverting, "venue down");
+        shares = (usdc6 * 1e12 * 1e18) / rate18;
+        require(shares >= minShares, "venue/too-few-shares");
+        usdc.transferFrom(msg.sender, address(this), usdc6);
+        IMintableShare(address(share)).mint(receiver, shares);
+    }
+
+    function redeem(uint256 shares, uint256 minUsdc6, address receiver) external returns (uint256 usdc6) {
+        require(!reverting, "venue down");
+        usdc6 = (shares * rate18) / 1e30;
+        usdc6 = shortPay >= usdc6 ? 0 : usdc6 - shortPay;
+        if (shortPay == 0) require(usdc6 >= minUsdc6, "venue/too-little-usdc");
+        share.transferFrom(msg.sender, address(this), shares);
+        usdc.transfer(receiver, usdc6);
+    }
+}
+
+/// @notice A second concrete idle savings source (protocol id 250) over the
+///         mock venue, proving the base is generic: every base case runs
+///         against it as well as against the Sky source. Step codes 90 to 95.
+contract MockIdleSavingsSource is BaseIdleSavingsHandler {
+    MockIdleSavingsVenue public immutable VENUE;
+    IERC20 public immutable SHARE;
+
+    constructor(
+        IERC20 _usdc,
+        IIdleSavingsRateProvider _rateProvider,
+        uint16 _maxToleranceBps,
+        uint16 _maxExposureBps,
+        MockIdleSavingsVenue _venue,
+        IERC20 _share
+    ) BaseIdleSavingsHandler(250, _usdc, _rateProvider, _share, _maxToleranceBps, _maxExposureBps) {
+        VENUE = _venue;
+        SHARE = _share;
+    }
+
+    function _shareToken() internal view override returns (IERC20) {
+        return SHARE;
+    }
+
+    function _poolParamMatches(bytes memory lpPoolParam) internal view override returns (bool) {
+        (address venue, address share) = abi.decode(lpPoolParam, (address, address));
+        return venue == address(VENUE) && share == address(SHARE);
+    }
+
+    function _depositUsdc(address safe, uint256 usdc6, uint256 minShares) internal override {
+        _safeApprove(safe, address(USDC), address(VENUE), usdc6, 90);
+        _safeExec(safe, address(VENUE), abi.encodeCall(MockIdleSavingsVenue.deposit, (usdc6, minShares, safe)), 91);
+        _safeApprove(safe, address(USDC), address(VENUE), 0, 92);
+    }
+
+    function _redeemShares(address safe, uint256 shares, uint256 minUsdc6) internal override {
+        _safeApprove(safe, address(SHARE), address(VENUE), shares, 93);
+        _safeExec(safe, address(VENUE), abi.encodeCall(MockIdleSavingsVenue.redeem, (shares, minUsdc6, safe)), 94);
+        _safeApprove(safe, address(SHARE), address(VENUE), 0, 95);
+    }
+
+    function _liquidityAvailable() internal view override returns (uint256) {
+        return USDC.balanceOf(address(VENUE));
     }
 }
