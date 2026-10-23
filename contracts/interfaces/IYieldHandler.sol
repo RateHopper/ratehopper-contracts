@@ -130,7 +130,10 @@ interface IYieldHandler {
     ///         SafeYieldManager (via staticcall, not delegatecall) to gate
     ///         openLp on the registry token whitelist. For Uniswap V4
     ///         `token0` may be address(0) — the native-ETH currency sentinel.
-    function poolTokens(bytes calldata lpPoolParam) external pure returns (address token0, address token1);
+    ///         `view` rather than `pure` so a handler whose pair is fixed by
+    ///         its immutables (an idle savings source reports `(USDC, USDC)`)
+    ///         can answer; LP handlers still implement it as `pure`.
+    function poolTokens(bytes calldata lpPoolParam) external view returns (address token0, address token1);
 
     /// @notice Whether the pool named by `lpPoolParam` runs third-party hook
     ///         code on its liquidity and swap paths (Uniswap V4 hooks). A hook
