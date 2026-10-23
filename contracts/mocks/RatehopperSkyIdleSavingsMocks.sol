@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISSRRateProvider} from "../interfaces/spark/ISSRRateProvider.sol";
 import {IIdleSavingsRateProvider} from "../yield/idleSavings/IIdleSavingsRateProvider.sol";
+import {OpenLpInKindParams} from "../interfaces/IYieldHandler.sol";
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Mocks for the idle savings handler stack (BaseIdleSavingsHandler,
@@ -191,5 +192,33 @@ contract MockPSM3 {
         IERC20(assetIn).transferFrom(msg.sender, address(this), amountIn);
         IERC20(assetOut).transfer(receiver, amountOut);
         emit Swap(assetIn, assetOut, msg.sender, receiver, amountIn, amountOut, referralCode);
+    }
+}
+
+/// @notice A protocol-3-shaped build whose rollover leg adopts one share less
+///         than the old build released. The manager then sees a one-share
+///         residue it has to value, and `TwapNotConfigured(sUSDS)` from
+///         `_settleSwitchResidue` is the backstop against an under-adopting
+///         build. Only the surface `setYieldHandler` and the switch open leg
+///         touch is implemented.
+contract MockUnderAdoptingYieldHandler {
+    uint8 public immutable PROTOCOL;
+    address public immutable usdc;
+
+    constructor(uint8 _protocol, address _usdc) {
+        PROTOCOL = _protocol;
+        usdc = _usdc;
+    }
+
+    function poolTokens(bytes calldata) external view returns (address, address) {
+        return (usdc, usdc);
+    }
+
+    function poolParamHasHooks(bytes calldata) external pure returns (bool) {
+        return false;
+    }
+
+    function openLpInKind(OpenLpInKindParams calldata p) external pure returns (uint256, uint128, uint128) {
+        return (uint256(uint160(p.onBehalfOf)), 0, uint128(p.amount1 - 1));
     }
 }

@@ -141,6 +141,53 @@ async function safeSigner(safeAddr: string) {
     return ethers.getSigner(safeAddr);
 }
 
+function collectParams(safeAddr: string, tokenId: bigint | number) {
+    return {
+        onBehalfOf: safeAddr,
+        tokenId,
+        swapFeesToUsdc: false,
+        swap0: ZERO_LEG,
+        swap1: ZERO_LEG,
+        swapRewardToUsdc: false,
+        rewardSwap: ZERO_LEG,
+        slippageBps: TOLERANCE,
+        deadline: DEADLINE,
+    };
+}
+
+function inKindParams(safeAddr: string, token0: string, token1: string, amount0: bigint, amount1: bigint) {
+    return {
+        onBehalfOf: safeAddr,
+        token0,
+        token1,
+        amount0,
+        amount1,
+        tickLower: 0,
+        tickUpper: 0,
+        mintAmount0Min: 0,
+        mintAmount1Min: 0,
+        lpPoolParam: SKY_PARAM,
+        deadline: DEADLINE,
+    };
+}
+
+function v3OpenParams(safeAddr: string) {
+    return {
+        onBehalfOf: safeAddr,
+        usdcAmount: 1_000_000n,
+        tickLower: -100,
+        tickUpper: 100,
+        mintAmount0Min: 0,
+        mintAmount1Min: 0,
+        swap0: leg(WETH_OUT, FEE_TIER),
+        swap1: ZERO_LEG,
+        slippageBps: 100,
+        deadline: DEADLINE,
+        lpPoolParam: FEE_TIER,
+        stake: false,
+    };
+}
+
 async function slotValue(contractAddr: string, slot: string): Promise<bigint> {
     return BigInt(await ethers.provider.send("eth_getStorageAt", [contractAddr, slot, "latest"]));
 }
@@ -330,6 +377,20 @@ async function registerIdleSavings(f: Harness, handlerAddr = f.handlerAddr, prot
     await (await f.manager.connect(f.pauser).setProtocolEnabledForClose(protocol, true)).wait();
     await (await f.manager.connect(f.pauser).setProtocolEnabledForOpen(protocol, true)).wait();
     await (await f.manager.connect(f.deployer).setPoolParamAllowed(protocol, param, true)).wait();
+}
+
+async function deployBuild(f: Harness): Promise<string> {
+    const build = await f.Handler.deploy(
+        f.usdcAddr,
+        f.providerAddr,
+        MAX_TOLERANCE_BPS,
+        MAX_EXPOSURE_BPS,
+        f.psm3Addr,
+        f.susdsAddr,
+        OSERO_REFERRAL_CODE,
+    );
+    await build.waitForDeployment();
+    return build.getAddress();
 }
 
 async function deployRegistered() {
@@ -810,6 +871,271 @@ describe("SafeYieldManager + SkyIdleSavingsYieldHandler", function () {
             expect(await manager.positionHandlerOf(SKY, tokenId)).to.equal(ZERO);
             expect(await manager.residualBasisUsd6Of(SKY, tokenId)).to.equal(0);
             expect(await manager.carryProfitUsd6Of(SKY, tokenId)).to.equal(0);
+            await expectZeroResidue(f);
+        });
+    });
+
+    describe("reverts", function () {
+        it("rejects staking, collect and direct entry", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, handler, operatorEOA, safeAddr, usdcAddr, susdsAddr } = f;
+            const tokenId = tokenIdOf(safeAddr);
+            await expect(open(f, safeAddr, { stake: true })).to.be.revertedWithCustomError(handler, "StakingNotSupported");
+            await (await open(f)).wait();
+            await expect(
+                manager.connect(operatorEOA).collectLp(SKY, collectParams(safeAddr, tokenId)),
+            ).to.be.revertedWithCustomError(handler, "CollectNotSupported");
+
+            await expect(handler.openLp(openParams(safeAddr, SKY_PARAM))).to.be.revertedWithCustomError(
+                handler,
+                "OnlyDelegatecall",
+            );
+            await expect(handler.closeLp(closeParams(safeAddr, tokenId), 0)).to.be.revertedWithCustomError(
+                handler,
+                "OnlyDelegatecall",
+            );
+            await expect(handler.withdrawLp(withdrawParams(safeAddr, tokenId))).to.be.revertedWithCustomError(
+                handler,
+                "OnlyDelegatecall",
+            );
+            await expect(
+                handler.openLpInKind(inKindParams(safeAddr, usdcAddr, susdsAddr, 0n, 1n)),
+            ).to.be.revertedWithCustomError(handler, "OnlyDelegatecall");
+            await expect(handler.collectLp(collectParams(safeAddr, tokenId))).to.be.revertedWithCustomError(
+                handler,
+                "OnlyDelegatecall",
+            );
+        });
+
+        it("never redeems or releases one Safe's shares against another Safe's record", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, handler, operatorEOA, safeAddr, safe2Addr } = f;
+            await (await open(f)).wait();
+            await (await open(f, safe2Addr)).wait();
+            await expect(
+                manager.connect(operatorEOA).closeLp(SKY, closeParams(safeAddr, tokenIdOf(safe2Addr))),
+            ).to.be.revertedWithCustomError(handler, "WrongPosition");
+            await expect(
+                manager.connect(operatorEOA).withdrawLp(SKY, withdrawParams(safeAddr, tokenIdOf(safe2Addr))),
+            ).to.be.revertedWithCustomError(handler, "WrongPosition");
+        });
+
+        it("rejects an approval the token does not confirm", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { handler, safe, usdcAddr, susdsAddr } = f;
+            await (await safe.setFailData(ethers.ZeroHash)).wait();
+            await (await safe.setFail(usdcAddr, 3)).wait();
+            await expect(open(f)).to.be.revertedWithCustomError(handler, "TokenApprovalFailed").withArgs(usdcAddr);
+            await (await safe.setFail(usdcAddr, 0)).wait();
+            await (await open(f)).wait();
+            await (await safe.setFail(susdsAddr, 3)).wait();
+            await expect(close(f)).to.be.revertedWithCustomError(handler, "TokenApprovalFailed").withArgs(susdsAddr);
+        });
+    });
+
+    describe("pause", function () {
+        it("blocks opens while close and withdraw keep working", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, pauser, safe2Addr } = f;
+            await (await open(f)).wait();
+            await (await open(f, safe2Addr)).wait();
+            await (await manager.connect(pauser).pause()).wait();
+            await expect(open(f)).to.be.revertedWithCustomError(manager, "EnforcedPause");
+            await (await close(f)).wait();
+            await (await withdraw(f, safe2Addr)).wait();
+            await expectZeroResidue(f);
+        });
+    });
+
+    describe("switchLp", function () {
+        it("rejects an in-kind switch between an LP position and protocol 3 in either direction", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, handler, uniHandler, operatorEOA, safeAddr } = f;
+            await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, v3OpenParams(safeAddr))).wait();
+            await expect(
+                manager.connect(operatorEOA).switchLp(UNISWAP_V3, SKY, switchParams(safeAddr, 1, SKY_PARAM)),
+            ).to.be.revertedWithCustomError(handler, "InKindNotSupported");
+
+            await (await open(f)).wait();
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .switchLp(SKY, UNISWAP_V3, switchParams(safeAddr, tokenIdOf(safeAddr), FEE_TIER)),
+            ).to.be.revertedWithCustomError(uniHandler, "WrongTokenPair");
+        });
+
+        it("rolls a position to a new build under the same id without moving tokens", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, managerAddr, managerEvents, timelock, operatorEOA, psm3, usdc, susds, treasury, safeAddr } = f;
+            const tokenId = tokenIdOf(safeAddr);
+            await (await open(f)).wait();
+            const shares = sharesFor(DEPOSIT, RATE);
+            const carry = 500n;
+            await setSlot(managerAddr, yieldSlot(YIELD_FIELD.carry, SKY, tokenId), carry);
+            const build2 = await deployBuild(f);
+            await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, build2])).wait();
+            const usdcBefore = await usdc.balanceOf(safeAddr);
+
+            const tx = manager.connect(operatorEOA).switchLp(SKY, SKY, switchParams(safeAddr, tokenId, SKY_PARAM));
+            await expect(tx).to.emit(managerEvents, "IdleSavingsReleased").withArgs(safeAddr, tokenId, shares);
+            await expect(tx).to.emit(managerEvents, "IdleSavingsAdopted").withArgs(safeAddr, tokenId, shares);
+            await expect(tx)
+                .to.emit(manager, "PositionSwitched")
+                .withArgs(safeAddr, SKY, SKY, tokenId, tokenId, DEPOSIT, 0, shares, 0, shares);
+            await expect(tx)
+                .to.emit(manager, "SwitchResidueSettled")
+                .withArgs(safeAddr, SKY, tokenId, 0, 0, 0, DEPOSIT, carry);
+            await expect(tx).to.not.emit(psm3, "Swap");
+
+            expect(await susds.balanceOf(safeAddr)).to.equal(shares);
+            expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore);
+            expect(await manager.positionHandlerOf(SKY, tokenId)).to.equal(build2);
+            expect(await manager.residualBasisUsd6Of(SKY, tokenId)).to.equal(DEPOSIT);
+            expect(await manager.carryProfitUsd6Of(SKY, tokenId)).to.equal(carry);
+            expect(await sharesOf(f)).to.equal(shares);
+            expect(await totalShares(f)).to.equal(shares);
+
+            const value = usdcFor(shares, RATE);
+            const realized = value + carry;
+            const fee = realized > DEPOSIT ? ((realized - DEPOSIT) * PERF_FEE_BPS) / 10_000n : 0n;
+            await expect(close(f))
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, SKY, tokenId, DEPOSIT, value, fee, 10_000, carry);
+            expect(await usdc.balanceOf(treasury.address)).to.equal(fee);
+            expect(await sharesOf(f)).to.equal(0);
+            expect(await totalShares(f)).to.equal(0);
+            await expectZeroResidue(f);
+        });
+
+        it("rolls over while the feed, the SSR oracle and PSM3 are all down", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, timelock, operatorEOA, feed, ssr, psm3, safeAddr } = f;
+            await (await open(f)).wait();
+            const build2 = await deployBuild(f);
+            await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, build2])).wait();
+            await (await feed.setReverting(true)).wait();
+            await (await ssr.setReverting(true)).wait();
+            await (await psm3.setReverting(true)).wait();
+            await (
+                await manager
+                    .connect(operatorEOA)
+                    .switchLp(SKY, SKY, switchParams(safeAddr, tokenIdOf(safeAddr), SKY_PARAM))
+            ).wait();
+            expect(await manager.positionHandlerOf(SKY, tokenIdOf(safeAddr))).to.equal(build2);
+            await (await withdraw(f)).wait();
+            await expectZeroResidue(f);
+        });
+
+        it("refuses a rollover when the Safe holds fewer shares than were released", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, handler, timelock, operatorEOA, susds, stranger, safeAddr } = f;
+            await (await open(f)).wait();
+            await (await susds.connect(await safeSigner(safeAddr)).transfer(stranger.address, 1n)).wait();
+            await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, await deployBuild(f)])).wait();
+            await expect(
+                manager.connect(operatorEOA).switchLp(SKY, SKY, switchParams(safeAddr, tokenIdOf(safeAddr), SKY_PARAM)),
+            ).to.be.revertedWithCustomError(handler, "SharesNotOnSafe");
+        });
+
+        it("refuses a rollover when paused, when either switch is off, or when the param is de-listed", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, handler, timelock, operatorEOA, pauser, deployer, safeAddr } = f;
+            await (await open(f)).wait();
+            await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, await deployBuild(f)])).wait();
+            const roll = () =>
+                manager.connect(operatorEOA).switchLp(SKY, SKY, switchParams(safeAddr, tokenIdOf(safeAddr), SKY_PARAM));
+
+            await (await manager.connect(pauser).pause()).wait();
+            await expect(roll()).to.be.revertedWithCustomError(manager, "EnforcedPause");
+            await (await manager.connect(pauser).unpause()).wait();
+
+            await (await manager.connect(pauser).setProtocolEnabledForClose(SKY, false)).wait();
+            await expect(roll()).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
+            await (await manager.connect(pauser).setProtocolEnabledForClose(SKY, true)).wait();
+
+            await (await manager.connect(pauser).setProtocolEnabledForOpen(SKY, false)).wait();
+            await expect(roll()).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
+            await (await manager.connect(pauser).setProtocolEnabledForOpen(SKY, true)).wait();
+
+            await (await manager.connect(deployer).setPoolParamAllowed(SKY, SKY_PARAM, false)).wait();
+            await expect(roll()).to.be.revertedWithCustomError(handler, "PoolParamNotAllowed");
+            await (await manager.connect(deployer).setPoolParamAllowed(SKY, SKY_PARAM, true)).wait();
+            await (await roll()).wait();
+            await expectZeroResidue(f);
+        });
+
+        it("reverts TwapNotConfigured when a new build adopts fewer shares than were released", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, timelock, operatorEOA, usdcAddr, susdsAddr, safeAddr } = f;
+            await (await open(f)).wait();
+            const Under = await ethers.getContractFactory("MockUnderAdoptingYieldHandler");
+            const under = await Under.deploy(SKY, usdcAddr);
+            await under.waitForDeployment();
+            await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, await under.getAddress()])).wait();
+            await expect(
+                manager.connect(operatorEOA).switchLp(SKY, SKY, switchParams(safeAddr, tokenIdOf(safeAddr), SKY_PARAM)),
+            )
+                .to.be.revertedWithCustomError(manager, "TwapNotConfigured")
+                .withArgs(susdsAddr);
+        });
+    });
+
+    describe("storage namespace", function () {
+        it("derives the ERC-7201 slot and leaves YieldLayout untouched except the pin and basis", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { handler, managerAddr, safeAddr } = f;
+            const tokenId = tokenIdOf(safeAddr);
+            const namespaceId = BigInt(ethers.keccak256(ethers.toUtf8Bytes("ratehopper.storage.idleSavings"))) - 1n;
+            const base = BigInt(ethers.keccak256(abi.encode(["uint256"], [namespaceId]))) & ~0xffn;
+            expect(base).to.not.equal(YIELD_SLOT);
+            expect(await handler.idleSavingsSharesSlot(tokenId)).to.equal(
+                mapSlot(tokenId, BigInt(mapSlot(BigInt(SKY), base))),
+            );
+            expect(await handler.idleSavingsTotalSharesSlot()).to.equal(mapSlot(BigInt(SKY), base + 1n));
+
+            const watched: Record<string, string> = { scalar: ethers.toBeHex(YIELD_SLOT, 32) };
+            for (const protocol of [0, 1, 2, 3]) {
+                for (const id of [1n, tokenId]) {
+                    watched[`basis:${protocol}:${id}`] = yieldSlot(YIELD_FIELD.residualBasis, protocol, id);
+                    watched[`pin:${protocol}:${id}`] = yieldSlot(YIELD_FIELD.positionHandler, protocol, id);
+                    watched[`carry:${protocol}:${id}`] = yieldSlot(YIELD_FIELD.carry, protocol, id);
+                }
+            }
+            const allowedBase = YIELD_SLOT + YIELD_FIELD.allowedPoolKey;
+            watched["allowed:3"] = mapSlot(BigInt(ethers.keccak256(SKY_PARAM)), BigInt(mapSlot(BigInt(SKY), allowedBase)));
+            watched["allowed:0"] = mapSlot(BigInt(ethers.keccak256(FEE_TIER)), BigInt(mapSlot(0n, allowedBase)));
+            const before: Record<string, bigint> = {};
+            for (const [k, slot] of Object.entries(watched)) before[k] = await slotValue(managerAddr, slot);
+            expect(before["allowed:3"]).to.equal(1n);
+
+            await (await open(f)).wait();
+            for (const [k, slot] of Object.entries(watched)) {
+                const after = await slotValue(managerAddr, slot);
+                if (k === `basis:3:${tokenId}` || k === `pin:3:${tokenId}`) expect(after, k).to.not.equal(before[k]);
+                else expect(after, k).to.equal(before[k]);
+            }
+            expect(await sharesOf(f)).to.equal(sharesFor(DEPOSIT, RATE));
+        });
+    });
+
+    describe("exit liveness", function () {
+        it("keeps withdrawLp alive through every failure except the close switch", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, pauser, feed, ssr, psm3, usdc, susds, psm3Addr, safeAddr, safe2Addr } = f;
+            await (await open(f)).wait();
+            await (await open(f, safe2Addr)).wait();
+            await (await feed.setReverting(true)).wait();
+            await (await ssr.setReverting(true)).wait();
+            await (await psm3.setReverting(true)).wait();
+            await (await usdc.burn(psm3Addr, await usdc.balanceOf(psm3Addr))).wait();
+            await (await manager.connect(pauser).pause()).wait();
+            await (await withdraw(f)).wait();
+            expect(await susds.balanceOf(safeAddr)).to.equal(sharesFor(DEPOSIT, RATE));
+
+            await (await manager.connect(pauser).setProtocolEnabledForClose(SKY, false)).wait();
+            await expect(withdraw(f, safe2Addr)).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
+            await (await manager.connect(pauser).setProtocolEnabledForClose(SKY, true)).wait();
+            await (await withdraw(f, safe2Addr)).wait();
             await expectZeroResidue(f);
         });
     });
