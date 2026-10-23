@@ -159,6 +159,13 @@ describe("ChainlinkSsrRateProvider", function () {
                 .withArgs(updatedAt);
         });
 
+        it("treats a future updatedAt as stale instead of underflowing", async function () {
+            const { provider, feed, susdsAddr } = await loadFixture(deployProviderHarness);
+            const future = (await time.latest()) + 100_000;
+            await (await feed.set(RATE, future)).wait();
+            await expect(provider.rate(susdsAddr)).to.be.revertedWithCustomError(provider, "StaleRate").withArgs(future);
+        });
+
         it("treats updatedAt == 0 as stale", async function () {
             const { provider, feed, susdsAddr } = await loadFixture(deployProviderHarness);
             await (await feed.set(RATE, 0)).wait();

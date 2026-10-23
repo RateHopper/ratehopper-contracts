@@ -16,6 +16,7 @@ import {
     MAX_FEED_AGE,
     MAX_RATE,
     MAX_TOLERANCE_BPS,
+    MAX_EXPOSURE_BPS,
     USDC,
     DEPOSIT,
     sharesFor,
@@ -176,6 +177,14 @@ describe("SafeYieldManager + idle savings handlers", function () {
                     await expectZeroResidue(f);
                 });
 
+                it("does not need the share token on the registry whitelist", async function () {
+                    const f = await loadFixture(deployRegistered);
+                    await (await f.reg.setWhitelisted(src.shareTokenAddr(f), false)).wait();
+                    await (await open(f, src)).wait();
+                    await (await close(f, src)).wait();
+                    await expectZeroResidue(f);
+                });
+
                 it("reverts SwapFailed when the Safe receives fewer shares than the floor", async function () {
                     const f = await loadFixture(deployRegistered);
                     // Mode 3: the Safe reports success without executing, so no shares arrive.
@@ -287,6 +296,20 @@ describe("SafeYieldManager + idle savings handlers", function () {
                         .to.be.revertedWithCustomError(src.handler(f), "ExposureCapExceeded")
                         .withArgs(tracked + amount + 1n, tracked + amount);
                     await (await open(f, src, safe2Addr, { usdcAmount: amount })).wait();
+                    await expectZeroResidue(f);
+                });
+
+                it("scales the cap with MAX_EXPOSURE_BPS", async function () {
+                    const f = await loadFixture(deployRegistered);
+                    const { manager, timelock, usdc } = f;
+                    const venue = src.venueAddr(f);
+                    const half = await src.deployBuild(f, 5_000);
+                    await (await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, half])).wait();
+                    await (await usdc.burn(venue, (await usdc.balanceOf(venue)) - USDC(1_000_000))).wait();
+                    await expect(open(f, src, f.safeAddr, { usdcAmount: USDC(500_000) + 1n }))
+                        .to.be.revertedWithCustomError(src.handler(f), "ExposureCapExceeded")
+                        .withArgs(USDC(500_000) + 1n, USDC(1_000_000));
+                    await (await open(f, src, f.safeAddr, { usdcAmount: USDC(500_000) })).wait();
                     await expectZeroResidue(f);
                 });
 
@@ -408,6 +431,30 @@ describe("SafeYieldManager + idle savings handlers", function () {
                     expect(await share.balanceOf(stranger.address)).to.equal(half);
                     expect(await sharesOf(f, src)).to.equal(0);
                     expect(await totalShares(f, src)).to.equal(0);
+                    await expectZeroResidue(f);
+                });
+
+                it("closes a position whose shares were all moved out with nothing to redeem", async function () {
+                    const f = await loadFixture(deployRegistered);
+                    const { manager, managerEvents, stranger, safeAddr } = f;
+                    const share = src.shareToken(f);
+                    const tokenId = tokenIdOf(safeAddr);
+                    await (await open(f, src)).wait();
+                    const shares = sharesFor(DEPOSIT, RATE);
+                    await (await share.connect(await safeSigner(safeAddr)).transfer(stranger.address, shares)).wait();
+                    await src.breakPricing(f);
+
+                    const tx = close(f, src);
+                    await expect(tx)
+                        .to.emit(managerEvents, "IdleSavingsSharesShortfall")
+                        .withArgs(safeAddr, tokenId, shares, 0);
+                    await expect(tx).to.emit(managerEvents, "IdleSavingsRedeemed").withArgs(safeAddr, tokenId, 0, 0, 0, 10_000);
+                    await expect(tx)
+                        .to.emit(manager, "PositionClosed")
+                        .withArgs(safeAddr, src.protocol, tokenId, DEPOSIT, 0, 0, 10_000, 0);
+                    expect(await sharesOf(f, src)).to.equal(0);
+                    expect(await totalShares(f, src)).to.equal(0);
+                    expect(await manager.positionHandlerOf(src.protocol, tokenId)).to.equal(ZERO);
                     await expectZeroResidue(f);
                 });
 
@@ -563,6 +610,35 @@ describe("SafeYieldManager + idle savings handlers", function () {
                             .connect(operatorEOA)
                             .switchLp(src.protocol, UNISWAP_V3, switchParams(safeAddr, tokenIdOf(safeAddr), f.feeTier)),
                     ).to.be.revertedWithCustomError(uniHandler, "WrongTokenPair");
+                });
+
+                it("rejects LP-shaped in-kind input, an open position and a stale record on the open leg", async function () {
+                    const f = await loadFixture(deployRegistered);
+                    const { manager, managerAddr, timelock, pauser, operatorEOA, usdcAddr, safeAddr } = f;
+                    const shareAddr = src.shareTokenAddr(f);
+                    const tokenId = tokenIdOf(safeAddr);
+                    const FEEDER = 251;
+                    const Feeder = await ethers.getContractFactory("MockInKindFeederYieldHandler");
+                    const feed = async (token0: string, token1: string, amount0: bigint, amount1: bigint) => {
+                        const feeder = await Feeder.deploy(FEEDER, token0, token1, amount0, amount1);
+                        await feeder.waitForDeployment();
+                        const feederAddr = await feeder.getAddress();
+                        await (await timelockCall(timelock, manager, "setYieldHandler", [FEEDER, feederAddr])).wait();
+                        await (await manager.connect(pauser).setProtocolEnabledForClose(FEEDER, true)).wait();
+                        await setSlot(managerAddr, yieldSlot(YIELD_FIELD.positionHandler, FEEDER, tokenId), BigInt(feederAddr));
+                        await setSlot(managerAddr, yieldSlot(YIELD_FIELD.residualBasis, FEEDER, tokenId), DEPOSIT);
+                        return manager
+                            .connect(operatorEOA)
+                            .switchLp(FEEDER, src.protocol, switchParams(safeAddr, tokenId, src.param(f)));
+                    };
+                    await expect(feed(usdcAddr, usdcAddr, 0n, 1n)).to.be.revertedWithCustomError(src.handler(f), "InKindNotSupported");
+                    await expect(feed(usdcAddr, shareAddr, 1n, 1n)).to.be.revertedWithCustomError(src.handler(f), "InKindNotSupported");
+                    await expect(feed(usdcAddr, shareAddr, 0n, 0n)).to.be.revertedWithCustomError(src.handler(f), "InKindNotSupported");
+                    await (await open(f, src)).wait();
+                    await expect(feed(usdcAddr, shareAddr, 0n, 1n)).to.be.revertedWithCustomError(src.handler(f), "PositionAlreadyOpen");
+                    await (await close(f, src)).wait();
+                    await setSlot(managerAddr, await src.handler(f).idleSavingsSharesSlot(tokenId), 1n);
+                    await expect(feed(usdcAddr, shareAddr, 0n, 1n)).to.be.revertedWithCustomError(src.handler(f), "StaleSharesRecord");
                 });
 
                 it("rolls a position to a new build under the same id without moving tokens", async function () {
@@ -742,6 +818,46 @@ describe("SafeYieldManager + idle savings handlers", function () {
 
     describe("Sky specifics", function () {
         const src = SKY_SRC;
+
+        it("rejects bad wiring and bounds at construction", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { Handler, handler, usdcAddr, providerAddr, psm3Addr, susdsAddr, wethAddr, mockShareAddr, stranger, ssr, feed } = f;
+            const deploy = (o: Partial<{ usdc: string; provider: string; tol: number; exp: number; psm3: string; susds: string }>) =>
+                Handler.deploy(
+                    o.usdc ?? usdcAddr,
+                    o.provider ?? providerAddr,
+                    o.tol ?? MAX_TOLERANCE_BPS,
+                    o.exp ?? MAX_EXPOSURE_BPS,
+                    o.psm3 ?? psm3Addr,
+                    o.susds ?? susdsAddr,
+                    OSERO_REFERRAL_CODE,
+                );
+            await expect(deploy({ usdc: ZERO })).to.be.revertedWithCustomError(handler, "ZeroAddress");
+            await expect(deploy({ provider: ZERO })).to.be.revertedWithCustomError(handler, "ZeroAddress");
+            await expect(deploy({ susds: ZERO })).to.be.revertedWithCustomError(handler, "ZeroAddress");
+            await expect(deploy({ susds: mockShareAddr })).to.be.revertedWithCustomError(handler, "InvalidConfig");
+            for (const tol of [0, 301]) await expect(deploy({ tol })).to.be.revertedWithCustomError(handler, "InvalidConfig");
+            for (const exp of [0, 10_001]) await expect(deploy({ exp })).to.be.revertedWithCustomError(handler, "InvalidConfig");
+            await expect(deploy({ psm3: ZERO })).to.be.revertedWithCustomError(handler, "ZeroAddress");
+
+            const Psm = await ethers.getContractFactory("MockPSM3");
+            const ssrAddr = await ssr.getAddress();
+            for (const wiring of [
+                [wethAddr, susdsAddr, ssrAddr],
+                [usdcAddr, wethAddr, ssrAddr],
+                [usdcAddr, susdsAddr, stranger.address],
+            ]) {
+                const wrong = await Psm.deploy(wiring[0], wiring[1], wiring[2]);
+                await wrong.waitForDeployment();
+                await expect(deploy({ psm3: await wrong.getAddress() })).to.be.revertedWithCustomError(handler, "InvalidConfig");
+            }
+
+            const edge = await deploy({ tol: 300, exp: 1 });
+            await edge.waitForDeployment();
+            expect(await edge.MAX_TOLERANCE_BPS()).to.equal(300);
+            await (await feed.setReverting(true)).wait();
+            await expect(deploy({})).to.be.revertedWith("feed down");
+        });
 
         it("carries the Osero referral code on the PSM3 Swap event", async function () {
             const f = await loadFixture(deployRegistered);

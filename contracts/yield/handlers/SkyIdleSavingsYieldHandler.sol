@@ -23,8 +23,9 @@ import "../../common/Types.sol";
 ///         Price protection is the handler's own floor from
 ///         `ChainlinkSsrRateProvider` (Chainlink sUSDS/USDS rate vetoed by
 ///         Spark's SSR oracle); the manager's Uniswap V3 TWAP rule is bypassed
-///         by reporting USDC-only pool tokens. Documented as the "Protocol 3
-///         prices from Chainlink, not a pool" exception in SECURITY_MODEL.md.
+///         by reporting USDC-only pool tokens. That exception belongs in
+///         SECURITY_MODEL.md ("Protocol 3 prices from Chainlink, not a pool"),
+///         written together with the registration tooling.
 /// @dev    Step codes 80 to 85: 80 approve USDC, 81 deposit swap, 82 reset,
 ///         83 approve sUSDS, 84 redeem swap, 85 reset. A PSM3 failure
 ///         (81, 84) is therefore distinguishable from an approval failure.
@@ -44,7 +45,16 @@ contract SkyIdleSavingsYieldHandler is BaseIdleSavingsHandler {
         ISparkPSM3 _psm3,
         IERC20 _susds,
         uint256 _referralCode
-    ) BaseIdleSavingsHandler(YIELD_PROTOCOL_SKY_IDLE_SAVINGS, _usdc, _rateProvider, _susds, _maxToleranceBps, _maxExposureBps) {
+    )
+        BaseIdleSavingsHandler(
+            YIELD_PROTOCOL_SKY_IDLE_SAVINGS,
+            _usdc,
+            _rateProvider,
+            _susds,
+            _maxToleranceBps,
+            _maxExposureBps
+        )
+    {
         if (address(_psm3) == address(0)) revert ZeroAddress();
         if (_psm3.usdc() != address(_usdc)) revert InvalidConfig();
         if (_psm3.susds() != address(_susds)) revert InvalidConfig();

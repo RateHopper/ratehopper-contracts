@@ -34,8 +34,9 @@ describe("idle savings source rules", function () {
                 .map((line, i) => ({ line, i }))
                 .filter(
                     ({ line }) =>
+                        !line.trim().startsWith("//") &&
                         !line.includes("abi.encodeCall(") &&
-                        /\.(transfer|safeTransfer|transferFrom|safeTransferFrom|forceApprove)\(/.test(line),
+                        /\.(transfer|safeTransfer|transferFrom|safeTransferFrom|approve|forceApprove)\(/.test(line),
                 )
                 .map(({ line, i }) => `${file}:${i + 1}: ${line.trim()}`);
             expect(offenders).to.deep.equal([]);

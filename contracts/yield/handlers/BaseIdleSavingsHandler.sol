@@ -42,8 +42,9 @@ import {IdleSavingsStorage} from "./IdleSavingsStorage.sol";
 ///         pinned old build followed by `openLpInKind` on the newly
 ///         registered one; neither leg touches the venue or an oracle.
 ///
-///         Every Safe interaction goes through `execTransactionFromModule`
-///         with `Operation.Call`, an immutable target and a selector chosen
+///         Every Safe interaction goes through
+///         `execTransactionFromModuleReturnData` with `Operation.Call`, an
+///         immutable target and a selector chosen
 ///         here (approve, deposit, redeem). This contract never holds or
 ///         moves tokens itself: inside a delegatecall `address(this)` is the
 ///         manager, so a direct `transfer` here would move the manager's
@@ -59,8 +60,8 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     ///         thin contract over this base.
     uint8 public immutable PROTOCOL;
     IERC20 public immutable USDC;
-    /// @notice Price source for the share token (decision 26). Pinned per
-    ///         build: replacing it is a handler rollover behind the timelock.
+    /// @notice Price source for the share token. Pinned per build: replacing
+    ///         it is a handler rollover behind the timelock.
     IIdleSavingsRateProvider public immutable RATE_PROVIDER;
     /// @notice Hard ceiling on the oracle tolerance a caller may pass as
     ///         `slippageBps`. 50 bps covers the observed Chainlink lag behind
@@ -239,7 +240,9 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     ///         claims.
     /// @dev    A Safe that moved shares out around the module redeems what is
     ///         left (`IdleSavingsSharesShortfall`); the manager still prorates
-    ///         and charges against the full basis.
+    ///         and charges against the full basis. With nothing left to redeem
+    ///         no price is read, so the record can be cleared while the feed is
+    ///         down; the event then reports a rate of zero.
     function closeLp(
         CloseLpParams calldata p,
         uint128 basisForExit
@@ -251,7 +254,7 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
         uint256 toRedeem = p.exitBps == BPS ? tracked : Math.mulDiv(tracked, p.exitBps, BPS);
         if (p.exitBps != BPS && basisForExit > 0 && toRedeem == 0) revert InvalidExitBps();
 
-        uint256 rate = _rate();
+        uint256 rate = toRedeem > 0 ? _rate() : 0;
         uint256 minOut = _minUsdcOut(toRedeem, rate, p.slippageBps, p.minUsdcOut);
         uint256 usdcBefore = USDC.balanceOf(p.onBehalfOf);
         if (toRedeem > 0) _redeemShares(p.onBehalfOf, toRedeem, minOut);
@@ -289,12 +292,15 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
         return (address(USDC), address(_shareToken()), 0, released);
     }
 
-    /// @notice The same-id handler rollover leg (decision 21), reached only
-    ///         through the manager's `switchLp(PROTOCOL, PROTOCOL, ...)` after
-    ///         the old build's `withdrawLp` released the record: adopt the
-    ///         shares already on the Safe. Reporting `used1 == amount1` makes
-    ///         the manager's residue zero, so no price is read and basis and
-    ///         carry carry over unchanged. Any LP-shaped input reverts.
+    /// @notice The same-id handler rollover leg, reached only through the
+    ///         manager's `switchLp(PROTOCOL, PROTOCOL, ...)` after the old
+    ///         build's `withdrawLp` released the record: adopt the shares
+    ///         already on the Safe. Reporting `used1 == amount1` makes the
+    ///         manager's residue zero, so no price is read and basis and carry
+    ///         carry over unchanged. Any LP-shaped input reverts, and so does
+    ///         a switch from another source into a Safe whose position under
+    ///         this id is still open (the manager clears the pin only for the
+    ///         same-id rollover).
     function openLpInKind(
         OpenLpInKindParams calldata p
     ) external onlyDelegatecall returns (uint256 tokenId, uint128 used0, uint128 used1) {
@@ -304,6 +310,7 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
             revert InKindNotSupported();
         }
         tokenId = _tokenIdOf(p.onBehalfOf);
+        if (_yieldStorage().positionHandlerOf[PROTOCOL][tokenId] != address(0)) revert PositionAlreadyOpen();
         IdleSavingsLayout storage $ = _idleSavingsStorage();
         if ($.sharesOf[PROTOCOL][tokenId] != 0) revert StaleSharesRecord();
         if (shares.balanceOf(p.onBehalfOf) < p.amount1) revert SharesNotOnSafe();
@@ -426,7 +433,12 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     }
 
     /// @dev Module-mediated Safe call with inner-revert bubbling.
-    function _safeExec(address safe, address target, bytes memory data, uint8 step) internal returns (bytes memory ret) {
+    function _safeExec(
+        address safe,
+        address target,
+        bytes memory data,
+        uint8 step
+    ) internal returns (bytes memory ret) {
         bool ok;
         (ok, ret) = ISafe(safe).execTransactionFromModuleReturnData(target, 0, data, ISafe.Operation.Call);
         if (!ok) {

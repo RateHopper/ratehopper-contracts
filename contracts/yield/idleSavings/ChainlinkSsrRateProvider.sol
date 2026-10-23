@@ -82,7 +82,9 @@ contract ChainlinkSsrRateProvider is IIdleSavingsRateProvider {
         if (token != address(SHARE_TOKEN)) revert WrongShareToken(token);
         (, int256 answer, , uint256 updatedAt, ) = FEED.latestRoundData();
         if (answer <= 0) revert InvalidRate();
-        if (updatedAt == 0 || block.timestamp - updatedAt > MAX_FEED_AGE) revert StaleRate(updatedAt);
+        if (updatedAt == 0 || updatedAt > block.timestamp || block.timestamp - updatedAt > MAX_FEED_AGE) {
+            revert StaleRate(updatedAt);
+        }
         r = uint256(answer);
         if (r < ONE || r > MAX_RATE) revert RateOutOfBounds(r);
 

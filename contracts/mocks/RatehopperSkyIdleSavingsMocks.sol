@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISSRRateProvider} from "../interfaces/spark/ISSRRateProvider.sol";
 import {IIdleSavingsRateProvider} from "../yield/idleSavings/IIdleSavingsRateProvider.sol";
-import {OpenLpInKindParams} from "../interfaces/IYieldHandler.sol";
+import {OpenLpInKindParams, WithdrawLpParams} from "../interfaces/IYieldHandler.sol";
 import {BaseIdleSavingsHandler} from "../yield/handlers/BaseIdleSavingsHandler.sol";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -165,7 +165,6 @@ contract MockPSM3 {
     }
 
     function pocket() external view returns (address) {
-        require(!reverting, "PSM3/down");
         return address(this);
     }
 
@@ -348,5 +347,30 @@ contract MockIdleSavingsSource is BaseIdleSavingsHandler {
 
     function _liquidityAvailable() internal view override returns (uint256) {
         return USDC.balanceOf(address(VENUE));
+    }
+}
+
+/// @notice A "from" handler for switchLp whose withdraw leg hands the open
+///         leg a fixed `(token0, token1, amount0, amount1)` without moving
+///         anything, so every operand of the idle savings in-kind shape check
+///         can be reached through the manager. Immutables only: it runs via
+///         delegatecall and must not touch storage.
+contract MockInKindFeederYieldHandler {
+    uint8 public immutable PROTOCOL;
+    address private immutable token0;
+    address private immutable token1;
+    uint256 private immutable amount0;
+    uint256 private immutable amount1;
+
+    constructor(uint8 _protocol, address _token0, address _token1, uint256 _amount0, uint256 _amount1) {
+        PROTOCOL = _protocol;
+        token0 = _token0;
+        token1 = _token1;
+        amount0 = _amount0;
+        amount1 = _amount1;
+    }
+
+    function withdrawLp(WithdrawLpParams calldata) external view returns (address, address, uint256, uint256) {
+        return (token0, token1, amount0, amount1);
     }
 }

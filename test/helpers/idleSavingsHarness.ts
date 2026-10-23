@@ -414,7 +414,7 @@ export type SourceSpec = {
     setRate: (f: Harness, rate18: bigint) => Promise<void>;
     breakPricing: (f: Harness) => Promise<void>;
     breakVenue: (f: Harness) => Promise<void>;
-    deployBuild: (f: Harness) => Promise<string>;
+    deployBuild: (f: Harness, exposureBps?: number) => Promise<string>;
     steps: { deposit: number; redeem: number };
     tooLow: { deposit: string; redeem: string };
 };
@@ -437,12 +437,12 @@ export const SKY_SRC: SourceSpec = {
         await (await f.ssr.setReverting(true)).wait();
     },
     breakVenue: async (f) => void (await (await f.psm3.setReverting(true)).wait()),
-    deployBuild: async (f) => {
+    deployBuild: async (f, exposureBps = MAX_EXPOSURE_BPS) => {
         const build = await f.Handler.deploy(
             f.usdcAddr,
             f.providerAddr,
             MAX_TOLERANCE_BPS,
-            MAX_EXPOSURE_BPS,
+            exposureBps,
             f.psm3Addr,
             f.susdsAddr,
             OSERO_REFERRAL_CODE,
@@ -469,12 +469,12 @@ export const MOCK_SRC: SourceSpec = {
     },
     breakPricing: async (f) => void (await (await f.mockProvider.setReverting(true)).wait()),
     breakVenue: async (f) => void (await (await f.mockVenue.setReverting(true)).wait()),
-    deployBuild: async (f) => {
+    deployBuild: async (f, exposureBps = MAX_EXPOSURE_BPS) => {
         const build = await f.MockSource.deploy(
             f.usdcAddr,
             await f.mockProvider.getAddress(),
             MAX_TOLERANCE_BPS,
-            MAX_EXPOSURE_BPS,
+            exposureBps,
             f.mockVenueAddr,
             f.mockShareAddr,
         );

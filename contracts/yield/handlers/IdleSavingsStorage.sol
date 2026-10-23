@@ -22,7 +22,8 @@ abstract contract IdleSavingsStorage {
     }
 
     // keccak256(abi.encode(uint256(keccak256("ratehopper.storage.idleSavings")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 internal constant IDLE_SAVINGS_STORAGE_SLOT = 0x976ffd6dddc2117eb0340a87bbce8d17054b1d112887edd40565281982b07900;
+    bytes32 internal constant IDLE_SAVINGS_STORAGE_SLOT =
+        0x976ffd6dddc2117eb0340a87bbce8d17054b1d112887edd40565281982b07900;
 
     function _idleSavingsStorage() internal pure returns (IdleSavingsLayout storage $) {
         assembly ("memory-safe") {

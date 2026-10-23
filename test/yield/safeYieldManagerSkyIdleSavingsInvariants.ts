@@ -32,7 +32,7 @@ import {
 //  action may revert; the properties below must hold after every step.
 // ─────────────────────────────────────────────────────────────────────────
 
-const STEPS = Number(process.env.IDLE_INVARIANT_STEPS ?? 120);
+const STEPS = Number(process.env.IDLE_INVARIANT_STEPS ?? 200);
 const SEED = Number(process.env.IDLE_INVARIANT_SEED ?? 1);
 const EXIT_BPS = [1, 250, 2_500, 5_000, 9_999, 10_000];
 
