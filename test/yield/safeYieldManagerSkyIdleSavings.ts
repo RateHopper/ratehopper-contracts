@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
-import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
+import { loadFixture, time, impersonateAccount, setBalance } from "@nomicfoundation/hardhat-network-helpers";
 import {
     YieldProtocol,
     OSERO_REFERRAL_CODE,
@@ -19,6 +19,10 @@ import { ZERO_LEG, leg } from "../helpers/utils";
 // ─────────────────────────────────────────────────────────────────────────
 
 const ZERO = "0x0000000000000000000000000000000000000000";
+const abi = ethers.AbiCoder.defaultAbiCoder();
+const YIELD_SLOT = 0x53ba738b9a2829dfda910cf4e864fcd3f84e03854b49244f3d159a473ee6a400n;
+// YieldLayout field offsets (see YieldStorage.sol)
+const YIELD_FIELD = { residualBasis: 1n, allowedPoolKey: 2n, positionHandler: 5n, carry: 8n };
 const DEADLINE = ethers.MaxUint256;
 const TOLERANCE = 20;
 const PERF_FEE_BPS = 1000n; // 10%
@@ -117,6 +121,24 @@ function switchParams(safeAddr: string, tokenId: bigint | number, poolParam: str
         deadline: DEADLINE,
         ...overrides,
     };
+}
+
+function mapSlot(key: bigint, base: bigint): string {
+    return ethers.keccak256(abi.encode(["uint256", "uint256"], [key, base]));
+}
+
+function yieldSlot(field: bigint, protocol: number, tokenId: bigint): string {
+    return mapSlot(tokenId, BigInt(mapSlot(BigInt(protocol), YIELD_SLOT + field)));
+}
+
+async function setSlot(contractAddr: string, slot: string, value: bigint) {
+    await network.provider.send("hardhat_setStorageAt", [contractAddr, slot, ethers.toBeHex(value, 32)]);
+}
+
+async function safeSigner(safeAddr: string) {
+    await impersonateAccount(safeAddr);
+    await setBalance(safeAddr, 10n ** 18n);
+    return ethers.getSigner(safeAddr);
 }
 
 async function slotValue(contractAddr: string, slot: string): Promise<bigint> {
@@ -511,6 +533,284 @@ describe("SafeYieldManager + SkyIdleSavingsYieldHandler", function () {
             const slot = await handler.idleSavingsSharesSlot(tokenIdOf(safeAddr));
             await network.provider.send("hardhat_setStorageAt", [managerAddr, slot, ethers.zeroPadValue("0x01", 32)]);
             await expect(open(f)).to.be.revertedWithCustomError(handler, "StaleSharesRecord");
+        });
+    });
+
+    describe("tolerance", function () {
+        it("bounds slippageBps to [1, MAX_TOLERANCE_BPS] on open and close", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { handler } = f;
+            await expect(open(f, f.safeAddr, { slippageBps: 0 })).to.be.revertedWithCustomError(handler, "SlippageTooLow");
+            await expect(open(f, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS + 1 })).to.be.revertedWithCustomError(
+                handler,
+                "SlippageAboveMax",
+            );
+            await (await open(f, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS })).wait();
+            await expect(close(f, f.safeAddr, { slippageBps: 0 })).to.be.revertedWithCustomError(handler, "SlippageTooLow");
+            await expect(close(f, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS + 1 })).to.be.revertedWithCustomError(
+                handler,
+                "SlippageAboveMax",
+            );
+            await (await close(f, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS })).wait();
+        });
+
+        it("needs a tolerance at least equal to a Chainlink lag below the PSM3 rate on deposit", async function () {
+            const f = await loadFixture(deployRegistered);
+            await (await f.feed.set(bps(RATE, -30), await time.latest())).wait();
+            await expect(open(f, f.safeAddr, { slippageBps: 20 })).to.be.revertedWith("PSM3/amountOut-too-low");
+            await (await open(f, f.safeAddr, { slippageBps: 40 })).wait();
+            await expectZeroResidue(f);
+        });
+
+        it("needs a tolerance at least equal to a Chainlink lead above the PSM3 rate on redeem", async function () {
+            const f = await loadFixture(deployRegistered);
+            await (await open(f)).wait();
+            await (await f.feed.set(bps(RATE, 30), await time.latest())).wait();
+            await expect(close(f, f.safeAddr, { slippageBps: 20 })).to.be.revertedWith("PSM3/amountOut-too-low");
+            await (await close(f, f.safeAddr, { slippageBps: 40 })).wait();
+            await expectZeroResidue(f);
+        });
+    });
+
+    describe("feed guards", function () {
+        const states: Array<{ name: string; error: string | null; reason?: string; apply: (f: Harness) => Promise<void> }> = [
+            { name: "zero answer", error: "InvalidRate", apply: async (f) => void (await (await f.feed.set(0, await time.latest())).wait()) },
+            { name: "negative answer", error: "InvalidRate", apply: async (f) => void (await (await f.feed.set(-1, await time.latest())).wait()) },
+            {
+                name: "answer older than 36h",
+                error: "StaleRate",
+                apply: async (f) => void (await (await f.feed.set(RATE, (await time.latest()) - MAX_FEED_AGE - 100)).wait()),
+            },
+            { name: "rate below 1e18", error: "RateOutOfBounds", apply: async (f) => void (await (await f.feed.set(ONE - 1n, await time.latest())).wait()) },
+            { name: "rate above MAX_RATE", error: "RateOutOfBounds", apply: async (f) => void (await (await f.feed.set(MAX_RATE + 1n, await time.latest())).wait()) },
+            { name: "reverting feed", error: null, reason: "feed down", apply: async (f) => void (await (await f.feed.setReverting(true)).wait()) },
+            { name: "Chainlink 51 bps above the SSR oracle", error: "OracleDisagreement", apply: async (f) => void (await (await f.feed.set(bps(RATE, 51), await time.latest())).wait()) },
+            { name: "Chainlink 51 bps below the SSR oracle", error: "OracleDisagreement", apply: async (f) => void (await (await f.feed.set(bps(RATE, -51), await time.latest())).wait()) },
+            { name: "reverting SSR oracle", error: null, reason: "ssr down", apply: async (f) => void (await (await f.ssr.setReverting(true)).wait()) },
+        ];
+
+        for (const state of states) {
+            it(`fails closed on open and close but withdraws in kind with a ${state.name}`, async function () {
+                const f = await loadFixture(deployRegistered);
+                const { provider, susds, safeAddr, safe2Addr } = f;
+                await (await open(f)).wait();
+                await state.apply(f);
+                const expectRevert = (tx: Promise<any>) =>
+                    state.error
+                        ? expect(tx).to.be.revertedWithCustomError(provider, state.error)
+                        : expect(tx).to.be.revertedWith(state.reason!);
+                await expectRevert(close(f));
+                await expectRevert(open(f, safe2Addr));
+                const shares = await susds.balanceOf(safeAddr);
+                await (await withdraw(f)).wait();
+                expect(await susds.balanceOf(safeAddr)).to.equal(shares);
+                expect(await sharesOf(f)).to.equal(0);
+                await expectZeroResidue(f);
+            });
+        }
+
+        it("passes a 49 bps disagreement in either direction on open and close", async function () {
+            for (const delta of [49, -49]) {
+                const f = await loadFixture(deployRegistered);
+                await (await f.feed.set(bps(RATE, delta), await time.latest())).wait();
+                await (await open(f, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS })).wait();
+                await (await close(f, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS })).wait();
+                await expectZeroResidue(f);
+            }
+        });
+    });
+
+    describe("exposure rail", function () {
+        it("rejects a deposit that would push the tracked book above the pocket", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { handler, usdc, psm3Addr, safe2Addr } = f;
+            await (await open(f)).wait();
+            const available = await usdc.balanceOf(psm3Addr);
+            const tracked = usdcFor(await totalShares(f), RATE);
+            const amount = available - tracked + 1n;
+            await expect(open(f, safe2Addr, { usdcAmount: amount }))
+                .to.be.revertedWithCustomError(handler, "ExposureCapExceeded")
+                .withArgs(tracked + amount, available);
+        });
+
+        it("accepts a deposit exactly at the cap and rejects one unit more", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { handler, usdc, psm3Addr, safe2Addr } = f;
+            await (await open(f)).wait();
+            const tracked = usdcFor(await totalShares(f), RATE);
+            const amount = USDC(500_000);
+            const available = await usdc.balanceOf(psm3Addr);
+            await (await usdc.burn(psm3Addr, available - (tracked + amount))).wait();
+            await expect(open(f, safe2Addr, { usdcAmount: amount + 1n }))
+                .to.be.revertedWithCustomError(handler, "ExposureCapExceeded")
+                .withArgs(tracked + amount + 1n, tracked + amount);
+            await (await open(f, safe2Addr, { usdcAmount: amount })).wait();
+            await expectZeroResidue(f);
+        });
+
+        it("returns headroom after a partial close once the pocket is refilled", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { handler, usdc, psm3Addr, safe2Addr } = f;
+            await (await open(f)).wait();
+            const tracked = usdcFor(await totalShares(f), RATE);
+            await (await usdc.burn(psm3Addr, (await usdc.balanceOf(psm3Addr)) - tracked)).wait();
+            await expect(open(f, safe2Addr, { usdcAmount: USDC(10) })).to.be.revertedWithCustomError(
+                handler,
+                "ExposureCapExceeded",
+            );
+            const pocketBefore = await usdc.balanceOf(psm3Addr);
+            await (await close(f, f.safeAddr, { exitBps: 5_000 })).wait();
+            await (await usdc.mint(psm3Addr, pocketBefore - (await usdc.balanceOf(psm3Addr)))).wait();
+            await (await open(f, safe2Addr, { usdcAmount: USDC(10) })).wait();
+            await expectZeroResidue(f);
+        });
+    });
+
+    describe("close", function () {
+        it("fully closes after the rate rose and charges the performance fee on the profit", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, managerEvents, usdc, treasury, safeAddr, ssr, feed } = f;
+            const tokenId = tokenIdOf(safeAddr);
+            await (await open(f)).wait();
+            const shares = sharesFor(DEPOSIT, RATE);
+            const newRate = 1_120_000_000_000_000_000n;
+            await (await ssr.set(newRate * 10n ** 9n)).wait();
+            await (await feed.set(newRate, await time.latest())).wait();
+            const value = usdcFor(shares, newRate);
+            const fee = ((value - DEPOSIT) * PERF_FEE_BPS) / 10_000n;
+            expect(value).to.be.greaterThan(DEPOSIT);
+            const usdcBefore = await usdc.balanceOf(safeAddr);
+
+            const tx = close(f);
+            await expect(tx)
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, SKY, tokenId, DEPOSIT, value, fee, 10_000, 0);
+            await expect(tx)
+                .to.emit(managerEvents, "IdleSavingsRedeemed")
+                .withArgs(safeAddr, tokenId, shares, value, newRate, 10_000);
+
+            expect(await usdc.balanceOf(treasury.address)).to.equal(fee);
+            expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore + value - fee);
+            expect(await manager.residualBasisUsd6Of(SKY, tokenId)).to.equal(0);
+            expect(await manager.positionHandlerOf(SKY, tokenId)).to.equal(ZERO);
+            expect(await sharesOf(f)).to.equal(0);
+            expect(await totalShares(f)).to.equal(0);
+            await expectZeroResidue(f);
+        });
+
+        it("partially closes and prorates shares, basis and carry", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, managerAddr, managerEvents, safeAddr } = f;
+            const tokenId = tokenIdOf(safeAddr);
+            await (await open(f)).wait();
+            const shares = sharesFor(DEPOSIT, RATE);
+            const carry = 1_000n;
+            await setSlot(managerAddr, yieldSlot(YIELD_FIELD.carry, SKY, tokenId), carry);
+
+            const toRedeem = (shares * 2_500n) / 10_000n;
+            const value = usdcFor(toRedeem, RATE);
+            const basisForExit = (DEPOSIT * 2_500n) / 10_000n;
+            const carryForExit = (carry * 2_500n) / 10_000n;
+            const realized = value + carryForExit;
+            const fee = realized > basisForExit ? ((realized - basisForExit) * PERF_FEE_BPS) / 10_000n : 0n;
+
+            const tx = close(f, safeAddr, { exitBps: 2_500 });
+            await expect(tx)
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, SKY, tokenId, basisForExit, value, fee, 2_500, carryForExit);
+            await expect(tx)
+                .to.emit(managerEvents, "IdleSavingsRedeemed")
+                .withArgs(safeAddr, tokenId, toRedeem, value, RATE, 2_500);
+            expect(await manager.residualBasisUsd6Of(SKY, tokenId)).to.equal(DEPOSIT - basisForExit);
+            expect(await manager.carryProfitUsd6Of(SKY, tokenId)).to.equal(carry - carryForExit);
+            expect(await sharesOf(f)).to.equal(shares - toRedeem);
+            expect(await totalShares(f)).to.equal(shares - toRedeem);
+
+            await (await close(f)).wait();
+            expect(await sharesOf(f)).to.equal(0);
+            expect(await totalShares(f)).to.equal(0);
+            expect(await manager.positionHandlerOf(SKY, tokenId)).to.equal(ZERO);
+            await expectZeroResidue(f);
+        });
+
+        it("reverts InvalidExitBps when a basis decrement would stand without shares leaving", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { handler, managerAddr, safeAddr } = f;
+            await (await open(f)).wait();
+            await setSlot(managerAddr, await handler.idleSavingsSharesSlot(tokenIdOf(safeAddr)), 1n);
+            await expect(close(f, safeAddr, { exitBps: 1 })).to.be.revertedWithCustomError(handler, "InvalidExitBps");
+        });
+
+        it("redeems what is left after the Safe moved sUSDS out around the module", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, managerEvents, susds, stranger, safeAddr } = f;
+            const tokenId = tokenIdOf(safeAddr);
+            await (await open(f)).wait();
+            const shares = sharesFor(DEPOSIT, RATE);
+            const half = shares / 2n;
+            await (await susds.connect(await safeSigner(safeAddr)).transfer(stranger.address, half)).wait();
+
+            const value = usdcFor(shares - half, RATE);
+            const tx = close(f);
+            await expect(tx)
+                .to.emit(managerEvents, "IdleSavingsSharesShortfall")
+                .withArgs(safeAddr, tokenId, shares, shares - half);
+            await expect(tx)
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, SKY, tokenId, DEPOSIT, value, 0, 10_000, 0);
+            expect(await susds.balanceOf(safeAddr)).to.equal(0);
+            expect(await susds.balanceOf(stranger.address)).to.equal(half);
+            expect(await sharesOf(f)).to.equal(0);
+            expect(await totalShares(f)).to.equal(0);
+            await expectZeroResidue(f);
+        });
+
+        it("bubbles the pocket's USDC revert and leaves storage untouched", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, handler, usdc, psm3Addr, safe, safeAddr, safe2Addr, handlerAddr } = f;
+            await (await open(f)).wait();
+            const shares = await sharesOf(f);
+            await (await usdc.burn(psm3Addr, await usdc.balanceOf(psm3Addr))).wait();
+            await expect(close(f)).to.be.revertedWith("ERC20: transfer amount exceeds balance");
+            expect(await sharesOf(f)).to.equal(shares);
+            expect(await totalShares(f)).to.equal(shares);
+            expect(await manager.positionHandlerOf(SKY, tokenIdOf(safeAddr))).to.equal(handlerAddr);
+            expect(await manager.residualBasisUsd6Of(SKY, tokenIdOf(safeAddr))).to.equal(DEPOSIT);
+
+            await (await safe.setFail(psm3Addr, 1)).wait();
+            await expect(close(f)).to.be.revertedWithCustomError(handler, "ModuleCallFailed").withArgs(84);
+            await (await usdc.mint(psm3Addr, USDC(10_000_000))).wait();
+            await (await f.safe2.setFail(psm3Addr, 1)).wait();
+            await expect(open(f, safe2Addr)).to.be.revertedWithCustomError(handler, "ModuleCallFailed").withArgs(81);
+        });
+    });
+
+    describe("withdrawLp", function () {
+        it("releases the record with no module call and leaves the sUSDS on the Safe", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { manager, managerAddr, managerEvents, psm3, usdc, susds, safe, safeAddr, psm3Addr, usdcAddr, susdsAddr } = f;
+            const tokenId = tokenIdOf(safeAddr);
+            await (await open(f)).wait();
+            const shares = sharesFor(DEPOSIT, RATE);
+            const carry = 777n;
+            await setSlot(managerAddr, yieldSlot(YIELD_FIELD.carry, SKY, tokenId), carry);
+            const usdcBefore = await usdc.balanceOf(safeAddr);
+            for (const target of [psm3Addr, usdcAddr, susdsAddr]) await (await safe.setFail(target, 1)).wait();
+
+            const tx = withdraw(f);
+            await expect(tx).to.emit(managerEvents, "IdleSavingsReleased").withArgs(safeAddr, tokenId, shares);
+            await expect(tx)
+                .to.emit(manager, "PositionWithdrawn")
+                .withArgs(safeAddr, SKY, tokenId, DEPOSIT, carry, 0, shares);
+            await expect(tx).to.not.emit(psm3, "Swap");
+            expect(await susds.balanceOf(safeAddr)).to.equal(shares);
+            expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore);
+            expect(await sharesOf(f)).to.equal(0);
+            expect(await totalShares(f)).to.equal(0);
+            expect(await manager.positionHandlerOf(SKY, tokenId)).to.equal(ZERO);
+            expect(await manager.residualBasisUsd6Of(SKY, tokenId)).to.equal(0);
+            expect(await manager.carryProfitUsd6Of(SKY, tokenId)).to.equal(0);
+            await expectZeroResidue(f);
         });
     });
 });
