@@ -69,8 +69,8 @@ contract SkyIdleSavingsYieldHandler is BaseIdleSavingsHandler {
         return SUSDS;
     }
 
-    function _poolParamMatches(bytes memory lpPoolParam) internal view override returns (bool) {
-        (address psm3, address susds) = abi.decode(lpPoolParam, (address, address));
+    function _poolParamMatches(bytes memory poolParam) internal view override returns (bool) {
+        (address psm3, address susds) = abi.decode(poolParam, (address, address));
         return psm3 == address(PSM3) && susds == address(SUSDS);
     }
 

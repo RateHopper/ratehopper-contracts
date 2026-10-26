@@ -12,7 +12,7 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../interfaces/safe/ISafe.sol";
 import {IProtocolRegistry} from "../interfaces/IProtocolRegistry.sol";
-import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, WithdrawLpParams, OpenLpInKindParams} from "../interfaces/IYieldHandler.sol";
+import {IYieldHandler, OpenParams, CloseParams, CollectParams, WithdrawParams, OpenInKindParams} from "../interfaces/IYieldHandler.sol";
 import {TokenReturnLib} from "./libraries/TokenReturnLib.sol";
 import {TwapOracle} from "./libraries/TwapOracle.sol";
 import {IUniswapV3Pool} from "../interfaces/uniswapV3/IUniswapV3Pool.sol";
@@ -29,7 +29,7 @@ interface ITimelockControllerLike {
 ///         token amounts become the open leg's input directly — no swaps, so
 ///         the only price protection is the decrease minimums (withdraw leg)
 ///         and the mint minimums (open leg).
-struct SwitchLpParams {
+struct SwitchParams {
     address onBehalfOf;
     uint256 tokenId;
     // withdraw leg (always a full exit)
@@ -40,7 +40,7 @@ struct SwitchLpParams {
     int24 tickUpper;
     uint256 mintAmount0Min;
     uint256 mintAmount1Min;
-    bytes lpPoolParam;
+    bytes poolParam;
     uint256 deadline;
 }
 
@@ -234,13 +234,13 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     //  LP lifecycle
     // ─────────────────────────────────────────────────────────────────────
 
-    /// @notice Open an LP position on `protocol`. The Safe must have enabled
+    /// @notice Open a position on `protocol`. The Safe must have enabled
     ///         this contract as a module and hold `params.usdcAmount` USDC.
     /// @dev    The only lifecycle entry gated by `whenNotPaused`: pausing the
     ///         contract yields an exit-only mode, never trapping positions.
-    function openLp(
+    function open(
         uint8 protocol,
-        OpenLpParams calldata params
+        OpenParams calldata params
     ) external nonReentrant whenNotPaused onlyOperatorOrSafe(params.onBehalfOf) returns (uint256 tokenId) {
         if (block.timestamp > params.deadline) revert DeadlineExpired();
         if (params.usdcAmount == 0) revert InvalidUsdcAmount();
@@ -248,9 +248,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         if (handler == address(0)) revert HandlerNotSet();
         if (!protocolEnabledForOpen[protocol]) revert ProtocolDisabled();
 
-        _requireWhitelistedPoolTokens(handler, params.lpPoolParam);
+        _requireWhitelistedPoolTokens(handler, params.poolParam);
 
-        bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.openLp, (params)));
+        bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.open, (params)));
         uint128 basisUsd6;
         uint128 used0;
         uint128 used1;
@@ -267,7 +267,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         emit PositionOpened(params.onBehalfOf, protocol, tokenId, params.usdcAmount, used0, used1, basisUsd6);
     }
 
-    /// @notice Close (partially or fully) an LP position opened through this
+    /// @notice Close (partially or fully) a position opened through this
     ///         contract. Charges `performanceFeeBps` on realized profit only.
     /// @dev    Deliberately NOT `whenNotPaused` and NOT gated on the current
     ///         `yieldHandlers` registration — exits run through the handler
@@ -275,9 +275,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         paused (exit-only mode). Only the per-protocol
     ///         `protocolEnabledForClose` switch can stop them (e.g. a
     ///         compromised handler).
-    function closeLp(
+    function close(
         uint8 protocol,
-        CloseLpParams calldata params
+        CloseParams calldata params
     ) external nonReentrant onlyOperatorOrSafe(params.onBehalfOf) {
         if (block.timestamp > params.deadline) revert DeadlineExpired();
         if (params.exitBps == 0 || params.exitBps > 10_000) revert InvalidExitBps();
@@ -300,7 +300,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
             $.carryProfitUsd6Of[protocol][params.tokenId] = carry - carryForExit;
         }
 
-        bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.closeLp, (params, basisForExit)));
+        bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.close, (params, basisForExit)));
         uint128 currentValueUsd6 = abi.decode(ret, (uint128));
 
         // Lifecycle profit, not just this exit's proceeds: value realized here
@@ -336,7 +336,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         the pool's own two tokens and stay on the Safe. No swap, so no
     ///         router and no price reference are involved.
     /// @dev    This is the exit that must keep working when nothing else does.
-    ///         `closeLp` sells the position to USDC, which means it depends on
+    ///         `close` sells the position to USDC, which means it depends on
     ///         the TWAP floor and therefore on a reference pool that could lose
     ///         depth, lose observation history, or simply be unconfigured for a
     ///         newly listed token. Without an oracle-free path, any of those
@@ -344,7 +344,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         NO price, and its only gate is the same `protocolEnabledForClose`
     ///         switch that guards every other exit.
     ///
-    ///         No PERFORMANCE fee is charged, for the same reason `switchLp`
+    ///         No PERFORMANCE fee is charged, for the same reason `switchPosition`
     ///         charges none: nothing is realized in USDC, so there is no profit
     ///         to measure. `feeCollectBps` is unaffected and still applies to
     ///         the fees harvested on the way out. Basis and carry are released
@@ -352,9 +352,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         does hand users a performance-fee-free way out, which changes
     ///         nothing economically — a Safe owner can already exit around the
     ///         module entirely (see docs/SECURITY_MODEL.md).
-    function withdrawLp(
+    function withdraw(
         uint8 protocol,
-        WithdrawLpParams calldata params
+        WithdrawParams calldata params
     ) external nonReentrant onlyOperatorOrSafe(params.onBehalfOf) returns (uint256 amount0, uint256 amount1) {
         if (block.timestamp > params.deadline) revert DeadlineExpired();
         if (!protocolEnabledForClose[protocol]) revert ProtocolDisabled();
@@ -366,7 +366,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         delete $.positionHandlerOf[protocol][params.tokenId];
         delete $.carryProfitUsd6Of[protocol][params.tokenId];
 
-        bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.withdrawLp, (params)));
+        bytes memory ret = _delegateToHandler(handler, abi.encodeCall(IYieldHandler.withdraw, (params)));
         (, , amount0, amount1) = abi.decode(ret, (address, address, uint256, uint256));
 
         emit PositionWithdrawn(
@@ -391,22 +391,22 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         position cannot consume are nevertheless value already returned
     ///         to the Safe, so they repay basis first and any excess is carried
     ///         as realized profit to the replacement position. The final
-    ///         `closeLp` settles that carry together with the replacement's
+    ///         `close` settles that carry together with the replacement's
     ///         realized USDC value.
     ///         A switch opens new exposure, hence `whenNotPaused` (unlike
     ///         exits) plus BOTH per-protocol switches:
     ///         `protocolEnabledForClose[from]` and `protocolEnabledForOpen[to]`.
-    function switchLp(
+    function switchPosition(
         uint8 fromProtocol,
         uint8 toProtocol,
-        SwitchLpParams calldata params
+        SwitchParams calldata params
     ) external nonReentrant whenNotPaused onlyOperatorOrSafe(params.onBehalfOf) returns (uint256 newTokenId) {
         if (block.timestamp > params.deadline) revert DeadlineExpired();
         if (!protocolEnabledForClose[fromProtocol]) revert ProtocolDisabled();
         address openHandler = yieldHandlers[toProtocol];
         if (openHandler == address(0)) revert HandlerNotSet();
         if (!protocolEnabledForOpen[toProtocol]) revert ProtocolDisabled();
-        _requireWhitelistedPoolTokens(openHandler, params.lpPoolParam);
+        _requireWhitelistedPoolTokens(openHandler, params.poolParam);
 
         YieldLayout storage $ = _yieldStorage();
         (uint128 residualBasis, address closeHandler) = _pinnedPosition($, fromProtocol, params.tokenId);
@@ -521,14 +521,14 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///      side arrives wrapped as its ERC20).
     function _switchWithdrawLeg(
         address handler,
-        SwitchLpParams calldata p
+        SwitchParams calldata p
     ) internal returns (address token0, address token1, uint256 amount0, uint256 amount1) {
         bytes memory ret = _delegateToHandler(
             handler,
             abi.encodeCall(
-                IYieldHandler.withdrawLp,
+                IYieldHandler.withdraw,
                 (
-                    WithdrawLpParams({
+                    WithdrawParams({
                         onBehalfOf: p.onBehalfOf,
                         tokenId: p.tokenId,
                         decreaseAmount0Min: p.decreaseAmount0Min,
@@ -547,7 +547,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///      switch can never silently deploy unrelated Safe funds.
     function _switchOpenLeg(
         address handler,
-        SwitchLpParams calldata p,
+        SwitchParams calldata p,
         address token0,
         address token1,
         uint256 amount0,
@@ -556,9 +556,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         bytes memory ret = _delegateToHandler(
             handler,
             abi.encodeCall(
-                IYieldHandler.openLpInKind,
+                IYieldHandler.openInKind,
                 (
-                    OpenLpInKindParams({
+                    OpenInKindParams({
                         onBehalfOf: p.onBehalfOf,
                         token0: token0,
                         token1: token1,
@@ -568,7 +568,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
                         tickUpper: p.tickUpper,
                         mintAmount0Min: p.mintAmount0Min,
                         mintAmount1Min: p.mintAmount1Min,
-                        lpPoolParam: p.lpPoolParam,
+                        poolParam: p.poolParam,
                         deadline: p.deadline
                     })
                 )
@@ -582,19 +582,19 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///      handler never runs in its own storage context). token0 ==
     ///      address(0) is Uniswap V4's native-ETH currency sentinel, not a
     ///      token — skip it (token1 can never be zero: currencies sort
-    ///      ascending). Applies to openLp and the switchLp open leg only;
+    ///      ascending). Applies to `open` and the `switchPosition` open leg only;
     ///      exits must never brick on a later de-listing.
-    function _requireWhitelistedPoolTokens(address handler, bytes calldata lpPoolParam) internal view {
-        (address token0, address token1) = _decodePoolTokens(handler, lpPoolParam);
+    function _requireWhitelistedPoolTokens(address handler, bytes calldata poolParam) internal view {
+        (address token0, address token1) = _decodePoolTokens(handler, poolParam);
         if (token0 != address(0) && !REGISTRY.whitelistedTokens(token0)) revert TokenNotWhitelisted(token0);
         if (!REGISTRY.whitelistedTokens(token1)) revert TokenNotWhitelisted(token1);
     }
 
     function _decodePoolTokens(
         address handler,
-        bytes memory lpPoolParam
+        bytes memory poolParam
     ) internal view returns (address token0, address token1) {
-        bytes memory ret = _staticcallHandler(handler, abi.encodeCall(IYieldHandler.poolTokens, (lpPoolParam)));
+        bytes memory ret = _staticcallHandler(handler, abi.encodeCall(IYieldHandler.poolTokens, (poolParam)));
         return abi.decode(ret, (address, address));
     }
 
@@ -624,7 +624,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ) internal view {
         (address token0, address token1) = _decodePoolTokens(handler, poolParam);
         _requireTwapReference($, token0);
-        // A native side comes back from `withdrawLp` wrapped, so a switch out
+        // A native side comes back from `withdraw` wrapped, so a switch out
         // of this pool values its residue under the WETH key: both must answer.
         if (token0 == address(0)) _requireTwapReference($, address(WETH));
         if (token1 != token0) _requireTwapReference($, token1);
@@ -649,19 +649,19 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
 
     /// @notice Harvest accrued LP fees of a position opened through this
     ///         contract without exiting it.
-    /// @dev    Same exit-friendly gating as `closeLp`: runs through the
+    /// @dev    Same exit-friendly gating as `close`: runs through the
     ///         pinned handler, unaffected by pause, stoppable only via
     ///         `protocolEnabledForClose`.
-    function collectLp(
+    function collect(
         uint8 protocol,
-        CollectLpParams calldata params
+        CollectParams calldata params
     ) external nonReentrant onlyOperatorOrSafe(params.onBehalfOf) {
         if (!protocolEnabledForClose[protocol]) revert ProtocolDisabled();
         // Only harvest positions this contract manages; otherwise any
         // Safe-owned NFT could be routed through to skim feeCollectBps.
         (, address handler) = _pinnedPosition(_yieldStorage(), protocol, params.tokenId);
 
-        _delegateToHandler(handler, abi.encodeCall(IYieldHandler.collectLp, (params)));
+        _delegateToHandler(handler, abi.encodeCall(IYieldHandler.collect, (params)));
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -697,7 +697,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
 
     /// @notice Profit an in-kind switch already handed back to the Safe that
     ///         this position still owes a performance fee on. Charged by
-    ///         `closeLp`, prorated with `exitBps`.
+    ///         `close`, prorated with `exitBps`.
     function carryProfitUsd6Of(uint8 protocol, uint256 tokenId) external view returns (uint128) {
         return _yieldStorage().carryProfitUsd6Of[protocol][tokenId];
     }
@@ -848,7 +848,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
 
     /// @notice Admit a pool param whose pool runs third-party hook code
     ///         (Uniswap V4). A hook runs on every liquidity and swap path,
-    ///         including the oracle-free `withdrawLp` exit, so admitting one is
+    ///         including the oracle-free `withdraw` exit, so admitting one is
     ///         a critical change: the hook must be reviewed first, and the
     ///         timelock gives operators and Safe owners time to inspect it.
     ///         Removal goes through `setPoolParamAllowed(…, false)` as usual.
@@ -894,7 +894,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         unconfigured token cannot be swapped at all.
     /// @dev    Restricted to the configured timelock holding CRITICAL_ROLE.
     ///         A DEFAULT_ADMIN_ROLE holder cannot repoint or clear a reference
-    ///         directly. `withdrawLp` remains available regardless of what is
+    ///         directly. `withdraw` remains available regardless of what is
     ///         configured here.
     /// @param token ERC20 reference key, or address(0) for native ETH. The
     ///        native key must point to a WETH/USDC reference pool.
@@ -1003,7 +1003,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         emit ProtocolStatusChanged(protocol, false, enabled);
     }
 
-    /// @notice Pause NEW position opens. closeLp/collectLp stay available —
+    /// @notice Pause NEW position opens. close/collect stay available —
     ///         pausing yields an exit-only mode and never traps positions.
     function pause() external onlyPauser {
         _pause();

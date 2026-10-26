@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
-import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
+import { clearSnapshots, loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import {
     CHAINLINK_SUSDS_USDS_FEED,
@@ -93,10 +93,10 @@ async function deployStack() {
     const providerAddr = await provider.getAddress();
 
     const Handler = await ethers.getContractFactory("SkyIdleSavingsYieldHandler");
-    const deployBuild = async (exposureBps = MAX_EXPOSURE_BPS) => {
+    const deployBuild = async (exposureBps = MAX_EXPOSURE_BPS, rateProvider = providerAddr) => {
         const build = await Handler.deploy(
             USDC_ADDR,
-            providerAddr,
+            rateProvider,
             MAX_TOLERANCE_BPS,
             exposureBps,
             PSM3_ADDR,
@@ -108,6 +108,26 @@ async function deployStack() {
     };
     const handler = await deployBuild();
     const handlerAddr = await handler.getAddress();
+    // A build whose Chainlink input sits `offsetBps` away from the live SSR rate
+    // (inside MAX_DISAGREEMENT_BPS, so the provider accepts it) over the REAL SSR
+    // oracle: the only way to put the oracle floor on the wrong side of what PSM3 pays.
+    const deployOffsetBuild = async (offsetBps: number) => {
+        const ssrRate = (await ssr.getConversionRate()) / 10n ** 9n;
+        const Feed = await ethers.getContractFactory("MockAggregatorV3");
+        const offsetFeed = await Feed.deploy();
+        await offsetFeed.waitForDeployment();
+        await (await offsetFeed.set((ssrRate * BigInt(10_000 + offsetBps)) / 10_000n, await time.latest())).wait();
+        const offsetProvider = await Provider.deploy(
+            await offsetFeed.getAddress(),
+            SPARK_SSR_ORACLE_ADDRESS,
+            SUSDS_ADDR,
+            MAX_FEED_AGE,
+            MAX_DISAGREEMENT_BPS,
+            MAX_RATE,
+        );
+        await offsetProvider.waitForDeployment();
+        return deployBuild(MAX_EXPOSURE_BPS, await offsetProvider.getAddress());
+    };
 
     const Registry = await ethers.getContractFactory("MockRegistry");
     const registry = await Registry.deploy();
@@ -160,6 +180,7 @@ async function deployStack() {
         handler,
         handlerAddr,
         deployBuild,
+        deployOffsetBuild,
         registry,
         timelock,
         manager,
@@ -173,13 +194,9 @@ async function deployStack() {
 type Stack = Awaited<ReturnType<typeof deployStack>>;
 
 const open = (f: Stack, safeAddr: string, overrides: Record<string, any> = {}) =>
-    f.manager.connect(f.operator).openLp(SKY, openParams(safeAddr, SKY_PARAM, { usdcAmount: AMOUNT, ...overrides }));
+    f.manager.connect(f.operator).open(SKY, openParams(safeAddr, SKY_PARAM, { usdcAmount: AMOUNT, ...overrides }));
 const close = (f: Stack, safeAddr: string, overrides: Record<string, any> = {}) =>
-    f.manager.connect(f.operator).closeLp(SKY, closeParams(safeAddr, tokenIdOf(safeAddr), overrides));
-const withdraw = (f: Stack, safeAddr: string) =>
-    f.manager.connect(f.operator).withdrawLp(SKY, withdrawParams(safeAddr, tokenIdOf(safeAddr)));
-const roll = (f: Stack, safeAddr: string) =>
-    f.manager.connect(f.operator).switchLp(SKY, SKY, switchParams(safeAddr, tokenIdOf(safeAddr), SKY_PARAM));
+    f.manager.connect(f.operator).close(SKY, closeParams(safeAddr, tokenIdOf(safeAddr), overrides));
 const sharesOf = async (f: Stack, safeAddr: string) =>
     slotValue(f.managerAddr, await f.handler.idleSavingsSharesSlot(tokenIdOf(safeAddr)));
 const totalShares = async (f: Stack) => slotValue(f.managerAddr, await f.handler.idleSavingsTotalSharesSlot());
@@ -201,18 +218,23 @@ function logArgs(contract: any, receipt: any, name: string) {
 describe("SafeYieldManager + Sky idle savings - integration (Base fork)", function () {
     this.timeout(300_000);
 
-    before(async function () {
+    // network-helpers keeps its fixture snapshots in a module-global registry, so
+    // a reset must also drop that registry or a later file's loadFixture would
+    // revert to an id from this node (same pattern as test/debt/debtSwapBySafe.ts).
+    const resetFork = async (blockNumber: number | undefined) => {
         await network.provider.request({
             method: "hardhat_reset",
-            params: [
-                {
-                    forking: {
-                        jsonRpcUrl: process.env.BASE_RPC_URL || "https://mainnet.base.org",
-                        blockNumber: FORK_BLOCK,
-                    },
-                },
-            ],
+            params: [{ forking: { jsonRpcUrl: process.env.BASE_RPC_URL || "https://mainnet.base.org", blockNumber } }],
         });
+        await clearSnapshots();
+    };
+
+    before(async function () {
+        await resetFork(FORK_BLOCK);
+    });
+
+    after(async function () {
+        await resetFork(process.env.BASE_FORK_BLOCK_NUMBER ? Number(process.env.BASE_FORK_BLOCK_NUMBER) : undefined);
     });
 
     it("prices sUSDS from a fresh 18-decimal Chainlink round the live SSR oracle agrees with, inside PSM3's own quote", async function () {
@@ -266,13 +288,13 @@ describe("SafeYieldManager + Sky idle savings - integration (Base fork)", functi
         const deposited = logArgs(managerEvents, openReceipt, "IdleSavingsDeposited");
         expect([deposited.usdcIn, deposited.sharesOut, deposited.rate]).to.deep.equal([AMOUNT, shares, rate]);
         const opened = logArgs(manager, openReceipt, "PositionOpened");
-        expect([
-            opened.tokenId,
-            opened.usdcInput,
-            opened.amount0ToLp,
-            opened.amount1ToLp,
-            opened.currentValueUsd6,
-        ]).to.deep.equal([tokenId, AMOUNT, AMOUNT, shares, AMOUNT]);
+        expect([opened.tokenId, opened.usdcInput, opened.used0, opened.used1, opened.currentValueUsd6]).to.deep.equal([
+            tokenId,
+            AMOUNT,
+            AMOUNT,
+            shares,
+            AMOUNT,
+        ]);
         expect(await manager.residualBasisUsd6Of(SKY, tokenId)).to.equal(AMOUNT);
         expect(await manager.positionHandlerOf(SKY, tokenId)).to.equal(handlerAddr);
         expect(await sharesOf(f, safeAddr)).to.equal(shares);
@@ -315,6 +337,8 @@ describe("SafeYieldManager + Sky idle savings - integration (Base fork)", functi
         const usdcBefore = await usdc.balanceOf(safeAddr);
         const treasuryBefore = await usdc.balanceOf(treasury.address);
         const ssrBefore = await ssr.getConversionRate();
+        const [, , , updatedAt] = await feed.latestRoundData();
+        expect((await time.latest()) - Number(updatedAt) + 12 * HOUR).to.be.lessThan(MAX_FEED_AGE);
         await time.increase(12 * HOUR);
         expect(await ssr.getConversionRate()).to.be.greaterThan(ssrBefore);
 
@@ -354,26 +378,28 @@ describe("SafeYieldManager + Sky idle savings - integration (Base fork)", functi
         expect(await sharesOf(f, safeAddr)).to.equal(0);
     });
 
-    it("keeps the handler's guards and PSM3's own floor in front of the live venue", async function () {
+    it("forwards the oracle floor and the caller floor to PSM3's minAmountOut on both legs", async function () {
         const f = await loadFixture(deployStack);
-        const { handler, safeAddr } = f;
-        await expect(open(f, safeAddr, { slippageBps: MAX_TOLERANCE_BPS + 1 })).to.be.revertedWithCustomError(
-            handler,
-            "SlippageAboveMax",
-        );
-        await expect(open(f, safeAddr, { slippageBps: 0 })).to.be.revertedWithCustomError(handler, "SlippageTooLow");
-        await expect(
-            open(f, safeAddr, { lpPoolParam: encodeSkyIdleSavingsPoolParam(SUSDS_ADDR, PSM3_ADDR) }),
-        ).to.be.revertedWithCustomError(handler, "WrongPoolParam");
-        await expect(open(f, safeAddr, { stake: true })).to.be.revertedWithCustomError(handler, "StakingNotSupported");
+        const { manager, timelock, safeAddr } = f;
 
-        await (await open(f, safeAddr)).wait();
-        await expect(open(f, safeAddr)).to.be.revertedWithCustomError(handler, "PositionAlreadyOpen");
+        // Chainlink 40 bps BELOW the live SSR rate: the deposit floor demands more
+        // shares than PSM3 pays; the redeem floor sits below what it pays.
+        const low = await f.deployOffsetBuild(-40);
+        await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, await low.getAddress()])).wait();
+        await expect(open(f, safeAddr, { slippageBps: 1 })).to.be.revertedWith("PSM3/amountOut-too-low");
+        await (await open(f, safeAddr, { slippageBps: MAX_TOLERANCE_BPS })).wait();
         await expect(close(f, safeAddr, { minUsdcOut: AMOUNT * 2n })).to.be.revertedWith("PSM3/amountOut-too-low");
-        await expect(close(f, safeAddr, { slippageBps: MAX_TOLERANCE_BPS + 1 })).to.be.revertedWithCustomError(
-            handler,
-            "SlippageAboveMax",
-        );
+        await (await close(f, safeAddr, { slippageBps: 1 })).wait();
+        expect(await susds.balanceOf(safeAddr)).to.equal(0);
+
+        // Chainlink 40 bps ABOVE the live SSR rate: deposits pass at any tolerance,
+        // the redeem floor is above what PSM3 pays until the tolerance covers it.
+        const high = await f.deployOffsetBuild(40);
+        await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, await high.getAddress()])).wait();
+        await (await open(f, safeAddr, { slippageBps: 1 })).wait();
+        await expect(close(f, safeAddr, { slippageBps: 1 })).to.be.revertedWith("PSM3/amountOut-too-low");
+        await (await close(f, safeAddr, { slippageBps: MAX_TOLERANCE_BPS })).wait();
+        expect(await susds.balanceOf(safeAddr)).to.equal(0);
     });
 
     it("fails closed on open and close once the live round is older than 36h, but still releases in kind", async function () {
@@ -383,7 +409,7 @@ describe("SafeYieldManager + Sky idle savings - integration (Base fork)", functi
         await (await open(f, safeAddr)).wait();
         const shares = await susds.balanceOf(safeAddr);
 
-        await time.increase(MAX_FEED_AGE);
+        await time.increase(MAX_FEED_AGE + 1);
         const [, , , updatedAt] = await feed.latestRoundData();
         await expect(provider.rate(SUSDS_ADDR))
             .to.be.revertedWithCustomError(provider, "StaleRate")
@@ -391,7 +417,9 @@ describe("SafeYieldManager + Sky idle savings - integration (Base fork)", functi
         await expect(open(f, safe2Addr)).to.be.revertedWithCustomError(provider, "StaleRate");
         await expect(close(f, safeAddr)).to.be.revertedWithCustomError(provider, "StaleRate");
 
-        const receipt = await (await withdraw(f, safeAddr)).wait();
+        const receipt = await (
+            await manager.connect(f.operator).withdraw(SKY, withdrawParams(safeAddr, tokenId))
+        ).wait();
         expect(logArgs(managerEvents, receipt, "IdleSavingsReleased").shares).to.equal(shares);
         const withdrawn = logArgs(manager, receipt, "PositionWithdrawn");
         expect([withdrawn.releasedBasisUsd6, withdrawn.amount0, withdrawn.amount1]).to.deep.equal([AMOUNT, 0n, shares]);
@@ -416,7 +444,7 @@ describe("SafeYieldManager + Sky idle savings - integration (Base fork)", functi
         expect(await manager.residualBasisUsd6Of(SKY, tokenIdOf(safeAddr))).to.equal(cap);
     });
 
-    it("rolls a live position onto a new build through switchLp(3, 3) without touching PSM3, then the new build redeems", async function () {
+    it("rolls a live position onto a new build through switchPosition(3, 3) without touching PSM3, then the new build redeems", async function () {
         const f = await loadFixture(deployStack);
         const { manager, managerEvents, timelock, safeAddr } = f;
         const tokenId = tokenIdOf(safeAddr);
@@ -428,7 +456,9 @@ describe("SafeYieldManager + Sky idle savings - integration (Base fork)", functi
         const usdcBefore = await usdc.balanceOf(safeAddr);
         const venueSharesBefore = await susds.balanceOf(PSM3_ADDR);
 
-        const receipt = await (await roll(f, safeAddr)).wait();
+        const receipt = await (
+            await manager.connect(f.operator).switchPosition(SKY, SKY, switchParams(safeAddr, tokenId, SKY_PARAM))
+        ).wait();
         const switched = logArgs(manager, receipt, "PositionSwitched");
         expect([
             switched.oldTokenId,

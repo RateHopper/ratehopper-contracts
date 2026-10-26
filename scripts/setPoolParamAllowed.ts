@@ -22,7 +22,7 @@ import { deployedManagerAddress } from "./lpSafeShared";
  * DEFAULT_ADMIN_ROLE or the call reverts.
  *
  * The pool param carries the pair and must be byte-identical to what callers
- * later pass as lpPoolParam / SwapLeg.poolParam:
+ * later pass as poolParam / SwapLeg.poolParam:
  *   - univ3:      abi.encode(token0, token1, uint24 feeTier)
  *   - aerodrome:  abi.encode(token0, token1, int24 tickSpacing)
  *   - univ4:      abi.encode(currency0, currency1, uint24 fee, int24 tickSpacing, address hooks)

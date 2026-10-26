@@ -38,8 +38,8 @@ contract AerodromeYieldHandler is BaseYieldHandler {
     /// @dev Stake the minted Slipstream NFT into its pool's stake pool (resolved
     ///      via the Voter) for AERO emissions: the Safe approves the stakePool for
     ///      the NFT, then deposits. Reverts if the pool has no live stakePool.
-    function _stake(address _onBehalfOf, uint256 tokenId, bytes memory lpPoolParam) internal override {
-        address stakePool = VOTER.gauges(_getPool(lpPoolParam));
+    function _stake(address _onBehalfOf, uint256 tokenId, bytes memory poolParam) internal override {
+        address stakePool = VOTER.gauges(_getPool(poolParam));
         if (stakePool == address(0) || !_stakePoolAcceptsDeposits(stakePool)) revert StakingNotSupported();
         _restakeInto(_onBehalfOf, tokenId, stakePool);
         _yieldStorage().stakePoolOf[PROTOCOL][tokenId] = stakePool;
@@ -159,7 +159,7 @@ contract AerodromeYieldHandler is BaseYieldHandler {
     }
 
     function _buildMintCalldata(
-        bytes memory lpPoolParam,
+        bytes memory poolParam,
         int24 tickLower,
         int24 tickUpper,
         uint256 amount0Desired,
@@ -169,7 +169,7 @@ contract AerodromeYieldHandler is BaseYieldHandler {
         address recipient,
         uint256 deadline
     ) internal pure override returns (bytes memory) {
-        (address token0, address token1, int24 tickSpacing) = _decodePoolParam(lpPoolParam);
+        (address token0, address token1, int24 tickSpacing) = _decodePoolParam(poolParam);
         return
             abi.encodeCall(
                 ISlipstreamNonfungiblePositionManager.mint,
@@ -194,11 +194,11 @@ contract AerodromeYieldHandler is BaseYieldHandler {
 
     function _position(
         uint256 tokenId
-    ) internal view override returns (address token0, address token1, bytes memory lpPoolParam, uint128 liquidity) {
+    ) internal view override returns (address token0, address token1, bytes memory poolParam, uint128 liquidity) {
         int24 tickSpacing;
         (, , token0, token1, tickSpacing, , , liquidity, , , , ) = ISlipstreamNonfungiblePositionManager(
             POSITION_MANAGER
         ).positions(tokenId);
-        lpPoolParam = abi.encode(token0, token1, tickSpacing);
+        poolParam = abi.encode(token0, token1, tickSpacing);
     }
 }

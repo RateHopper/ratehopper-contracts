@@ -96,7 +96,7 @@ describe("idle savings invariants (Sky)", function () {
                     const receipt = await (
                         await manager
                             .connect(f.operatorEOA)
-                            .closeLp(SKY, closeParams(s, tokenIdOf(s), { exitBps, slippageBps: 50 }))
+                            .close(SKY, closeParams(s, tokenIdOf(s), { exitBps, slippageBps: 50 }))
                     ).wait();
                     const closed = receipt!.logs
                         .map((l: any) => {
@@ -107,7 +107,7 @@ describe("idle savings invariants (Sky)", function () {
                             }
                         })
                         .find((l: any) => l && l.name === "PositionClosed")!;
-                    const [, , , basisForExit, value, fee, , carryForExit] = closed.args;
+                    const [, , , basisForExit, value, fee, , carryForExit] = closed.args as bigint[];
                     const realized = value + carryForExit;
                     const expectedFee = realized > basisForExit ? ((realized - basisForExit) * PERF_FEE_BPS) / 10_000n : 0n;
                     expect(fee).to.equal(expectedFee);

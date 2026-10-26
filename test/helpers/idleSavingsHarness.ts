@@ -69,7 +69,7 @@ export function openParams(safeAddr: string, poolParam: string, overrides: Recor
         swap1: ZERO_LEG,
         slippageBps: TOLERANCE,
         deadline: DEADLINE,
-        lpPoolParam: poolParam,
+        poolParam: poolParam,
         stake: false,
         ...overrides,
     };
@@ -112,7 +112,7 @@ export function switchParams(safeAddr: string, tokenId: bigint | number, poolPar
         tickUpper: 0,
         mintAmount0Min: 0,
         mintAmount1Min: 0,
-        lpPoolParam: poolParam,
+        poolParam: poolParam,
         deadline: DEADLINE,
         ...overrides,
     };
@@ -143,7 +143,7 @@ export function inKindParams(safeAddr: string, poolParam: string, token0: string
         tickUpper: 0,
         mintAmount0Min: 0,
         mintAmount1Min: 0,
-        lpPoolParam: poolParam,
+        poolParam: poolParam,
         deadline: DEADLINE,
     };
 }
@@ -160,7 +160,7 @@ export function v3OpenParams(f: Harness, safeAddr: string) {
         swap1: ZERO_LEG,
         slippageBps: 100,
         deadline: DEADLINE,
-        lpPoolParam: f.feeTier,
+        poolParam: f.feeTier,
         stake: false,
     };
 }
@@ -501,25 +501,25 @@ export async function deployRegistered() {
 }
 
 export function open(f: Harness, src: SourceSpec, safeAddr = f.safeAddr, overrides: Record<string, any> = {}) {
-    return f.manager.connect(f.operatorEOA).openLp(src.protocol, openParams(safeAddr, src.param(f), overrides));
+    return f.manager.connect(f.operatorEOA).open(src.protocol, openParams(safeAddr, src.param(f), overrides));
 }
 
 export function close(f: Harness, src: SourceSpec, safeAddr = f.safeAddr, overrides: Record<string, any> = {}) {
     return f.manager
         .connect(f.operatorEOA)
-        .closeLp(src.protocol, closeParams(safeAddr, tokenIdOf(safeAddr), overrides));
+        .close(src.protocol, closeParams(safeAddr, tokenIdOf(safeAddr), overrides));
 }
 
 export function withdraw(f: Harness, src: SourceSpec, safeAddr = f.safeAddr, overrides: Record<string, any> = {}) {
     return f.manager
         .connect(f.operatorEOA)
-        .withdrawLp(src.protocol, withdrawParams(safeAddr, tokenIdOf(safeAddr), overrides));
+        .withdraw(src.protocol, withdrawParams(safeAddr, tokenIdOf(safeAddr), overrides));
 }
 
 export function roll(f: Harness, src: SourceSpec, safeAddr = f.safeAddr) {
     return f.manager
         .connect(f.operatorEOA)
-        .switchLp(src.protocol, src.protocol, switchParams(safeAddr, tokenIdOf(safeAddr), src.param(f)));
+        .switchPosition(src.protocol, src.protocol, switchParams(safeAddr, tokenIdOf(safeAddr), src.param(f)));
 }
 
 export async function sharesOf(f: Harness, src: SourceSpec, safeAddr = f.safeAddr) {

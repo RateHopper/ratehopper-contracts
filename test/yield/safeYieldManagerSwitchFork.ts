@@ -72,7 +72,7 @@ function switchParams(
     tokenId: bigint,
     tickLower: number,
     tickUpper: number,
-    lpPoolParam: string,
+    poolParam: string,
     deadline: bigint,
 ) {
     return {
@@ -84,7 +84,7 @@ function switchParams(
         tickUpper,
         mintAmount0Min: 0,
         mintAmount1Min: 0,
-        lpPoolParam,
+        poolParam,
         deadline,
     };
 }
@@ -247,7 +247,7 @@ async function openUniV3(
 ) {
     const openExpectedOut = spotUsdcToWeth(input / 2n, sqrtP);
     await (
-        await manager.connect(operator).openLp(UNISWAP_V3, {
+        await manager.connect(operator).open(UNISWAP_V3, {
             onBehalfOf: safeAddress,
             usdcAmount: input,
             tickLower,
@@ -258,7 +258,7 @@ async function openUniV3(
             swap1: ZERO_LEG,
             slippageBps: 300,
             deadline,
-            lpPoolParam: poolParam,
+            poolParam: poolParam,
             stake: false,
         })
     ).wait();
@@ -296,7 +296,7 @@ async function expectResidueConserved(manager: any, safeAddress: string, previou
     return newBasisUsd6 as bigint;
 }
 
-describe("SafeYieldManager switchLp - integration (Base fork)", function () {
+describe("SafeYieldManager switchPosition - integration (Base fork)", function () {
     this.timeout(300_000);
 
     beforeEach(async function () {
@@ -351,7 +351,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         await expect(
             manager
                 .connect(operator)
-                .switchLp(
+                .switchPosition(
                     UNISWAP_V3,
                     AERODROME,
                     switchParams(
@@ -407,7 +407,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
 
         const treasuryBeforeClose: bigint = await usdc.balanceOf(treasury.address);
         const closeReceipt = await (
-            await manager.connect(operator).closeLp(AERODROME, {
+            await manager.connect(operator).close(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId: newTokenId,
                 exitBps: 10_000,
@@ -446,7 +446,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         await expect(
             manager
                 .connect(operator)
-                .switchLp(
+                .switchPosition(
                     AERODROME,
                     UNISWAP_V3,
                     switchParams(
@@ -506,7 +506,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         await expect(
             manager
                 .connect(operator)
-                .switchLp(
+                .switchPosition(
                     UNISWAP_V3,
                     UNISWAP_V3,
                     switchParams(
@@ -584,7 +584,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         await expect(
             manager
                 .connect(operator)
-                .switchLp(
+                .switchPosition(
                     UNISWAP_V3,
                     UNISWAP_V4,
                     switchParams(
@@ -617,7 +617,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         await expect(
             manager
                 .connect(operator)
-                .switchLp(
+                .switchPosition(
                     UNISWAP_V4,
                     UNISWAP_V3,
                     switchParams(
@@ -664,7 +664,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         const deadline = BigInt(block!.timestamp + 3_600);
         const openExpectedOut = spotUsdcToWeth(input / 2n, aeroSqrtP);
         await (
-            await manager.connect(operator).openLp(AERODROME, {
+            await manager.connect(operator).open(AERODROME, {
                 onBehalfOf: safeAddress,
                 usdcAmount: input,
                 tickLower: aeroAlignedTick - 1_000,
@@ -675,7 +675,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 deadline,
-                lpPoolParam: AERO_POOL_PARAM,
+                poolParam: AERO_POOL_PARAM,
                 stake: false,
             })
         ).wait();
@@ -689,7 +689,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         await expect(
             manager
                 .connect(operator)
-                .switchLp(
+                .switchPosition(
                     AERODROME,
                     UNISWAP_V4,
                     switchParams(
@@ -721,7 +721,7 @@ describe("SafeYieldManager switchLp - integration (Base fork)", function () {
         await expect(
             manager
                 .connect(operator)
-                .switchLp(
+                .switchPosition(
                     UNISWAP_V4,
                     AERODROME,
                     switchParams(

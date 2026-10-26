@@ -193,9 +193,9 @@ async function main() {
     console.log("- swapRewardToUsdc:", SWAP_REWARD_TO_USDC);
     console.log("- Deadline:", deadline.toString());
 
-    const collectLpData = manager.interface.encodeFunctionData("collectLp", [protocol, collectParams]);
+    const collectLpData = manager.interface.encodeFunctionData("collect", [protocol, collectParams]);
     if (DRY_RUN) {
-        console.log("\nDRY_RUN — collectLp calldata:");
+        console.log("\nDRY_RUN — collect calldata:");
         console.log(collectLpData);
         return;
     }

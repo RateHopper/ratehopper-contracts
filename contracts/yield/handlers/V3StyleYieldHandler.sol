@@ -77,7 +77,7 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
     }
 
     function _buildMintCalldata(
-        bytes memory lpPoolParam,
+        bytes memory poolParam,
         int24 tickLower,
         int24 tickUpper,
         uint256 amount0Desired,
@@ -87,7 +87,7 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
         address recipient,
         uint256 deadline
     ) internal pure override returns (bytes memory) {
-        (address token0, address token1, uint24 feeTier) = _decodePoolParam(lpPoolParam);
+        (address token0, address token1, uint24 feeTier) = _decodePoolParam(poolParam);
         return
             abi.encodeCall(
                 INonfungiblePositionManager.mint,
@@ -111,11 +111,11 @@ abstract contract V3StyleYieldHandler is BaseYieldHandler {
 
     function _position(
         uint256 tokenId
-    ) internal view override returns (address token0, address token1, bytes memory lpPoolParam, uint128 liquidity) {
+    ) internal view override returns (address token0, address token1, bytes memory poolParam, uint128 liquidity) {
         uint24 feeTier;
         (, , token0, token1, feeTier, , , liquidity, , , , ) = INonfungiblePositionManager(POSITION_MANAGER).positions(
             tokenId
         );
-        lpPoolParam = abi.encode(token0, token1, feeTier);
+        poolParam = abi.encode(token0, token1, feeTier);
     }
 }

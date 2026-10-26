@@ -11,7 +11,7 @@ October 2026 against the same properties.
 
 ## I-01 — The performance fee is cooperative, by construction
 
-`SafeYieldManager.closeLp` charges `performanceFeeBps` on realized profit only,
+`SafeYieldManager.close` charges `performanceFeeBps` on realized profit only,
 and collects it by asking the Safe to send USDC to the treasury:
 
 ```solidity
@@ -144,16 +144,16 @@ validated pool replaces it atomically. New pool parameters cannot be
 allow-listed, and a protocol's open side cannot be re-enabled, unless every
 non-USDC currency decoded by its registered handler has a live reference.
 Native ETH checks BOTH the `address(0)` key (swap legs on a native pool) and
-the WETH key (`withdrawLp` hands a native side back wrapped, so a switch out of
+the WETH key (`withdraw` hands a native side back wrapped, so a switch out of
 that pool values its residue under WETH). The close-side emergency switch
-remains oracle-independent so it can re-enable `withdrawLp`; close/collect swap
+remains oracle-independent so it can re-enable `withdraw`; close/collect swap
 paths still fail closed inside the handlers. If an active reference fails
-before a replacement is executed, `withdrawLp` remains available.
+before a replacement is executed, `withdraw` remains available.
 `twapMinimumOut` exposes the exact contract-derived floor for operations and
 deployment verification.
 
-The allow-list gates OPENS only. An exit's swap leg (`closeLp`, the
-`collectLp` swap path) is validated for pair shape, the per-protocol
+The allow-list gates OPENS only. An exit's swap leg (`close`, the
+`collect` swap path) is validated for pair shape, the per-protocol
 `minPoolLiquidity` floor (zero, i.e. disabled, in the shipped deployment) and
 the reference-TWAP floor, but not for allow-list membership. The TWAP floor is
 what protects the price: whatever pool the leg names, the Safe receives at
@@ -164,26 +164,26 @@ pool. A dynamic exit delta whose floor rounds to zero stays on the Safe in kind
 rather than failing the exit — the same rule the harvest paths already follow.
 
 Hooked Uniswap V4 pools are the exception on both counts. A hook runs on every
-liquidity and swap path, including the oracle-free `withdrawLp` exit, so
+liquidity and swap path, including the oracle-free `withdraw` exit, so
 admitting one is a timelocked critical change (`allowHookedPoolParam`, after the
 hook has been reviewed; routine `setPoolParamAllowed` refuses it), and an exit
 leg may route through a hooked pool only if it is allow-listed — a hookless
 route for the same pair is always available instead.
 
-### `withdrawLp`: the exit that reads no price
+### `withdraw`: the exit that reads no price
 
-Flooring `closeLp` on an oracle would otherwise mean a broken reference strands
-a position. `withdrawLp` takes a position out in kind — liquidity and fees as
+Flooring `close` on an oracle would otherwise mean a broken reference strands
+a position. `withdraw` takes a position out in kind — liquidity and fees as
 the pool's own two tokens, no router, no price read — and is gated only by
 `protocolEnabledForClose`. It charges no performance fee, for the same reason
-`switchLp` charges none: nothing is realized in USDC, so there is no profit to
+`switchPosition` charges none: nothing is realized in USDC, so there is no profit to
 measure. That does hand users a fee-free exit, which changes nothing
 economically given I-01 above.
 
 ## M-02 — Switch residue is valued and carried, not forgotten
 
 A concentrated-liquidity mint consumes its two sides only in the ratio the
-range demands, so it stops at whichever side runs out. An in-kind `switchLp`
+range demands, so it stops at whichever side runs out. An in-kind `switchPosition`
 therefore always hands some of the withdrawal back to the Safe. Measured on a
 Base fork, that residue is **4.8%–5.3% of the position's basis** (9.55% of the
 token0 side across protocols, 2.75% when the range is carried over) — money,
@@ -211,7 +211,7 @@ able to nudge a pool under-report the residue and shrink the fee the eventual
 close charges. A switch that redeploys everything reads no price at all, and a
 switch that cannot price its residue reverts rather than guessing.
 
-`withdrawLp` releases any carry without charging it, and says so in
+`withdraw` releases any carry without charging it, and says so in
 `PositionWithdrawn.releasedCarryUsd6`. That is the same fee-free-exit property
 as I-01, made visible rather than silent.
 
@@ -219,7 +219,7 @@ as I-01, made visible rather than silent.
 
 The September 2026 Shred audit identifies the case where a partial close removes
 non-zero liquidity but its proportional cost-basis slice rounds down to zero.
-`SafeYieldManager.closeLp` computes `basisForExit = floor(residualBasis *
+`SafeYieldManager.close` computes `basisForExit = floor(residualBasis *
 exitBps / 10_000)` in raw USDC units. The handlers independently round the
 liquidity slice down, so the two slices need not become non-zero together.
 
@@ -232,7 +232,7 @@ The zero slice can slightly overstate this close's taxable profit, with fees
 still subject to the configured performance-fee rate and integer rounding.
 
 A zero basis is also a legitimate state, not just a rounding artifact:
-`switchLp` sets the replacement basis to zero when the residue returned to the
+`switchPosition` sets the replacement basis to zero when the residue returned to the
 Safe repays all of the previous basis, and carries any excess as profit. The
 replacement may still have substantial liquidity. Reverting whenever
 `basisForExit == 0 && liquidityToRemove > 0`, as suggested in L-2, would disable
@@ -257,8 +257,8 @@ the floor.
 The pauser is a single address, set by `DEFAULT_ADMIN_ROLE` via `setPauser`. It
 holds `pause`/`unpause` and the two per-protocol switches.
 
-Pausing is deliberately **exit-only**, not a freeze. `closeLp`, `withdrawLp` and
-`collectLp` carry no `whenNotPaused` modifier and do not consult the current
+Pausing is deliberately **exit-only**, not a freeze. `close`, `withdraw` and
+`collect` carry no `whenNotPaused` modifier and do not consult the current
 `yieldHandlers` registration — they run through the handler pinned at open
 time, so a paused or re-registered protocol still lets positions out.
 
@@ -268,7 +268,7 @@ One switch is the exception:
 function setProtocolEnabledForClose(uint8 protocol, bool enabled) external onlyPauser
 ```
 
-`closeLp`, `switchLp` and `collectLp` all check `protocolEnabledForClose`. A
+`close`, `switchPosition` and `collect` all check `protocolEnabledForClose`. A
 pauser can therefore stop module-mediated exits for a protocol. This is
 intentional and is reserved for one scenario: **a compromised or malfunctioning
 handler**, where letting exits continue would route user funds through code we

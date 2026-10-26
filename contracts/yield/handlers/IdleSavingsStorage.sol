@@ -9,7 +9,7 @@ pragma solidity ^0.8.28;
 ///         under another id can never read or move this one's records. The
 ///         handlers declare no storage variables of their own; the manager's
 ///         `YieldLayout` is read by them but never written (the basis a
-///         handler reports goes back through the `openLp` return value).
+///         handler reports goes back through the `open` return value).
 abstract contract IdleSavingsStorage {
     /// @custom:storage-location erc7201:ratehopper.storage.idleSavings
     struct IdleSavingsLayout {

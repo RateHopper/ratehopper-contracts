@@ -17,7 +17,7 @@ import {IIdleSavingsRateProvider} from "../../interfaces/IIdleSavingsRateProvide
 /// @dev    Fails closed on every doubt: a non-positive answer, an answer
 ///         older than `MAX_FEED_AGE`, an answer outside [1e18, MAX_RATE], an
 ///         SSR oracle that answers zero or reverts, or a disagreement above
-///         `MAX_DISAGREEMENT_BPS` all revert. The handler's `withdrawLp` reads
+///         `MAX_DISAGREEMENT_BPS` all revert. The handler's `withdraw` reads
 ///         no price, so a reverting provider never strands a position.
 ///         `answeredInRound` is deprecated and `roundId` is zero on Spark's
 ///         Chainlink-format wrapper, so only `updatedAt` governs staleness.

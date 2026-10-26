@@ -15,7 +15,7 @@ import { ONE, SOURCES, USDC, close, deployRegistered, expectZeroResidue, open, w
 
 const HANDLERS_DIR = path.join(__dirname, "..", "..", "contracts", "yield", "handlers");
 const BASE = "BaseIdleSavingsHandler.sol";
-const ENTRY_POINTS = ["openLp", "closeLp", "withdrawLp", "openLpInKind", "collectLp"];
+const ENTRY_POINTS = ["open", "close", "withdraw", "openInKind", "collect"];
 
 function sourceFiles(): string[] {
     const sources = fs.readdirSync(HANDLERS_DIR).filter((name) => name.endsWith("IdleSavingsYieldHandler.sol"));

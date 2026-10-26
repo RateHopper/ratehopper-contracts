@@ -65,8 +65,8 @@ The system consists of several key components:
     Caller passes per-call `swapAmountOutMin` and `deadline` (audit fixes C-01 / H-02). The constructor rejects any non-WETH/USDC token pair (M-08). Performance fee is charged on net profit (`currentValueUsd6 - basisUsd6`); fee-collect is charged on accrued fees only. All fee setters are gated by `CRITICAL_ROLE` on a TimelockController (H-04); `rescueToken` and similar emergency ops are gated by `DEFAULT_ADMIN_ROLE`.
 
 7. **SafeYieldManager.sol + Yield Handlers** (`contracts/yield/`): Adapter-pattern successor to (6). `SafeYieldManager` is the single Safe module users enable; it owns basis bookkeeping (`residualBasisUsd6Of`, keyed by `(uint8 protocolId, tokenId)`), the performance fee, pause / per-protocol disable switches, and the timelocked setter surface. Protocol ids are plain `uint8` (not a Solidity enum) end-to-end, so a NEW protocol registers on the deployed manager via `setYieldHandler(id, handler)` — followed by the pauser enabling open/close and the admin allow-listing pool params — with no redeploy; the `YIELD_PROTOCOL_*` constants in `Types.sol` just document the canonical id assignment (append-only). Protocol mechanics live in stateless handlers executed via delegatecall:
-    - `switchLp()` atomically closes a full position and opens its replacement in another allowed pool/protocol, carrying only the cost basis attributable to value actually deployed into the new LP.
-    - `BaseYieldHandler.sol` — the shared `openLp`/`closeLp`/`collectLp` flow for V3-style CL protocols over ANY token pair; protocol diffs are isolated in virtual hooks (pool resolution, pair decoding, `slot0` read, swap calldata, mint calldata, `positions` decoding). USDC stays the sole funding/accounting currency: each non-USDC side of the pair is acquired/realized through its own USDC `SwapLeg` (a side that IS USDC needs no swap), so a WETH/USDC position swaps one leg and a WBTC/USDT-style position swaps both.
+    - `switchPosition()` atomically closes a full position and opens its replacement in another allowed pool/protocol, carrying only the cost basis attributable to value actually deployed into the new LP.
+    - `BaseYieldHandler.sol` — the shared `open`/`close`/`collect` flow for V3-style CL protocols over ANY token pair; protocol diffs are isolated in virtual hooks (pool resolution, pair decoding, `slot0` read, swap calldata, mint calldata, `positions` decoding). USDC stays the sole funding/accounting currency: each non-USDC side of the pair is acquired/realized through its own USDC `SwapLeg` (a side that IS USDC needs no swap), so a WETH/USDC position swaps one leg and a WBTC/USDT-style position swaps both.
     - `V3StyleYieldHandler.sol` — the `BaseYieldHandler` hooks implemented once against the canonical Uniswap V3 interfaces (factory `getPool` by `uint24 feeTier`, 7-field `slot0`, SwapRouter02), with the protocol id as a constructor argument so V3-shaped protocols and tests reuse the hook bodies.
     - `UniV3YieldHandler.sol` (extends `V3StyleYieldHandler`) / `AerodromeYieldHandler.sol` (extends `BaseYieldHandler`) — concrete adapters holding protocol immutables.
     - `UniV4YieldHandler.sol` — implements `IYieldHandler` directly (the V4 singleton/actions model doesn't fit the V3-shaped hooks): pool params are the full V4 `PoolKey` tuple (`keccak256(poolParam)` IS the V4 PoolId), ERC20 sides route through two-step Permit2 approvals and UniversalRouter swaps, and native ETH pools (`currency0 == address(0)`) are supported.
@@ -197,7 +197,7 @@ REGISTRY=0x...                # Optional. Falls back to PROTOCOL_REGISTRY_ADDRES
 INITIAL_ADMIN=0x...           # Optional. DEFAULT_ADMIN_ROLE holder. Falls back to ADMIN_ADDRESS
 RHP_TIMELOCK=0x...            # Optional. Reuse an existing TimelockController for the yield module only
                               # (module override: SYM_TIMELOCK). The registry deploy uses REGISTRY_TIMELOCK.
-PERFORMANCE_FEE_BPS=1000      # Optional. Performance fee on profit at closeLp (bps). Default 1000 (10%)
+PERFORMANCE_FEE_BPS=1000      # Optional. Performance fee on profit at close (bps). Default 1000 (10%)
 FEE_COLLECT_BPS=250           # Optional. Fee on accrued LP fees (bps). Default 250 (2.5%)
 MAX_FEE_BPS=2000              # Optional. Hard upper bound on BOTH fees (bps). Default 2000 (20%)
 MIN_POSITION_LIQUIDITY=10000  # Optional. Floor on NPM mint liquidity. Default 10000
@@ -264,7 +264,7 @@ Comprehensive tests are available in the `/test` directory, organized by area (`
 - Multiple collateral asset scenarios
 - Safe module integration
 - Leveraged position creation
-- Yield stack: `SafeYieldManager` unit suites (mock-driven) and per-protocol fork suites (Uniswap V3, Aerodrome, Uniswap V4, cross-protocol `switchLp`)
+- Yield stack: `SafeYieldManager` unit suites (mock-driven) and per-protocol fork suites (Uniswap V3, Aerodrome, Uniswap V4, cross-protocol `switchPosition`)
 - Legacy standalone yield module (`test/legacy/`)
 
 The `*Fork.ts` suites run against a Base mainnet fork and need `BASE_RPC_URL` (see Environment Variables).
@@ -351,7 +351,7 @@ The module by default deploys:
 
 1. **TimelockController** (shared `TimelockControllerModule`; skipped when `SYM_TIMELOCK` / `RHP_TIMELOCK` is set)
 2. **UniV3YieldHandler**, **AerodromeYieldHandler** and **UniV4YieldHandler** (stateless delegatecall targets pinned to the canonical Base position-manager / factory / router / Permit2 / USDC addresses)
-3. **SafeYieldManager** with all three handlers registered, protocols enabled, and default pool-param allow-lists seeded (WETH/USDC on Uniswap V3 fee tiers `{100, 500, 3000}` and Aerodrome tick spacings `{100, 200}`; the hookless native ETH/USDC 0.05% pool on Uniswap V4). Additional pools are allow-listed post-deploy via `setPoolParamAllowed`. Hooked V4 pool keys are admitted only through the timelocked `allowHookedPoolParam` after the hook has been reviewed (routine `setPoolParamAllowed` refuses them), and an exit swap leg may route through a hooked pool only if it is allow-listed. De-listing a pool param stops NEW opens through it only; existing positions keep every exit (`closeLp`, `collectLp`, `withdrawLp`) — exit swap legs are validated for pair shape, the `minPoolLiquidity` floor and the reference-TWAP floor, not for allow-list membership.
+3. **SafeYieldManager** with all three handlers registered, protocols enabled, and default pool-param allow-lists seeded (WETH/USDC on Uniswap V3 fee tiers `{100, 500, 3000}` and Aerodrome tick spacings `{100, 200}`; the hookless native ETH/USDC 0.05% pool on Uniswap V4). Additional pools are allow-listed post-deploy via `setPoolParamAllowed`. Hooked V4 pool keys are admitted only through the timelocked `allowHookedPoolParam` after the hook has been reviewed (routine `setPoolParamAllowed` refuses them), and an exit swap leg may route through a hooked pool only if it is allow-listed. De-listing a pool param stops NEW opens through it only; existing positions keep every exit (`close`, `collect`, `withdraw`) — exit swap legs are validated for pair shape, the `minPoolLiquidity` floor and the reference-TWAP floor, not for allow-list membership.
 
 Coexistence note: the standalone `RatehopperUniV3Positions` deployment keeps serving positions opened through it. `SafeYieldManager` rejects those tokenIds (`UnknownPosition`) and vice versa — there is no basis migration; legacy positions drain naturally via the legacy module.
 

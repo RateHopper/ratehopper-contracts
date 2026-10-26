@@ -239,11 +239,6 @@
     },
     {
         "inputs": [],
-        "name": "LpNotOnSafe",
-        "type": "error"
-    },
-    {
-        "inputs": [],
         "name": "MinUsdcOutNotMet",
         "type": "error"
     },
@@ -291,6 +286,11 @@
     {
         "inputs": [],
         "name": "PositionLiquidityTooLow",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "PositionNotOnSafe",
         "type": "error"
     },
     {
@@ -852,13 +852,13 @@
             {
                 "indexed": false,
                 "internalType": "uint128",
-                "name": "amount0ToLp",
+                "name": "used0",
                 "type": "uint128"
             },
             {
                 "indexed": false,
                 "internalType": "uint128",
-                "name": "amount1ToLp",
+                "name": "used1",
                 "type": "uint128"
             },
             {
@@ -1627,12 +1627,12 @@
                         "type": "uint256"
                     }
                 ],
-                "internalType": "struct CloseLpParams",
+                "internalType": "struct CloseParams",
                 "name": "params",
                 "type": "tuple"
             }
         ],
-        "name": "closeLp",
+        "name": "close",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
@@ -1728,12 +1728,12 @@
                         "type": "uint256"
                     }
                 ],
-                "internalType": "struct CollectLpParams",
+                "internalType": "struct CollectParams",
                 "name": "params",
                 "type": "tuple"
             }
         ],
-        "name": "collectLp",
+        "name": "collect",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
@@ -1972,7 +1972,7 @@
                     },
                     {
                         "internalType": "bytes",
-                        "name": "lpPoolParam",
+                        "name": "poolParam",
                         "type": "bytes"
                     },
                     {
@@ -1981,12 +1981,12 @@
                         "type": "bool"
                     }
                 ],
-                "internalType": "struct OpenLpParams",
+                "internalType": "struct OpenParams",
                 "name": "params",
                 "type": "tuple"
             }
         ],
-        "name": "openLp",
+        "name": "open",
         "outputs": [
             {
                 "internalType": "uint256",
@@ -2516,7 +2516,7 @@
                     },
                     {
                         "internalType": "bytes",
-                        "name": "lpPoolParam",
+                        "name": "poolParam",
                         "type": "bytes"
                     },
                     {
@@ -2525,12 +2525,12 @@
                         "type": "uint256"
                     }
                 ],
-                "internalType": "struct SwitchLpParams",
+                "internalType": "struct SwitchParams",
                 "name": "params",
                 "type": "tuple"
             }
         ],
-        "name": "switchLp",
+        "name": "switchPosition",
         "outputs": [
             {
                 "internalType": "uint256",
@@ -2708,12 +2708,12 @@
                         "type": "uint256"
                     }
                 ],
-                "internalType": "struct WithdrawLpParams",
+                "internalType": "struct WithdrawParams",
                 "name": "params",
                 "type": "tuple"
             }
         ],
-        "name": "withdrawLp",
+        "name": "withdraw",
         "outputs": [
             {
                 "internalType": "uint256",

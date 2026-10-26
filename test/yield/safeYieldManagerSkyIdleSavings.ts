@@ -60,7 +60,7 @@ import {
 //  mock provider), which proves BaseIdleSavingsHandler is generic. Covers
 //  registration through the timelock the way a new id lands on the deployed
 //  manager, the deposit / redeem lifecycle, the exposure rail, the in-kind
-//  exit, the same-id handler rollover through switchLp, and the storage
+//  exit, the same-id handler rollover through switchPosition, and the storage
 //  namespace that keeps the handler's records apart from YieldLayout. Sky
 //  oracle guards and mock short-pay cases follow in their own blocks.
 // ─────────────────────────────────────────────────────────────────────────
@@ -134,11 +134,11 @@ describe("SafeYieldManager + idle savings handlers", function () {
                     const wrongShare = encodeParam(src.venueAddr(f), usdcAddr);
                     await (await manager.connect(deployer).setPoolParamAllowed(src.protocol, wrongVenue, true)).wait();
                     await (await manager.connect(deployer).setPoolParamAllowed(src.protocol, wrongShare, true)).wait();
-                    await expect(open(f, src, f.safeAddr, { lpPoolParam: wrongVenue })).to.be.revertedWithCustomError(
+                    await expect(open(f, src, f.safeAddr, { poolParam: wrongVenue })).to.be.revertedWithCustomError(
                         src.handler(f),
                         "WrongPoolParam",
                     );
-                    await expect(open(f, src, f.safeAddr, { lpPoolParam: wrongShare })).to.be.revertedWithCustomError(
+                    await expect(open(f, src, f.safeAddr, { poolParam: wrongShare })).to.be.revertedWithCustomError(
                         src.handler(f),
                         "WrongPoolParam",
                     );
@@ -483,7 +483,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                 });
             });
 
-            describe("withdrawLp", function () {
+            describe("withdraw", function () {
                 it("releases the record with no module call and leaves the shares on the Safe", async function () {
                     const f = await loadFixture(deployRegistered);
                     const { manager, managerAddr, managerEvents, usdc, safe, safeAddr, usdcAddr } = f;
@@ -526,25 +526,25 @@ describe("SafeYieldManager + idle savings handlers", function () {
                     );
                     await (await open(f, src)).wait();
                     await expect(
-                        manager.connect(operatorEOA).collectLp(src.protocol, collectParams(safeAddr, tokenId)),
+                        manager.connect(operatorEOA).collect(src.protocol, collectParams(safeAddr, tokenId)),
                     ).to.be.revertedWithCustomError(handler, "CollectNotSupported");
 
-                    await expect(handler.openLp(openParams(safeAddr, src.param(f)))).to.be.revertedWithCustomError(
+                    await expect(handler.open(openParams(safeAddr, src.param(f)))).to.be.revertedWithCustomError(
                         handler,
                         "OnlyDelegatecall",
                     );
-                    await expect(handler.closeLp(closeParams(safeAddr, tokenId), 0)).to.be.revertedWithCustomError(
+                    await expect(handler.close(closeParams(safeAddr, tokenId), 0)).to.be.revertedWithCustomError(
                         handler,
                         "OnlyDelegatecall",
                     );
-                    await expect(handler.withdrawLp(withdrawParams(safeAddr, tokenId))).to.be.revertedWithCustomError(
+                    await expect(handler.withdraw(withdrawParams(safeAddr, tokenId))).to.be.revertedWithCustomError(
                         handler,
                         "OnlyDelegatecall",
                     );
                     await expect(
-                        handler.openLpInKind(inKindParams(safeAddr, src.param(f), usdcAddr, src.shareTokenAddr(f), 0n, 1n)),
+                        handler.openInKind(inKindParams(safeAddr, src.param(f), usdcAddr, src.shareTokenAddr(f), 0n, 1n)),
                     ).to.be.revertedWithCustomError(handler, "OnlyDelegatecall");
-                    await expect(handler.collectLp(collectParams(safeAddr, tokenId))).to.be.revertedWithCustomError(
+                    await expect(handler.collect(collectParams(safeAddr, tokenId))).to.be.revertedWithCustomError(
                         handler,
                         "OnlyDelegatecall",
                     );
@@ -556,10 +556,10 @@ describe("SafeYieldManager + idle savings handlers", function () {
                     await (await open(f, src)).wait();
                     await (await open(f, src, safe2Addr)).wait();
                     await expect(
-                        manager.connect(operatorEOA).closeLp(src.protocol, closeParams(safeAddr, tokenIdOf(safe2Addr))),
+                        manager.connect(operatorEOA).close(src.protocol, closeParams(safeAddr, tokenIdOf(safe2Addr))),
                     ).to.be.revertedWithCustomError(src.handler(f), "WrongPosition");
                     await expect(
-                        manager.connect(operatorEOA).withdrawLp(src.protocol, withdrawParams(safeAddr, tokenIdOf(safe2Addr))),
+                        manager.connect(operatorEOA).withdraw(src.protocol, withdrawParams(safeAddr, tokenIdOf(safe2Addr))),
                     ).to.be.revertedWithCustomError(src.handler(f), "WrongPosition");
                 });
 
@@ -595,20 +595,20 @@ describe("SafeYieldManager + idle savings handlers", function () {
                 });
             });
 
-            describe("switchLp", function () {
+            describe("switchPosition", function () {
                 it("rejects an in-kind switch between an LP position and the source in either direction", async function () {
                     const f = await loadFixture(deployRegistered);
                     const { manager, uniHandler, operatorEOA, safeAddr } = f;
-                    await (await manager.connect(operatorEOA).openLp(UNISWAP_V3, v3OpenParams(f, safeAddr))).wait();
+                    await (await manager.connect(operatorEOA).open(UNISWAP_V3, v3OpenParams(f, safeAddr))).wait();
                     await expect(
-                        manager.connect(operatorEOA).switchLp(UNISWAP_V3, src.protocol, switchParams(safeAddr, 1, src.param(f))),
+                        manager.connect(operatorEOA).switchPosition(UNISWAP_V3, src.protocol, switchParams(safeAddr, 1, src.param(f))),
                     ).to.be.revertedWithCustomError(src.handler(f), "InKindNotSupported");
 
                     await (await open(f, src)).wait();
                     await expect(
                         manager
                             .connect(operatorEOA)
-                            .switchLp(src.protocol, UNISWAP_V3, switchParams(safeAddr, tokenIdOf(safeAddr), f.feeTier)),
+                            .switchPosition(src.protocol, UNISWAP_V3, switchParams(safeAddr, tokenIdOf(safeAddr), f.feeTier)),
                     ).to.be.revertedWithCustomError(uniHandler, "WrongTokenPair");
                 });
 
@@ -629,7 +629,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                         await setSlot(managerAddr, yieldSlot(YIELD_FIELD.residualBasis, FEEDER, tokenId), DEPOSIT);
                         return manager
                             .connect(operatorEOA)
-                            .switchLp(FEEDER, src.protocol, switchParams(safeAddr, tokenId, src.param(f)));
+                            .switchPosition(FEEDER, src.protocol, switchParams(safeAddr, tokenId, src.param(f)));
                     };
                     await expect(feed(usdcAddr, usdcAddr, 0n, 1n)).to.be.revertedWithCustomError(src.handler(f), "InKindNotSupported");
                     await expect(feed(usdcAddr, shareAddr, 1n, 1n)).to.be.revertedWithCustomError(src.handler(f), "InKindNotSupported");
@@ -794,7 +794,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
             });
 
             describe("exit liveness", function () {
-                it("keeps withdrawLp alive through every failure except the close switch", async function () {
+                it("keeps withdraw alive through every failure except the close switch", async function () {
                     const f = await loadFixture(deployRegistered);
                     const { manager, pauser, usdc, safeAddr, safe2Addr } = f;
                     await (await open(f, src)).wait();

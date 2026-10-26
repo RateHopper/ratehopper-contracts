@@ -36,7 +36,7 @@ abstract contract YieldStorage {
         mapping(uint8 protocolId => uint128) minPoolLiquidity;
         /// @dev Minimum liquidity returned by NPM mint. Zero disables.
         mapping(uint8 protocolId => uint128) minPositionLiquidity;
-        /// @dev Handler pinned at openLp per position. close/collect always
+        /// @dev Handler pinned at open per position. close/collect always
         ///      run through this address so `setYieldHandler` never applies
         ///      retroactively to positions opened under an older handler.
         ///      Deleted on full close together with the basis.
@@ -55,7 +55,7 @@ abstract contract YieldStorage {
         ///      performance fee, in USDC 6dp. An in-kind switch redeploys only
         ///      what the destination range can consume; the rest lands on the
         ///      Safe. That residue first repays cost basis, and anything beyond
-        ///      the basis is realized profit the eventual `closeLp` would
+        ///      the basis is realized profit the eventual `close` would
         ///      otherwise never see — measured at 2.75%-9.55% of the token0
         ///      side on Base, so it is not roundable away. Carried onto the
         ///      replacement position and prorated on partial exits exactly
@@ -89,8 +89,8 @@ abstract contract YieldStorage {
         uint8 indexed protocol,
         uint256 indexed tokenId,
         uint256 usdcInput,
-        uint128 amount0ToLp,
-        uint128 amount1ToLp,
+        uint128 used0,
+        uint128 used1,
         uint128 currentValueUsd6
     );
     event PositionSwitched(
@@ -182,7 +182,7 @@ abstract contract YieldStorage {
     /// @notice An in-kind exit: liquidity out, no swap, no price reference.
     /// @dev    No PERFORMANCE fee is taken — `feeCollectBps` still applies to
     ///         the fees harvested on the way out, exactly as it does on every
-    ///         other harvest. `releasedCarryUsd6` is switch residue `closeLp`
+    ///         other harvest. `releasedCarryUsd6` is switch residue `close`
     ///         would have charged a performance fee on and this path does not,
     ///         reported so that waiver is visible rather than silent.
     event PositionWithdrawn(
@@ -209,7 +209,7 @@ abstract contract YieldStorage {
     error PoolParamNotAllowed();
     error UnknownPosition();
     error ModuleCallFailed(uint8 step);
-    error LpNotOnSafe();
+    error PositionNotOnSafe();
     error WrongTokenPair();
     error NotAuthorized();
     error DeadlineExpired();

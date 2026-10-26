@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISSRRateProvider} from "../interfaces/spark/ISSRRateProvider.sol";
 import {IIdleSavingsRateProvider} from "../interfaces/IIdleSavingsRateProvider.sol";
-import {OpenLpInKindParams, WithdrawLpParams} from "../interfaces/IYieldHandler.sol";
+import {OpenInKindParams, WithdrawParams} from "../interfaces/IYieldHandler.sol";
 import {BaseIdleSavingsHandler} from "../yield/handlers/BaseIdleSavingsHandler.sol";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -218,7 +218,7 @@ contract MockUnderAdoptingYieldHandler {
         return false;
     }
 
-    function openLpInKind(OpenLpInKindParams calldata p) external pure returns (uint256, uint128, uint128) {
+    function openInKind(OpenInKindParams calldata p) external pure returns (uint256, uint128, uint128) {
         return (uint256(uint160(p.onBehalfOf)), 0, uint128(p.amount1 - 1));
     }
 }
@@ -328,8 +328,8 @@ contract MockIdleSavingsSource is BaseIdleSavingsHandler {
         return SHARE;
     }
 
-    function _poolParamMatches(bytes memory lpPoolParam) internal view override returns (bool) {
-        (address venue, address share) = abi.decode(lpPoolParam, (address, address));
+    function _poolParamMatches(bytes memory poolParam) internal view override returns (bool) {
+        (address venue, address share) = abi.decode(poolParam, (address, address));
         return venue == address(VENUE) && share == address(SHARE);
     }
 
@@ -350,7 +350,7 @@ contract MockIdleSavingsSource is BaseIdleSavingsHandler {
     }
 }
 
-/// @notice A "from" handler for switchLp whose withdraw leg hands the open
+/// @notice A "from" handler for switchPosition whose withdraw leg hands the open
 ///         leg a fixed `(token0, token1, amount0, amount1)` without moving
 ///         anything, so every operand of the idle savings in-kind shape check
 ///         can be reached through the manager. Immutables only: it runs via
@@ -370,7 +370,7 @@ contract MockInKindFeederYieldHandler {
         amount1 = _amount1;
     }
 
-    function withdrawLp(WithdrawLpParams calldata) external view returns (address, address, uint256, uint256) {
+    function withdraw(WithdrawParams calldata) external view returns (address, address, uint256, uint256) {
         return (token0, token1, amount0, amount1);
     }
 }

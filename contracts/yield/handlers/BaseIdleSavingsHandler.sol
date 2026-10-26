@@ -6,7 +6,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../../interfaces/safe/ISafe.sol";
-import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, WithdrawLpParams, OpenLpInKindParams} from "../../interfaces/IYieldHandler.sol";
+import {IYieldHandler, OpenParams, CloseParams, CollectParams, WithdrawParams, OpenInKindParams} from "../../interfaces/IYieldHandler.sol";
 import {IIdleSavingsRateProvider} from "../../interfaces/IIdleSavingsRateProvider.sol";
 import {TokenReturnLib} from "../libraries/TokenReturnLib.sol";
 import {YieldStorage} from "./YieldStorage.sol";
@@ -23,7 +23,7 @@ import {IdleSavingsStorage} from "./IdleSavingsStorage.sol";
 ///
 ///         A position is identified by the Safe itself:
 ///         `tokenId = uint256(uint160(onBehalfOf))`. One open position per
-///         Safe, no top-ups (a second `openLp` reverts `PositionAlreadyOpen`).
+///         Safe, no top-ups (a second `open` reverts `PositionAlreadyOpen`).
 ///
 ///         The manager's rule "allow-listed implies a live Uniswap V3 TWAP
 ///         reference for every non-USDC token" cannot be met for a share
@@ -35,11 +35,11 @@ import {IdleSavingsStorage} from "./IdleSavingsStorage.sol";
 ///         a hook claims: deposits and redemptions are measured as Safe
 ///         balance deltas and checked against the floor here.
 ///
-///         `withdrawLp` is the exit that must keep working when nothing else
+///         `withdraw` is the exit that must keep working when nothing else
 ///         does: it releases the record with no Safe call and no price read,
 ///         leaving the share token where it already is, on the Safe. The
-///         same-id handler rollover (`switchLp(3, 3)`) is `withdrawLp` on the
-///         pinned old build followed by `openLpInKind` on the newly
+///         same-id handler rollover (`switchPosition(3, 3)`) is `withdraw` on the
+///         pinned old build followed by `openInKind` on the newly
 ///         registered one; neither leg touches the venue or an oracle.
 ///
 ///         Every Safe interaction goes through
@@ -165,9 +165,9 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     /// @dev The share token this source deposits into (sUSDS; a vault's share).
     function _shareToken() internal view virtual returns (IERC20);
 
-    /// @dev Whether `lpPoolParam` names exactly this source's venue and share
+    /// @dev Whether `poolParam` names exactly this source's venue and share
     ///      token. The manager's allow-list is checked separately.
-    function _poolParamMatches(bytes memory lpPoolParam) internal view virtual returns (bool);
+    function _poolParamMatches(bytes memory poolParam) internal view virtual returns (bool);
 
     /// @dev Move `usdc6` USDC from the Safe into the venue for at least
     ///      `minShares` share tokens, delivered to the Safe. Every allowance
@@ -205,12 +205,12 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     /// @return basisUsd6 `usdcAmount`; the manager records it as the basis.
     /// @return used0     `usdcAmount`.
     /// @return used1     Share tokens received, 18 decimals.
-    function openLp(
-        OpenLpParams calldata p
+    function open(
+        OpenParams calldata p
     ) external onlyDelegatecall returns (uint256 tokenId, uint128 basisUsd6, uint128 used0, uint128 used1) {
         if (p.stake) revert StakingNotSupported();
         _requireTolerance(p.slippageBps);
-        _validatePoolParam(p.lpPoolParam);
+        _validatePoolParam(p.poolParam);
         tokenId = _tokenIdOf(p.onBehalfOf);
         if (_yieldStorage().positionHandlerOf[PROTOCOL][tokenId] != address(0)) revert PositionAlreadyOpen();
         IdleSavingsLayout storage $ = _idleSavingsStorage();
@@ -243,8 +243,8 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     ///         and charges against the full basis. With nothing left to redeem
     ///         no price is read, so the record can be cleared while the feed is
     ///         down; the event then reports a rate of zero.
-    function closeLp(
-        CloseLpParams calldata p,
+    function close(
+        CloseParams calldata p,
         uint128 basisForExit
     ) external onlyDelegatecall returns (uint128 currentValueUsd6) {
         _requireTolerance(p.slippageBps);
@@ -280,8 +280,8 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     /// @return token1  The share token.
     /// @return amount0 Always zero.
     /// @return amount1 Shares released from the record.
-    function withdrawLp(
-        WithdrawLpParams calldata p
+    function withdraw(
+        WithdrawParams calldata p
     ) external onlyDelegatecall returns (address token0, address token1, uint256 amount0, uint256 amount1) {
         _requirePosition(p.onBehalfOf, p.tokenId);
         IdleSavingsLayout storage $ = _idleSavingsStorage();
@@ -293,18 +293,18 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     }
 
     /// @notice The same-id handler rollover leg, reached only through the
-    ///         manager's `switchLp(PROTOCOL, PROTOCOL, ...)` after the old
-    ///         build's `withdrawLp` released the record: adopt the shares
+    ///         manager's `switchPosition(PROTOCOL, PROTOCOL, ...)` after the old
+    ///         build's `withdraw` released the record: adopt the shares
     ///         already on the Safe. Reporting `used1 == amount1` makes the
     ///         manager's residue zero, so no price is read and basis and carry
     ///         carry over unchanged. Any LP-shaped input reverts, and so does
     ///         a switch from another source into a Safe whose position under
     ///         this id is still open (the manager clears the pin only for the
     ///         same-id rollover).
-    function openLpInKind(
-        OpenLpInKindParams calldata p
+    function openInKind(
+        OpenInKindParams calldata p
     ) external onlyDelegatecall returns (uint256 tokenId, uint128 used0, uint128 used1) {
-        _validatePoolParam(p.lpPoolParam);
+        _validatePoolParam(p.poolParam);
         IERC20 shares = _shareToken();
         if (p.token0 != address(USDC) || p.token1 != address(shares) || p.amount0 != 0 || p.amount1 == 0) {
             revert InKindNotSupported();
@@ -323,7 +323,7 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
 
     /// @notice Idle savings accrue inside the share price; there is nothing
     ///         to harvest.
-    function collectLp(CollectLpParams calldata) external view onlyDelegatecall {
+    function collect(CollectParams calldata) external view onlyDelegatecall {
         revert CollectNotSupported();
     }
 
@@ -371,9 +371,9 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     /// @dev The param must name this source's immutables AND be on the
     ///      manager's allow-list (read-only use of the manager namespace); the
     ///      allow-list is the routine kill switch for new deposits.
-    function _validatePoolParam(bytes memory lpPoolParam) internal view {
-        if (!_poolParamMatches(lpPoolParam)) revert WrongPoolParam();
-        if (!_yieldStorage().allowedPoolKey[PROTOCOL][keccak256(lpPoolParam)]) revert PoolParamNotAllowed();
+    function _validatePoolParam(bytes memory poolParam) internal view {
+        if (!_poolParamMatches(poolParam)) revert WrongPoolParam();
+        if (!_yieldStorage().allowedPoolKey[PROTOCOL][keccak256(poolParam)]) revert PoolParamNotAllowed();
     }
 
     /// @dev Shares the floor demands for `usdc6` at `rate`, less the tolerance.
