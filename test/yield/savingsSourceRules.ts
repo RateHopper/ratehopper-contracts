@@ -1,8 +1,16 @@
 import { expect } from "chai";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import * as fs from "fs";
 import * as path from "path";
-import { ONE, SOURCES, USDC, close, deployRegistered, expectZeroResidue, open, withdraw } from "../helpers/savingsHarness";
+import {
+    ONE,
+    SOURCES,
+    USDC,
+    close,
+    deployRegistered,
+    expectZeroResidue,
+    open,
+    withdraw,
+} from "../helpers/savingsHarness";
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Source rules for savings handlers (spec 14.1). Inside a delegatecall
@@ -34,9 +42,10 @@ describe("savings source rules", function () {
                 .map((line, i) => ({ line, i }))
                 .filter(
                     ({ line }) =>
-                        !line.trim().startsWith("//") &&
-                        !line.includes("abi.encodeCall(") &&
-                        /\.(transfer|safeTransfer|transferFrom|safeTransferFrom|approve|forceApprove)\(/.test(line),
+                        !line.replace(/\/\/.*$/, "").includes("abi.encodeCall(") &&
+                        /\.(transfer|safeTransfer|transferFrom|safeTransferFrom|approve|forceApprove)\(/.test(
+                            line.replace(/\/\/.*$/, ""),
+                        ),
                 )
                 .map(({ line, i }) => `${file}:${i + 1}: ${line.trim()}`);
             expect(offenders).to.deep.equal([]);
@@ -46,6 +55,7 @@ describe("savings source rules", function () {
             const text = fs.readFileSync(path.join(HANDLERS_DIR, file), "utf8");
             expect(text).to.not.match(/delete\s+_yieldStorage\(\)/);
             expect(text).to.not.match(/_yieldStorage\(\)[^;]*[^=!<>]=[^=]/);
+            expect(text).to.not.match(/YieldLayout\s+storage\s+\w+\s*=\s*_yieldStorage\(\)/);
         });
     }
 
@@ -57,7 +67,7 @@ describe("savings source rules", function () {
     });
 
     it("leaves no residue on the manager when the Safe already holds the tokens involved", async function () {
-        const f = await loadFixture(deployRegistered);
+        const f = await deployRegistered();
         await (await f.usdc.mint(f.safeAddr, USDC(5_000))).wait();
         await (await f.susds.mint(f.safeAddr, 1_000n * ONE)).wait();
         await (await f.mockShare.mint(f.safeAddr, 1_000n * ONE)).wait();

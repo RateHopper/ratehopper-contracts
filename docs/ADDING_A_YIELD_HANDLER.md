@@ -41,9 +41,10 @@ A savings source needs a price source as well: an `ISavingsRateProvider` build
   a live TWAP reference before a pool param can be allow-listed. A source with
   no pool reports `(USDC, USDC)` and documents its own floor in
   `SECURITY_MODEL.md` (see "Protocol 3 prices from Chainlink, not a pool").
-- **`withdraw` must work when nothing else does.** No price read, no venue
-  dependency; it releases the position in kind so a broken oracle or venue can
-  never strand a Safe.
+- **`withdraw` must work when nothing else does.** No price read, no swap; an LP
+  handler still calls the position manager to pull liquidity out in kind, a
+  savings source does not even touch its venue. A broken oracle must never
+  strand a Safe.
 - **`configure` is optional.** Tunables live in the handler's namespace and are
   set by the admin through `SafeYieldManager.configureHandler`; bound them with
   constants and emit an event. A handler with nothing to tune reverts
@@ -67,8 +68,9 @@ A savings source needs a price source as well: an `ISavingsRateProvider` build
 - Pick the base from the table and implement its hooks. Validate every wiring
   argument in the constructor (zero addresses, venue immutables agreeing with the
   pinned ones, bounds on tunables) so a misdeployed build cannot be registered.
-- Give the handler's Safe calls their own step-code range (LP handlers use
-  10-59, Sky savings 80-85, the mock source 90-95).
+- Give the handler's Safe calls their own step-code range (V3-style and
+  Aerodrome handlers use 21-37, Uniswap V4 up to 74, Sky savings 80-85, the
+  mock source 90-95; take the next free range from 100).
 - A savings source's rate provider must answer at construction
   (`_rateProvider.rate(share)` is called), so a dead feed fails the deploy, not
   the first user.
@@ -111,25 +113,30 @@ params). Dry-run against a local forked node (`npx hardhat node`, then
 `--network localhost --deployment-id <tmp>`); the in-process `--network hardhat`
 simulation cannot be used. Always pass `--deployment-id`.
 
-**Existing manager:**
+**Existing manager** (one deployed from this API generation: the manager
+delegatecalls handlers by selector, so a handler built from this branch cannot
+run on a manager that still speaks `openLp`/`closeLp`; the script below refuses
+such a manager):
 
 1. Deploy the handler (and its rate provider) with its own Ignition module or
    `hardhat run`, verify on Basescan.
 2. `scripts/timelockSetYieldHandler.ts`: schedule
    `setYieldHandler(protocol, handler)` through the TimelockController, wait
    `getMinDelay()` (48 h on Base), execute. `setYieldHandler` checks
-   `PROTOCOL()` and code only; it does not touch the protocol switches.
+   `PROTOCOL()` and code, then turns opens for the id off: a first registration
+   starts with both switches off, a replacement build keeps closes on.
 3. If a pool param needs a non-USDC reference, `setTwapConfig` goes through the
    same timelock first.
-4. Pauser: `setProtocolEnabledForClose(protocol, true)`, then
-   `setProtocolEnabledForOpen(protocol, true)` (a first registration starts with
-   both off).
-5. Admin: `scripts/setPoolParamAllowed.ts` for each pool param; for a source,
+4. Pauser: `setProtocolEnabledForClose(protocol, true)` (first registration),
+   then `setProtocolEnabledForOpen(protocol, true)` after looking at the build.
+   Nothing of the new build runs before this step, `configureHandler` included.
+5. Admin: `scripts/setPoolParamAllowed.ts` for each pool param (`PROTOCOL_NAME =
+   "sky"` for the savings source); for a source,
    `scripts/configureSavingsHandler.ts` if the constructor defaults need
    retuning.
 6. Rolling a build under an id already in use is the same `setYieldHandler`,
-   then `switchPosition(id, id)` per position (in kind, no price read for a
-   savings source).
+   the pauser re-enabling opens, then `switchPosition(id, id)` per position (in
+   kind, no price read for a savings source).
 
 ### 5. ABIs, addresses, downstream
 

@@ -219,15 +219,17 @@ position: the same path as repointing a TWAP reference, for the same reason.
 Only the tolerance ceiling and the exposure cap are admin-tunable, and both are
 bounded by constants.
 
-**The exposure cap is a rail, not the liquidity policy.** A deposit reverts
-`ExposureCapExceeded` when the book's tracked value plus the deposit would
-exceed `maxExposureBps` of what PSM3 can pay out right now (its USDC pocket,
-pinned at about 1.0M by Spark's ALM). The deposit itself lands in that pocket,
-so until the venue sweeps it the next deposit sees it as headroom; the rail
-catches a runaway backend, not a slow drift.
+**The exposure cap is a per-deposit rail, not the liquidity policy.** A
+deposit reverts `ExposureCapExceeded` when it alone exceeds `maxExposureBps` of
+what PSM3 can pay out right now (its USDC pocket, pinned at about 1.0M by
+Spark's ALM). It deliberately does not count the book: a Safe can redeem its
+sUSDS directly at PSM3 and leave its record behind, so a counter of tracked
+shares is an upper bound anyone can inflate at no cost and use to block every
+other Safe's deposit. The fleet-wide cap belongs to the backend, which can read
+balances; the on-chain rail catches a single runaway deposit.
 
-**Exits never depend on the oracle or the venue.** `withdraw` releases the
-record with no Safe call and no price read; the sUSDS stays on the Safe, where
+**`withdraw` and the rollover never depend on the oracle or the venue.**
+`withdraw` releases the record with no Safe call and no price read; the sUSDS stays on the Safe, where
 the owner can redeem it at PSM3 or anywhere else. A full `close` with every
 share already moved out around the module reads no price either, so a record
 can be cleared while the feed is down. If PSM3's pocket is drained a redemption
@@ -355,7 +357,10 @@ position.**
 2. The new pauser calls `setProtocolEnabledForClose(protocol, true)`.
 3. If a handler was genuinely compromised, register a fixed handler before
    re-enabling. Existing positions still exit through their pinned handler, so
-   re-registration does not disturb them.
+   re-registration does not disturb them. Registering a build also turns opens
+   for its id off until the pauser re-enables them, and `configureHandler` is
+   refused meanwhile, so a replacement never serves a new entry, a rollover or a
+   configuration call before a second party has looked at it.
 4. In the worst case, `rescueERC721` (`DEFAULT_ADMIN_ROLE`) returns a stranded
    NFT held by the module itself.
 

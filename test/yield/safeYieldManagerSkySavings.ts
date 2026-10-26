@@ -50,6 +50,8 @@ import {
     sharesOf,
     totalShares,
     expectZeroResidue,
+    registerBuild,
+    MAX_DISAGREEMENT_BPS,
 } from "../helpers/savingsHarness";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -89,10 +91,14 @@ describe("SafeYieldManager + savings handlers", function () {
                     await expect(
                         manager.connect(deployer).setPoolParamAllowed(src.protocol, src.param(f), true),
                     ).to.be.revertedWithCustomError(manager, "HandlerNotSet");
-                    await (await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, src.handlerAddr(f)])).wait();
+                    await (
+                        await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, src.handlerAddr(f)])
+                    ).wait();
                     expect(await manager.protocolEnabledForOpen(src.protocol)).to.equal(false);
                     expect(await manager.protocolEnabledForClose(src.protocol)).to.equal(false);
-                    await (await manager.connect(deployer).setPoolParamAllowed(src.protocol, src.param(f), true)).wait();
+                    await (
+                        await manager.connect(deployer).setPoolParamAllowed(src.protocol, src.param(f), true)
+                    ).wait();
                     await expect(open(f, src)).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
 
                     await (await manager.connect(pauser).setProtocolEnabledForOpen(src.protocol, true)).wait();
@@ -101,15 +107,26 @@ describe("SafeYieldManager + savings handlers", function () {
                     await expect(withdraw(f, src)).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
                 });
 
-                it("keeps the switches as they are when a replacement build is registered", async function () {
+                it("disables opens and keeps closes when a replacement build is registered", async function () {
                     const f = await loadFixture(deployRegistered);
                     const { manager, timelock, pauser } = f;
-                    await (await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, await src.deployBuild(f)])).wait();
-                    expect(await manager.protocolEnabledForOpen(src.protocol)).to.equal(true);
+                    await expect(
+                        timelockCall(timelock, manager, "setYieldHandler", [src.protocol, await src.deployBuild(f)]),
+                    )
+                        .to.emit(manager, "ProtocolStatusChanged")
+                        .withArgs(src.protocol, true, false);
+                    expect(await manager.protocolEnabledForOpen(src.protocol)).to.equal(false);
                     expect(await manager.protocolEnabledForClose(src.protocol)).to.equal(true);
+                    await expect(open(f, src)).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
+
+                    await (await manager.connect(pauser).setProtocolEnabledForOpen(src.protocol, true)).wait();
+                    await (await open(f, src)).wait();
+                    await (await close(f, src)).wait();
 
                     await (await manager.connect(pauser).setProtocolEnabledForOpen(src.protocol, false)).wait();
-                    await (await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, src.handlerAddr(f)])).wait();
+                    await expect(
+                        timelockCall(timelock, manager, "setYieldHandler", [src.protocol, src.handlerAddr(f)]),
+                    ).to.not.emit(manager, "ProtocolStatusChanged");
                     expect(await manager.protocolEnabledForOpen(src.protocol)).to.equal(false);
                     expect(await manager.protocolEnabledForClose(src.protocol)).to.equal(true);
                 });
@@ -146,7 +163,9 @@ describe("SafeYieldManager + savings handlers", function () {
 
                 it("rejects the right pool param once it is de-listed", async function () {
                     const f = await loadFixture(deployRegistered);
-                    await (await f.manager.connect(f.deployer).setPoolParamAllowed(src.protocol, src.param(f), false)).wait();
+                    await (
+                        await f.manager.connect(f.deployer).setPoolParamAllowed(src.protocol, src.param(f), false)
+                    ).wait();
                     await expect(open(f, src)).to.be.revertedWithCustomError(src.handler(f), "PoolParamNotAllowed");
                 });
             });
@@ -196,17 +215,21 @@ describe("SafeYieldManager + savings handlers", function () {
                 it("bounds slippageBps to [1, MAX_TOLERANCE_BPS] on open and close", async function () {
                     const f = await loadFixture(deployRegistered);
                     const handler = src.handler(f);
-                    await expect(open(f, src, f.safeAddr, { slippageBps: 0 })).to.be.revertedWithCustomError(handler, "SlippageTooLow");
-                    await expect(open(f, src, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS + 1 })).to.be.revertedWithCustomError(
+                    await expect(open(f, src, f.safeAddr, { slippageBps: 0 })).to.be.revertedWithCustomError(
                         handler,
-                        "SlippageAboveMax",
+                        "SlippageTooLow",
                     );
+                    await expect(
+                        open(f, src, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS + 1 }),
+                    ).to.be.revertedWithCustomError(handler, "SlippageAboveMax");
                     await (await open(f, src, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS })).wait();
-                    await expect(close(f, src, f.safeAddr, { slippageBps: 0 })).to.be.revertedWithCustomError(handler, "SlippageTooLow");
-                    await expect(close(f, src, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS + 1 })).to.be.revertedWithCustomError(
+                    await expect(close(f, src, f.safeAddr, { slippageBps: 0 })).to.be.revertedWithCustomError(
                         handler,
-                        "SlippageAboveMax",
+                        "SlippageTooLow",
                     );
+                    await expect(
+                        close(f, src, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS + 1 }),
+                    ).to.be.revertedWithCustomError(handler, "SlippageAboveMax");
                     await (await close(f, src, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS })).wait();
                 });
 
@@ -311,9 +334,7 @@ describe("SafeYieldManager + savings handlers", function () {
                         handler,
                         "SlippageAboveMax",
                     );
-                    await (
-                        await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, await src.deployBuild(f)])
-                    ).wait();
+                    await registerBuild(f, src, await src.deployBuild(f));
                     await (await close(f, src, f.safeAddr, { slippageBps: 100 })).wait();
 
                     const venue = src.venueAddr(f);
@@ -324,42 +345,58 @@ describe("SafeYieldManager + savings handlers", function () {
                     await (await open(f, src, f.safeAddr, { usdcAmount: USDC(500_000) })).wait();
                     await expectZeroResidue(f);
                 });
+
+                it("refuses malformed bytes and runs configure only on a build the pauser has activated", async function () {
+                    const f = await loadFixture(deployRegistered);
+                    const { manager, managerAddr, managerEvents, deployer, timelock, pauser } = f;
+                    const handler = src.handler(f);
+                    for (const data of [
+                        "0x",
+                        "0x" + "00".repeat(32),
+                        abi.encode(["uint256", "uint256"], [2n ** 16n, 1n]),
+                    ]) {
+                        await expect(
+                            manager.connect(deployer).configureHandler(src.protocol, data),
+                        ).to.be.revertedWithCustomError(manager, "HandlerCallFailed");
+                    }
+                    expect(await slotValue(managerAddr, await handler.savingsConfigSlot())).to.equal(0);
+
+                    await (
+                        await timelockCall(timelock, manager, "setYieldHandler", [
+                            src.protocol,
+                            await src.deployBuild(f),
+                        ])
+                    ).wait();
+                    await expect(
+                        manager.connect(deployer).configureHandler(src.protocol, encodeConfig(100, 5_000)),
+                    ).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
+                    await (await manager.connect(pauser).setProtocolEnabledForOpen(src.protocol, true)).wait();
+                    await expect(manager.connect(deployer).configureHandler(src.protocol, encodeConfig(100, 5_000)))
+                        .to.emit(managerEvents, "SavingsConfigUpdated")
+                        .withArgs(src.protocol, 100, 5_000);
+                });
             });
 
             describe("exposure rail", function () {
-                it("rejects a deposit that would push the tracked book above the venue's liquidity", async function () {
+                it("caps a single deposit at the venue's live liquidity, whatever the book already holds", async function () {
                     const f = await loadFixture(deployRegistered);
                     const { usdc, safe2Addr } = f;
+                    const venue = src.venueAddr(f);
                     await (await open(f, src)).wait();
-                    const available = await usdc.balanceOf(src.venueAddr(f));
-                    const tracked = usdcFor(await totalShares(f, src), RATE);
-                    const amount = available - tracked + 1n;
-                    await expect(open(f, src, safe2Addr, { usdcAmount: amount }))
-                        .to.be.revertedWithCustomError(src.handler(f), "ExposureCapExceeded")
-                        .withArgs(tracked + amount, available);
-                });
-
-                it("accepts a deposit exactly at the cap and rejects one unit more", async function () {
-                    const f = await loadFixture(deployRegistered);
-                    const { usdc, safe2Addr } = f;
-                    await (await open(f, src)).wait();
-                    const tracked = usdcFor(await totalShares(f, src), RATE);
                     const amount = USDC(500_000);
-                    const available = await usdc.balanceOf(src.venueAddr(f));
-                    await (await usdc.burn(src.venueAddr(f), available - (tracked + amount))).wait();
+                    await (await usdc.burn(venue, (await usdc.balanceOf(venue)) - amount)).wait();
                     await expect(open(f, src, safe2Addr, { usdcAmount: amount + 1n }))
                         .to.be.revertedWithCustomError(src.handler(f), "ExposureCapExceeded")
-                        .withArgs(tracked + amount + 1n, tracked + amount);
+                        .withArgs(amount + 1n, amount);
                     await (await open(f, src, safe2Addr, { usdcAmount: amount })).wait();
                     await expectZeroResidue(f);
                 });
 
-                it("scales the cap with MAX_EXPOSURE_BPS", async function () {
+                it("scales the cap with the exposure ceiling", async function () {
                     const f = await loadFixture(deployRegistered);
-                    const { manager, timelock, usdc } = f;
+                    const { usdc } = f;
                     const venue = src.venueAddr(f);
-                    const half = await src.deployBuild(f, 5_000);
-                    await (await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, half])).wait();
+                    await registerBuild(f, src, await src.deployBuild(f, 5_000));
                     await (await usdc.burn(venue, (await usdc.balanceOf(venue)) - USDC(1_000_000))).wait();
                     await expect(open(f, src, f.safeAddr, { usdcAmount: USDC(500_000) + 1n }))
                         .to.be.revertedWithCustomError(src.handler(f), "ExposureCapExceeded")
@@ -368,26 +405,38 @@ describe("SafeYieldManager + savings handlers", function () {
                     await expectZeroResidue(f);
                 });
 
-                it("returns headroom after a partial close once the venue is refilled", async function () {
+                it("is not inflated by shares a Safe redeemed around the module", async function () {
                     const f = await loadFixture(deployRegistered);
-                    const { usdc, safe2Addr } = f;
+                    const { usdc, safeAddr, safe2Addr } = f;
                     const venue = src.venueAddr(f);
+                    const share = src.shareToken(f);
                     await (await open(f, src)).wait();
-                    const tracked = usdcFor(await totalShares(f, src), RATE);
-                    await (await usdc.burn(venue, (await usdc.balanceOf(venue)) - tracked)).wait();
-                    await expect(open(f, src, safe2Addr, { usdcAmount: USDC(10) })).to.be.revertedWithCustomError(
-                        src.handler(f),
-                        "ExposureCapExceeded",
-                    );
-                    const before = await usdc.balanceOf(venue);
-                    await (await close(f, src, f.safeAddr, { exitBps: 5_000 })).wait();
-                    await (await usdc.mint(venue, before - (await usdc.balanceOf(venue)))).wait();
+                    const shares = await share.balanceOf(safeAddr);
+                    const safe = await safeSigner(safeAddr);
+                    await (await share.connect(safe).approve(venue, shares)).wait();
+                    await (await src.redeemDirect(f, safe, shares)).wait();
+                    expect(await totalShares(f, src)).to.equal(shares);
+                    await (await usdc.burn(venue, (await usdc.balanceOf(venue)) - USDC(10))).wait();
                     await (await open(f, src, safe2Addr, { usdcAmount: USDC(10) })).wait();
-                    await expectZeroResidue(f);
+                    expect(await usdc.balanceOf(safe2Addr)).to.equal(USDC(2_000_000) - USDC(10));
                 });
             });
 
             describe("close", function () {
+                it("redeems only the shares it deposited and leaves the Safe's other shares alone", async function () {
+                    const f = await loadFixture(deployRegistered);
+                    const { managerEvents, safeAddr } = f;
+                    const share = src.shareToken(f);
+                    await (await open(f, src)).wait();
+                    const tracked = await sharesOf(f, src);
+                    await (await share.mint(safeAddr, 10n ** 21n)).wait();
+                    await expect(close(f, src))
+                        .to.emit(managerEvents, "SavingsRedeemed")
+                        .withArgs(safeAddr, tokenIdOf(safeAddr), tracked, usdcFor(tracked, RATE), RATE, 10_000);
+                    expect(await share.balanceOf(safeAddr)).to.equal(10n ** 21n);
+                    expect(await sharesOf(f, src)).to.equal(0);
+                });
+
                 it("fully closes after the rate rose and charges the performance fee on the profit", async function () {
                     const f = await loadFixture(deployRegistered);
                     const { manager, managerEvents, usdc, treasury, safeAddr } = f;
@@ -503,7 +552,9 @@ describe("SafeYieldManager + savings handlers", function () {
                     await expect(tx)
                         .to.emit(managerEvents, "SavingsSharesShortfall")
                         .withArgs(safeAddr, tokenId, shares, 0);
-                    await expect(tx).to.emit(managerEvents, "SavingsRedeemed").withArgs(safeAddr, tokenId, 0, 0, 0, 10_000);
+                    await expect(tx)
+                        .to.emit(managerEvents, "SavingsRedeemed")
+                        .withArgs(safeAddr, tokenId, 0, 0, 0, 10_000);
                     await expect(tx)
                         .to.emit(manager, "PositionClosed")
                         .withArgs(safeAddr, src.protocol, tokenId, DEPOSIT, 0, 0, 10_000, 0);
@@ -523,7 +574,9 @@ describe("SafeYieldManager + savings handlers", function () {
                     await expect(close(f, src)).to.be.revertedWith("ERC20: transfer amount exceeds balance");
                     expect(await sharesOf(f, src)).to.equal(shares);
                     expect(await totalShares(f, src)).to.equal(shares);
-                    expect(await manager.positionHandlerOf(src.protocol, tokenIdOf(safeAddr))).to.equal(src.handlerAddr(f));
+                    expect(await manager.positionHandlerOf(src.protocol, tokenIdOf(safeAddr))).to.equal(
+                        src.handlerAddr(f),
+                    );
                     expect(await manager.residualBasisUsd6Of(src.protocol, tokenIdOf(safeAddr))).to.equal(DEPOSIT);
 
                     await (await safe.setFail(venue, 1)).wait();
@@ -597,7 +650,9 @@ describe("SafeYieldManager + savings handlers", function () {
                         "OnlyDelegatecall",
                     );
                     await expect(
-                        handler.openInKind(inKindParams(safeAddr, src.param(f), usdcAddr, src.shareTokenAddr(f), 0n, 1n)),
+                        handler.openInKind(
+                            inKindParams(safeAddr, src.param(f), usdcAddr, src.shareTokenAddr(f), 0n, 1n),
+                        ),
                     ).to.be.revertedWithCustomError(handler, "OnlyDelegatecall");
                     await expect(handler.collect(collectParams(safeAddr, tokenId))).to.be.revertedWithCustomError(
                         handler,
@@ -615,7 +670,9 @@ describe("SafeYieldManager + savings handlers", function () {
                         manager.connect(operatorEOA).close(src.protocol, closeParams(safeAddr, tokenIdOf(safe2Addr))),
                     ).to.be.revertedWithCustomError(src.handler(f), "WrongPosition");
                     await expect(
-                        manager.connect(operatorEOA).withdraw(src.protocol, withdrawParams(safeAddr, tokenIdOf(safe2Addr))),
+                        manager
+                            .connect(operatorEOA)
+                            .withdraw(src.protocol, withdrawParams(safeAddr, tokenIdOf(safe2Addr))),
                     ).to.be.revertedWithCustomError(src.handler(f), "WrongPosition");
                 });
 
@@ -657,14 +714,20 @@ describe("SafeYieldManager + savings handlers", function () {
                     const { manager, uniHandler, operatorEOA, safeAddr } = f;
                     await (await manager.connect(operatorEOA).open(UNISWAP_V3, v3OpenParams(f, safeAddr))).wait();
                     await expect(
-                        manager.connect(operatorEOA).switchPosition(UNISWAP_V3, src.protocol, switchParams(safeAddr, 1, src.param(f))),
+                        manager
+                            .connect(operatorEOA)
+                            .switchPosition(UNISWAP_V3, src.protocol, switchParams(safeAddr, 1, src.param(f))),
                     ).to.be.revertedWithCustomError(src.handler(f), "InKindNotSupported");
 
                     await (await open(f, src)).wait();
                     await expect(
                         manager
                             .connect(operatorEOA)
-                            .switchPosition(src.protocol, UNISWAP_V3, switchParams(safeAddr, tokenIdOf(safeAddr), f.feeTier)),
+                            .switchPosition(
+                                src.protocol,
+                                UNISWAP_V3,
+                                switchParams(safeAddr, tokenIdOf(safeAddr), f.feeTier),
+                            ),
                     ).to.be.revertedWithCustomError(uniHandler, "WrongTokenPair");
                 });
 
@@ -681,20 +744,39 @@ describe("SafeYieldManager + savings handlers", function () {
                         const feederAddr = await feeder.getAddress();
                         await (await timelockCall(timelock, manager, "setYieldHandler", [FEEDER, feederAddr])).wait();
                         await (await manager.connect(pauser).setProtocolEnabledForClose(FEEDER, true)).wait();
-                        await setSlot(managerAddr, yieldSlot(YIELD_FIELD.positionHandler, FEEDER, tokenId), BigInt(feederAddr));
+                        await setSlot(
+                            managerAddr,
+                            yieldSlot(YIELD_FIELD.positionHandler, FEEDER, tokenId),
+                            BigInt(feederAddr),
+                        );
                         await setSlot(managerAddr, yieldSlot(YIELD_FIELD.residualBasis, FEEDER, tokenId), DEPOSIT);
                         return manager
                             .connect(operatorEOA)
                             .switchPosition(FEEDER, src.protocol, switchParams(safeAddr, tokenId, src.param(f)));
                     };
-                    await expect(feed(usdcAddr, usdcAddr, 0n, 1n)).to.be.revertedWithCustomError(src.handler(f), "InKindNotSupported");
-                    await expect(feed(usdcAddr, shareAddr, 1n, 1n)).to.be.revertedWithCustomError(src.handler(f), "InKindNotSupported");
-                    await expect(feed(usdcAddr, shareAddr, 0n, 0n)).to.be.revertedWithCustomError(src.handler(f), "InKindNotSupported");
+                    await expect(feed(usdcAddr, usdcAddr, 0n, 1n)).to.be.revertedWithCustomError(
+                        src.handler(f),
+                        "InKindNotSupported",
+                    );
+                    await expect(feed(usdcAddr, shareAddr, 1n, 1n)).to.be.revertedWithCustomError(
+                        src.handler(f),
+                        "InKindNotSupported",
+                    );
+                    await expect(feed(usdcAddr, shareAddr, 0n, 0n)).to.be.revertedWithCustomError(
+                        src.handler(f),
+                        "InKindNotSupported",
+                    );
                     await (await open(f, src)).wait();
-                    await expect(feed(usdcAddr, shareAddr, 0n, 1n)).to.be.revertedWithCustomError(src.handler(f), "PositionAlreadyOpen");
+                    await expect(feed(usdcAddr, shareAddr, 0n, 1n)).to.be.revertedWithCustomError(
+                        src.handler(f),
+                        "PositionAlreadyOpen",
+                    );
                     await (await close(f, src)).wait();
                     await setSlot(managerAddr, await src.handler(f).savingsSharesSlot(tokenId), 1n);
-                    await expect(feed(usdcAddr, shareAddr, 0n, 1n)).to.be.revertedWithCustomError(src.handler(f), "StaleSharesRecord");
+                    await expect(feed(usdcAddr, shareAddr, 0n, 1n)).to.be.revertedWithCustomError(
+                        src.handler(f),
+                        "StaleSharesRecord",
+                    );
                 });
 
                 it("rolls a position to a new build under the same id without moving tokens", async function () {
@@ -707,7 +789,7 @@ describe("SafeYieldManager + savings handlers", function () {
                     const carry = 500n;
                     await setSlot(managerAddr, yieldSlot(YIELD_FIELD.carry, src.protocol, tokenId), carry);
                     const build2 = await src.deployBuild(f);
-                    await (await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, build2])).wait();
+                    await registerBuild(f, src, build2);
                     const usdcBefore = await usdc.balanceOf(safeAddr);
                     const venueShareBefore = await share.balanceOf(src.venueAddr(f));
 
@@ -716,7 +798,18 @@ describe("SafeYieldManager + savings handlers", function () {
                     await expect(tx).to.emit(managerEvents, "SavingsAdopted").withArgs(safeAddr, tokenId, shares);
                     await expect(tx)
                         .to.emit(manager, "PositionSwitched")
-                        .withArgs(safeAddr, src.protocol, src.protocol, tokenId, tokenId, DEPOSIT, 0, shares, 0, shares);
+                        .withArgs(
+                            safeAddr,
+                            src.protocol,
+                            src.protocol,
+                            tokenId,
+                            tokenId,
+                            DEPOSIT,
+                            0,
+                            shares,
+                            0,
+                            shares,
+                        );
                     await expect(tx)
                         .to.emit(manager, "SwitchResidueSettled")
                         .withArgs(safeAddr, src.protocol, tokenId, 0, 0, 0, DEPOSIT, carry);
@@ -747,7 +840,7 @@ describe("SafeYieldManager + savings handlers", function () {
                     const { manager, timelock, safeAddr } = f;
                     await (await open(f, src)).wait();
                     const build2 = await src.deployBuild(f);
-                    await (await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, build2])).wait();
+                    await registerBuild(f, src, build2);
                     await src.breakPricing(f);
                     await src.breakVenue(f);
                     await (await roll(f, src)).wait();
@@ -760,8 +853,13 @@ describe("SafeYieldManager + savings handlers", function () {
                     const f = await loadFixture(deployRegistered);
                     const { manager, timelock, stranger, safeAddr } = f;
                     await (await open(f, src)).wait();
-                    await (await src.shareToken(f).connect(await safeSigner(safeAddr)).transfer(stranger.address, 1n)).wait();
-                    await (await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, await src.deployBuild(f)])).wait();
+                    await (
+                        await src
+                            .shareToken(f)
+                            .connect(await safeSigner(safeAddr))
+                            .transfer(stranger.address, 1n)
+                    ).wait();
+                    await registerBuild(f, src, await src.deployBuild(f));
                     await expect(roll(f, src)).to.be.revertedWithCustomError(src.handler(f), "SharesNotOnSafe");
                 });
 
@@ -769,7 +867,7 @@ describe("SafeYieldManager + savings handlers", function () {
                     const f = await loadFixture(deployRegistered);
                     const { manager, timelock, pauser, deployer } = f;
                     await (await open(f, src)).wait();
-                    await (await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, await src.deployBuild(f)])).wait();
+                    await registerBuild(f, src, await src.deployBuild(f));
 
                     await (await manager.connect(pauser).pause()).wait();
                     await expect(roll(f, src)).to.be.revertedWithCustomError(manager, "EnforcedPause");
@@ -783,9 +881,13 @@ describe("SafeYieldManager + savings handlers", function () {
                     await expect(roll(f, src)).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
                     await (await manager.connect(pauser).setProtocolEnabledForOpen(src.protocol, true)).wait();
 
-                    await (await manager.connect(deployer).setPoolParamAllowed(src.protocol, src.param(f), false)).wait();
+                    await (
+                        await manager.connect(deployer).setPoolParamAllowed(src.protocol, src.param(f), false)
+                    ).wait();
                     await expect(roll(f, src)).to.be.revertedWithCustomError(src.handler(f), "PoolParamNotAllowed");
-                    await (await manager.connect(deployer).setPoolParamAllowed(src.protocol, src.param(f), true)).wait();
+                    await (
+                        await manager.connect(deployer).setPoolParamAllowed(src.protocol, src.param(f), true)
+                    ).wait();
                     await (await roll(f, src)).wait();
                     await expectZeroResidue(f);
                 });
@@ -797,7 +899,7 @@ describe("SafeYieldManager + savings handlers", function () {
                     const Under = await ethers.getContractFactory("MockUnderAdoptingYieldHandler");
                     const under = await Under.deploy(src.protocol, usdcAddr);
                     await under.waitForDeployment();
-                    await (await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, await under.getAddress()])).wait();
+                    await registerBuild(f, src, await under.getAddress());
                     await expect(roll(f, src))
                         .to.be.revertedWithCustomError(manager, "TwapNotConfigured")
                         .withArgs(src.shareTokenAddr(f));
@@ -833,7 +935,10 @@ describe("SafeYieldManager + savings handlers", function () {
                             BigInt(mapSlot(BigInt(s.protocol), allowedBase)),
                         );
                     }
-                    watched["allowed:0"] = mapSlot(BigInt(ethers.keccak256(f.feeTier)), BigInt(mapSlot(0n, allowedBase)));
+                    watched["allowed:0"] = mapSlot(
+                        BigInt(ethers.keccak256(f.feeTier)),
+                        BigInt(mapSlot(0n, allowedBase)),
+                    );
                     const before: Record<string, bigint> = {};
                     for (const [k, slot] of Object.entries(watched)) before[k] = await slotValue(managerAddr, slot);
                     expect(before[`allowed:${src.protocol}`]).to.equal(1n);
@@ -863,7 +968,10 @@ describe("SafeYieldManager + savings handlers", function () {
                     expect(await src.shareToken(f).balanceOf(safeAddr)).to.equal(sharesFor(DEPOSIT, RATE));
 
                     await (await manager.connect(pauser).setProtocolEnabledForClose(src.protocol, false)).wait();
-                    await expect(withdraw(f, src, safe2Addr)).to.be.revertedWithCustomError(manager, "ProtocolDisabled");
+                    await expect(withdraw(f, src, safe2Addr)).to.be.revertedWithCustomError(
+                        manager,
+                        "ProtocolDisabled",
+                    );
                     await (await manager.connect(pauser).setProtocolEnabledForClose(src.protocol, true)).wait();
                     await (await withdraw(f, src, safe2Addr)).wait();
                     await expectZeroResidue(f);
@@ -875,10 +983,73 @@ describe("SafeYieldManager + savings handlers", function () {
     describe("Sky specifics", function () {
         const src = SKY_SRC;
 
+        it("rolls onto a build with another provider and defaults, which govern until the admin configures", async function () {
+            const f = await loadFixture(deployRegistered);
+            const { Handler, manager, managerEvents, deployer, usdcAddr, psm3Addr, susdsAddr, safeAddr, ssr } = f;
+            await (await open(f, src)).wait();
+            const shares = await sharesOf(f, src);
+            const feed2 = await (await ethers.getContractFactory("MockAggregatorV3")).deploy();
+            await feed2.waitForDeployment();
+            const rate2 = bps(RATE, 10);
+            await (await feed2.set(rate2, await time.latest())).wait();
+            const provider2 = await (
+                await ethers.getContractFactory("ChainlinkSsrRateProvider")
+            ).deploy(
+                await feed2.getAddress(),
+                await ssr.getAddress(),
+                susdsAddr,
+                MAX_FEED_AGE,
+                MAX_DISAGREEMENT_BPS,
+                MAX_RATE,
+            );
+            await provider2.waitForDeployment();
+            const build2 = await Handler.deploy(
+                usdcAddr,
+                await provider2.getAddress(),
+                300,
+                1,
+                psm3Addr,
+                susdsAddr,
+                OSERO_REFERRAL_CODE,
+            );
+            await build2.waitForDeployment();
+            await registerBuild(f, src, await build2.getAddress());
+            await (await roll(f, src)).wait();
+
+            await expect(close(f, src, safeAddr, { slippageBps: 300, exitBps: 5_000 }))
+                .to.emit(managerEvents, "SavingsRedeemed")
+                .withArgs(safeAddr, tokenIdOf(safeAddr), shares / 2n, usdcFor(shares / 2n, RATE), rate2, 5_000);
+
+            await (
+                await manager
+                    .connect(deployer)
+                    .configureHandler(src.protocol, abi.encode(["uint16", "uint16"], [50, 10_000]))
+            ).wait();
+            await expect(close(f, src, safeAddr, { slippageBps: 51 })).to.be.revertedWithCustomError(
+                build2,
+                "SlippageAboveMax",
+            );
+            await (await close(f, src, safeAddr, { slippageBps: 50 })).wait();
+        });
+
         it("rejects bad wiring and bounds at construction", async function () {
             const f = await loadFixture(deployRegistered);
-            const { Handler, handler, usdcAddr, providerAddr, psm3Addr, susdsAddr, wethAddr, mockShareAddr, stranger, ssr, feed } = f;
-            const deploy = (o: Partial<{ usdc: string; provider: string; tol: number; exp: number; psm3: string; susds: string }>) =>
+            const {
+                Handler,
+                handler,
+                usdcAddr,
+                providerAddr,
+                psm3Addr,
+                susdsAddr,
+                wethAddr,
+                mockShareAddr,
+                stranger,
+                ssr,
+                feed,
+            } = f;
+            const deploy = (
+                o: Partial<{ usdc: string; provider: string; tol: number; exp: number; psm3: string; susds: string }>,
+            ) =>
                 Handler.deploy(
                     o.usdc ?? usdcAddr,
                     o.provider ?? providerAddr,
@@ -892,8 +1063,10 @@ describe("SafeYieldManager + savings handlers", function () {
             await expect(deploy({ provider: ZERO })).to.be.revertedWithCustomError(handler, "ZeroAddress");
             await expect(deploy({ susds: ZERO })).to.be.revertedWithCustomError(handler, "ZeroAddress");
             await expect(deploy({ susds: mockShareAddr })).to.be.revertedWithCustomError(handler, "InvalidConfig");
-            for (const tol of [0, 301]) await expect(deploy({ tol })).to.be.revertedWithCustomError(handler, "InvalidConfig");
-            for (const exp of [0, 10_001]) await expect(deploy({ exp })).to.be.revertedWithCustomError(handler, "InvalidConfig");
+            for (const tol of [0, 301])
+                await expect(deploy({ tol })).to.be.revertedWithCustomError(handler, "InvalidConfig");
+            for (const exp of [0, 10_001])
+                await expect(deploy({ exp })).to.be.revertedWithCustomError(handler, "InvalidConfig");
             await expect(deploy({ psm3: ZERO })).to.be.revertedWithCustomError(handler, "ZeroAddress");
 
             const Psm = await ethers.getContractFactory("MockPSM3");
@@ -905,7 +1078,10 @@ describe("SafeYieldManager + savings handlers", function () {
             ]) {
                 const wrong = await Psm.deploy(wiring[0], wiring[1], wiring[2]);
                 await wrong.waitForDeployment();
-                await expect(deploy({ psm3: await wrong.getAddress() })).to.be.revertedWithCustomError(handler, "InvalidConfig");
+                await expect(deploy({ psm3: await wrong.getAddress() })).to.be.revertedWithCustomError(
+                    handler,
+                    "InvalidConfig",
+                );
             }
 
             const edge = await deploy({ tol: 300, exp: 1 });
@@ -927,20 +1103,60 @@ describe("SafeYieldManager + savings handlers", function () {
                 .withArgs(susdsAddr, usdcAddr, safeAddr, safeAddr, shares, usdcFor(shares, RATE), OSERO_REFERRAL_CODE);
         });
 
-        const states: Array<{ name: string; error: string | null; reason?: string; apply: (f: Harness) => Promise<void> }> = [
-            { name: "zero answer", error: "InvalidRate", apply: async (f) => void (await (await f.feed.set(0, await time.latest())).wait()) },
-            { name: "negative answer", error: "InvalidRate", apply: async (f) => void (await (await f.feed.set(-1, await time.latest())).wait()) },
+        const states: Array<{
+            name: string;
+            error: string | null;
+            reason?: string;
+            apply: (f: Harness) => Promise<void>;
+        }> = [
+            {
+                name: "zero answer",
+                error: "InvalidRate",
+                apply: async (f) => void (await (await f.feed.set(0, await time.latest())).wait()),
+            },
+            {
+                name: "negative answer",
+                error: "InvalidRate",
+                apply: async (f) => void (await (await f.feed.set(-1, await time.latest())).wait()),
+            },
             {
                 name: "answer older than 36h",
                 error: "StaleRate",
-                apply: async (f) => void (await (await f.feed.set(RATE, (await time.latest()) - MAX_FEED_AGE - 100)).wait()),
+                apply: async (f) =>
+                    void (await (await f.feed.set(RATE, (await time.latest()) - MAX_FEED_AGE - 100)).wait()),
             },
-            { name: "rate below 1e18", error: "RateOutOfBounds", apply: async (f) => void (await (await f.feed.set(ONE - 1n, await time.latest())).wait()) },
-            { name: "rate above MAX_RATE", error: "RateOutOfBounds", apply: async (f) => void (await (await f.feed.set(MAX_RATE + 1n, await time.latest())).wait()) },
-            { name: "reverting feed", error: null, reason: "feed down", apply: async (f) => void (await (await f.feed.setReverting(true)).wait()) },
-            { name: "Chainlink 51 bps above the SSR oracle", error: "OracleDisagreement", apply: async (f) => void (await (await f.feed.set(bps(RATE, 51), await time.latest())).wait()) },
-            { name: "Chainlink 51 bps below the SSR oracle", error: "OracleDisagreement", apply: async (f) => void (await (await f.feed.set(bps(RATE, -51), await time.latest())).wait()) },
-            { name: "reverting SSR oracle", error: null, reason: "ssr down", apply: async (f) => void (await (await f.ssr.setReverting(true)).wait()) },
+            {
+                name: "rate below 1e18",
+                error: "RateOutOfBounds",
+                apply: async (f) => void (await (await f.feed.set(ONE - 1n, await time.latest())).wait()),
+            },
+            {
+                name: "rate above MAX_RATE",
+                error: "RateOutOfBounds",
+                apply: async (f) => void (await (await f.feed.set(MAX_RATE + 1n, await time.latest())).wait()),
+            },
+            {
+                name: "reverting feed",
+                error: null,
+                reason: "feed down",
+                apply: async (f) => void (await (await f.feed.setReverting(true)).wait()),
+            },
+            {
+                name: "Chainlink 51 bps above the SSR oracle",
+                error: "OracleDisagreement",
+                apply: async (f) => void (await (await f.feed.set(bps(RATE, 51), await time.latest())).wait()),
+            },
+            {
+                name: "Chainlink 51 bps below the SSR oracle",
+                error: "OracleDisagreement",
+                apply: async (f) => void (await (await f.feed.set(bps(RATE, -51), await time.latest())).wait()),
+            },
+            {
+                name: "reverting SSR oracle",
+                error: null,
+                reason: "ssr down",
+                apply: async (f) => void (await (await f.ssr.setReverting(true)).wait()),
+            },
         ];
 
         for (const state of states) {
@@ -1000,7 +1216,9 @@ describe("SafeYieldManager + savings handlers", function () {
             const f = await loadFixture(deployRegistered);
             await (await open(f, src)).wait();
             const expected = usdcFor(sharesFor(DEPOSIT, RATE), RATE);
-            await expect(close(f, src, f.safeAddr, { minUsdcOut: expected + 1n })).to.be.revertedWith(src.tooLow.redeem);
+            await expect(close(f, src, f.safeAddr, { minUsdcOut: expected + 1n })).to.be.revertedWith(
+                src.tooLow.redeem,
+            );
             await (await f.mockVenue.setShortPay(1n)).wait();
             await expect(close(f, src, f.safeAddr, { minUsdcOut: expected })).to.be.revertedWithCustomError(
                 src.handler(f),

@@ -797,11 +797,20 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         the handler pinned per position at open time, so replacing a
     ///         handler (or a bad registration) can never strand existing
     ///         positions on an incompatible implementation.
+    /// @dev Registering a build also turns opens for the id OFF: a replacement
+    ///      never serves new entries, rollovers or `configureHandler` until the
+    ///      pauser has re-enabled it, so a second party looks at the build
+    ///      before its code runs. Closes stay as they were: existing positions
+    ///      exit through the build pinned at open.
     function setYieldHandler(uint8 protocol, address handler) external onlyTimelockCriticalRole {
         _validateHandler(protocol, handler);
         address oldHandler = yieldHandlers[protocol];
         yieldHandlers[protocol] = handler;
         emit YieldHandlerUpdated(protocol, oldHandler, handler);
+        if (protocolEnabledForOpen[protocol]) {
+            protocolEnabledForOpen[protocol] = false;
+            emit ProtocolStatusChanged(protocol, true, false);
+        }
     }
 
     /// @dev The code-length pre-check is load-bearing: for a codeless address
@@ -835,10 +844,13 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         id, so the values survive a handler rollover and are read by
     ///         every build under the id, including the build a position is
     ///         pinned to. Handlers without parameters revert
-    ///         `ConfigureNotSupported`.
+    ///         `ConfigureNotSupported`. Refused while opens are disabled for
+    ///         the id, so a freshly registered build's code never runs before
+    ///         the pauser has activated it.
     function configureHandler(uint8 protocol, bytes calldata data) external onlyRole(DEFAULT_ADMIN_ROLE) {
         address handler = yieldHandlers[protocol];
         if (handler == address(0)) revert HandlerNotSet();
+        if (!protocolEnabledForOpen[protocol]) revert ProtocolDisabled();
         _delegateToHandler(handler, abi.encodeCall(IYieldHandler.configure, (data)));
         emit HandlerConfigured(protocol, handler, data);
     }

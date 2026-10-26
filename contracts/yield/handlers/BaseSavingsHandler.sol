@@ -69,11 +69,11 @@ abstract contract BaseSavingsHandler is IYieldHandler, YieldStorage, SavingsStor
     ///         50 bps covers the observed Chainlink lag behind the SSR oracle
     ///         (a few bps) with room to spare.
     uint16 public immutable DEFAULT_MAX_TOLERANCE_BPS;
-    /// @notice Share of the venue's live exit liquidity the whole book may
+    /// @notice Share of the venue's live exit liquidity a single deposit may
     ///         reach until the admin sets one through `configure`. A rail
-    ///         against a backend bug, not the liquidity policy: the deposit
-    ///         itself lands in the venue, so until the venue sweeps it the
-    ///         next deposit sees it as headroom.
+    ///         against a backend bug, not the liquidity policy: the fleet-wide
+    ///         book is the backend's to cap, because this contract cannot see
+    ///         shares a Safe redeemed around the module.
     uint16 public immutable DEFAULT_MAX_EXPOSURE_BPS;
 
     /// @dev Own deployment address, captured at construction to enforce
@@ -141,21 +141,21 @@ abstract contract BaseSavingsHandler is IYieldHandler, YieldStorage, SavingsStor
         IERC20 _usdc,
         ISavingsRateProvider _rateProvider,
         IERC20 _sourceShareToken,
-        uint16 _maxToleranceBps,
-        uint16 _maxExposureBps
+        uint16 _defaultMaxToleranceBps,
+        uint16 _defaultMaxExposureBps
     ) {
         if (address(_usdc) == address(0)) revert ZeroAddress();
         if (address(_rateProvider) == address(0)) revert ZeroAddress();
         if (address(_sourceShareToken) == address(0)) revert ZeroAddress();
         if (_rateProvider.shareToken() != address(_sourceShareToken)) revert InvalidConfig();
         _rateProvider.rate(address(_sourceShareToken));
-        _requireConfigBounds(_maxToleranceBps, _maxExposureBps);
+        _requireConfigBounds(_defaultMaxToleranceBps, _defaultMaxExposureBps);
 
         PROTOCOL = _protocol;
         USDC = _usdc;
         RATE_PROVIDER = _rateProvider;
-        DEFAULT_MAX_TOLERANCE_BPS = _maxToleranceBps;
-        DEFAULT_MAX_EXPOSURE_BPS = _maxExposureBps;
+        DEFAULT_MAX_TOLERANCE_BPS = _defaultMaxToleranceBps;
+        DEFAULT_MAX_EXPOSURE_BPS = _defaultMaxExposureBps;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -218,7 +218,7 @@ abstract contract BaseSavingsHandler is IYieldHandler, YieldStorage, SavingsStor
 
         uint256 rate = _rate();
         uint256 minShares = _minSharesOut(p.usdcAmount, rate, p.slippageBps);
-        _requireExposureHeadroom($, p.usdcAmount, rate);
+        _requireExposureHeadroom(p.usdcAmount);
 
         IERC20 shares = _shareToken();
         uint256 sharesBefore = shares.balanceOf(p.onBehalfOf);
@@ -435,13 +435,14 @@ abstract contract BaseSavingsHandler is IYieldHandler, YieldStorage, SavingsStor
         return floor > callerMin ? floor : callerMin;
     }
 
-    /// @dev Caps what the whole book could need to exit at what the venue can
-    ///      pay right now.
-    function _requireExposureHeadroom(SavingsLayout storage $, uint256 usdc6, uint256 rate) internal view {
+    /// @dev Caps one deposit at what the venue can pay out right now. A cap on
+    ///      the tracked book was dropped on purpose: a Safe can redeem its
+    ///      shares around the module and leave its record behind, so a counter
+    ///      of tracked shares is an upper bound anyone can inflate at no cost
+    ///      and use to block every other deposit.
+    function _requireExposureHeadroom(uint256 usdc6) internal view {
         uint256 available = _liquidityAvailable();
-        uint256 tracked = Math.mulDiv($.totalShares[PROTOCOL], rate, SHARES_TIMES_RATE_TO_USDC);
-        uint256 need = tracked + usdc6;
-        if (need > Math.mulDiv(available, _maxExposureBps(), BPS)) revert ExposureCapExceeded(need, available);
+        if (usdc6 > Math.mulDiv(available, _maxExposureBps(), BPS)) revert ExposureCapExceeded(usdc6, available);
     }
 
     /// @dev Tracked shares for a position, lowered to the Safe's balance when

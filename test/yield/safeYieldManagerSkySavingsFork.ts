@@ -386,6 +386,7 @@ describe("SafeYieldManager + Sky savings - integration (Base fork)", function ()
         // shares than PSM3 pays; the redeem floor sits below what it pays.
         const low = await f.deployOffsetBuild(-40);
         await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, await low.getAddress()])).wait();
+        await (await manager.connect(f.pauser).setProtocolEnabledForOpen(SKY, true)).wait();
         await expect(open(f, safeAddr, { slippageBps: 1 })).to.be.revertedWith("PSM3/amountOut-too-low");
         await (await open(f, safeAddr, { slippageBps: MAX_TOLERANCE_BPS })).wait();
         await expect(close(f, safeAddr, { minUsdcOut: AMOUNT * 2n })).to.be.revertedWith("PSM3/amountOut-too-low");
@@ -396,6 +397,7 @@ describe("SafeYieldManager + Sky savings - integration (Base fork)", function ()
         // the redeem floor is above what PSM3 pays until the tolerance covers it.
         const high = await f.deployOffsetBuild(40);
         await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, await high.getAddress()])).wait();
+        await (await manager.connect(f.pauser).setProtocolEnabledForOpen(SKY, true)).wait();
         await (await open(f, safeAddr, { slippageBps: 1 })).wait();
         await expect(close(f, safeAddr, { slippageBps: 1 })).to.be.revertedWith("PSM3/amountOut-too-low");
         await (await close(f, safeAddr, { slippageBps: MAX_TOLERANCE_BPS })).wait();
@@ -436,6 +438,7 @@ describe("SafeYieldManager + Sky savings - integration (Base fork)", function ()
         const pocket = await usdc.balanceOf(await psm3.pocket());
         const thin = await f.deployBuild(1);
         await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, await thin.getAddress()])).wait();
+        await (await manager.connect(f.pauser).setProtocolEnabledForOpen(SKY, true)).wait();
         const cap = pocket / 10_000n;
         await expect(open(f, safeAddr, { usdcAmount: cap + 1n }))
             .to.be.revertedWithCustomError(thin, "ExposureCapExceeded")
@@ -453,6 +456,7 @@ describe("SafeYieldManager + Sky savings - integration (Base fork)", function ()
         const build2 = await f.deployBuild();
         const build2Addr = await build2.getAddress();
         await (await timelockCall(timelock, manager, "setYieldHandler", [SKY, build2Addr])).wait();
+        await (await manager.connect(f.pauser).setProtocolEnabledForOpen(SKY, true)).wait();
         const usdcBefore = await usdc.balanceOf(safeAddr);
         const venueSharesBefore = await susds.balanceOf(PSM3_ADDR);
 

@@ -658,6 +658,8 @@ describe("SafeYieldManager", function () {
             await (
                 await timelockCall(timelock, manager, "setYieldHandler", [UNISWAP_V3, await newHandler.getAddress()])
             ).wait();
+            expect(await manager.protocolEnabledForOpen(UNISWAP_V3)).to.equal(false);
+            expect(await manager.protocolEnabledForClose(UNISWAP_V3)).to.equal(true);
 
             expect(await manager.positionHandlerOf(UNISWAP_V3, 1)).to.equal(pinnedHandler);
             await (await uniRouter.setOutput(600_000n)).wait();

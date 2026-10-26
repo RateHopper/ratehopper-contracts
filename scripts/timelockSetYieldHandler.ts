@@ -11,11 +11,15 @@ import { deployedManagerAddress } from "./lpSafeShared";
  *   2. wait `getMinDelay()` (48 h on Base)
  *   3. execute (EXECUTOR_ROLE)
  *
- * The manager only checks that the handler has code and that its `PROTOCOL()`
- * matches; it does NOT touch the protocol switches. A first registration under a
- * new id therefore starts with open and close disabled (the pauser enables
- * them), a replacement build under a live id keeps them as they are and existing
- * positions stay pinned to the old build until `switchPosition(id, id)`.
+ * The manager checks that the handler has code and that its `PROTOCOL()`
+ * matches, then turns opens for the id OFF: a first registration starts with
+ * both switches off, a replacement build keeps closes on but needs the pauser
+ * to re-enable opens before any entry, rollover or configureHandler reaches it.
+ * Existing positions stay pinned to the old build until `switchPosition(id, id)`.
+ *
+ * Only a manager deployed from this API generation can register a handler built
+ * from it (the manager delegatecalls `open`/`close`/... by selector); the script
+ * probes `configureHandler` and refuses a pre-rename manager.
  *
  * Usage:
  *   STEP 1 - schedule:
@@ -26,16 +30,23 @@ import { deployedManagerAddress } from "./lpSafeShared";
  *   EXECUTE=true OPERATION_ID="..." TIMELOCK_ADDRESS=0x... PROTOCOL_ID=3 HANDLER_ADDRESS=0x... \
  *   npx hardhat run scripts/timelockSetYieldHandler.ts --network base
  *
- * MANAGER_ADDRESS defaults to the Ignition journal selected by IGNITION_DEPLOYMENT_ID.
+ * MANAGER_ADDRESS, or IGNITION_DEPLOYMENT_ID naming the journal to read it from, is
+ * required; there is no silent default journal.
  */
 
 async function main() {
     const [signer] = await ethers.getSigners();
 
     const TIMELOCK_ADDRESS = process.env.TIMELOCK_ADDRESS || "";
+    if (!process.env.MANAGER_ADDRESS && !process.env.IGNITION_DEPLOYMENT_ID) {
+        throw new Error(
+            "Set MANAGER_ADDRESS, or IGNITION_DEPLOYMENT_ID to read the manager from that Ignition journal",
+        );
+    }
     const MANAGER_ADDRESS = process.env.MANAGER_ADDRESS || deployedManagerAddress();
     const HANDLER_ADDRESS = process.env.HANDLER_ADDRESS || "";
-    const PROTOCOL_ID = Number(process.env.PROTOCOL_ID ?? NaN);
+    const rawProtocolId = (process.env.PROTOCOL_ID ?? "").trim();
+    const PROTOCOL_ID = rawProtocolId === "" ? NaN : Number(rawProtocolId);
     const EXECUTE = process.env.EXECUTE === "true";
     const OPERATION_ID = process.env.OPERATION_ID || `set-yield-handler-${PROTOCOL_ID}-${Date.now()}`;
 
@@ -60,6 +71,48 @@ async function main() {
         throw new Error(
             `Manager ${MANAGER_ADDRESS} is governed by ${await manager.timelock()}, not ${TIMELOCK_ADDRESS}`,
         );
+    }
+    // A pre-rename manager has no configureHandler: the probe reverts with empty
+    // data, while a current manager answers with one of its own custom errors.
+    try {
+        await ethers.provider.call({
+            to: MANAGER_ADDRESS,
+            from: signer.address,
+            data: manager.interface.encodeFunctionData("configureHandler", [PROTOCOL_ID, "0x"]),
+        });
+    } catch (error: any) {
+        const revertData: string = error?.data ?? error?.error?.data ?? "0x";
+        if (!revertData || revertData === "0x") {
+            throw new Error(
+                `Manager ${MANAGER_ADDRESS} does not speak this API generation (no configureHandler); a handler built from this branch cannot run on it. Deploy a new manager with ignition/modules/2_DeployYieldManager.ts instead.`,
+            );
+        }
+    }
+    console.log("Handler immutables (compare against the deployment plan):");
+    for (const name of [
+        "PSM3",
+        "SUSDS",
+        "RATE_PROVIDER",
+        "REFERRAL_CODE",
+        "DEFAULT_MAX_TOLERANCE_BPS",
+        "DEFAULT_MAX_EXPOSURE_BPS",
+        "POSITION_MANAGER",
+        "SWAP_ROUTER",
+    ]) {
+        try {
+            const probe = new ethers.Contract(
+                HANDLER_ADDRESS,
+                [`function ${name}() view returns (uint256)`],
+                ethers.provider,
+            );
+            const value: bigint = await probe[name]();
+            console.log(
+                `- ${name}:`,
+                value < 2n ** 160n && value > 2n ** 64n ? ethers.toBeHex(value, 20) : value.toString(),
+            );
+        } catch {
+            // not every handler exposes every immutable
+        }
     }
 
     const currentHandler = await manager.yieldHandlers(PROTOCOL_ID);
@@ -102,7 +155,8 @@ async function main() {
         );
         console.log(`   HANDLER_ADDRESS=${HANDLER_ADDRESS} MANAGER_ADDRESS=${MANAGER_ADDRESS} \\`);
         console.log("   npx hardhat run scripts/timelockSetYieldHandler.ts --network base");
-        console.log("2. Pauser: setProtocolEnabledForClose then setProtocolEnabledForOpen (first registration only).");
+        console.log("2. Pauser: setProtocolEnabledForOpen(id, true) (opens are OFF after every registration; a first");
+        console.log("   registration also needs setProtocolEnabledForClose(id, true)).");
         console.log(
             "3. Admin: scripts/setPoolParamAllowed.ts per pool param; scripts/configureSavingsHandler.ts if needed.",
         );

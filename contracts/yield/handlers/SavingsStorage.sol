@@ -21,8 +21,9 @@ abstract contract SavingsStorage {
         /// @dev Share-token units deposited for a position, net of
         ///      redemptions. `tokenId` is the Safe address as a uint256.
         mapping(uint8 protocolId => mapping(uint256 tokenId => uint256)) sharesOf;
-        /// @dev Sum of `sharesOf` across all positions of a protocol; the
-        ///      exposure rail reads it.
+        /// @dev Sum of `sharesOf` across all positions of a protocol, kept for
+        ///      reconciliation (`savingsTotalSharesSlot`). Not a measure of the
+        ///      live book: a Safe can redeem around the module.
         mapping(uint8 protocolId => uint256) totalShares;
         /// @dev Admin-tuned ceilings (`configure`); zero means unset, the
         ///      build's constructor defaults apply.

@@ -315,11 +315,11 @@ contract MockSavingsSource is BaseSavingsHandler {
     constructor(
         IERC20 _usdc,
         ISavingsRateProvider _rateProvider,
-        uint16 _maxToleranceBps,
-        uint16 _maxExposureBps,
+        uint16 _defaultMaxToleranceBps,
+        uint16 _defaultMaxExposureBps,
         MockSavingsVenue _venue,
         IERC20 _share
-    ) BaseSavingsHandler(250, _usdc, _rateProvider, _share, _maxToleranceBps, _maxExposureBps) {
+    ) BaseSavingsHandler(250, _usdc, _rateProvider, _share, _defaultMaxToleranceBps, _defaultMaxExposureBps) {
         VENUE = _venue;
         SHARE = _share;
     }

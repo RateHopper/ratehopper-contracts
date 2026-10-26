@@ -40,12 +40,21 @@ contract SkySavingsYieldHandler is BaseSavingsHandler {
     constructor(
         IERC20 _usdc,
         ChainlinkSsrRateProvider _rateProvider,
-        uint16 _maxToleranceBps,
-        uint16 _maxExposureBps,
+        uint16 _defaultMaxToleranceBps,
+        uint16 _defaultMaxExposureBps,
         ISparkPSM3 _psm3,
         IERC20 _susds,
         uint256 _referralCode
-    ) BaseSavingsHandler(YIELD_PROTOCOL_SKY_SAVINGS, _usdc, _rateProvider, _susds, _maxToleranceBps, _maxExposureBps) {
+    )
+        BaseSavingsHandler(
+            YIELD_PROTOCOL_SKY_SAVINGS,
+            _usdc,
+            _rateProvider,
+            _susds,
+            _defaultMaxToleranceBps,
+            _defaultMaxExposureBps
+        )
+    {
         if (address(_psm3) == address(0)) revert ZeroAddress();
         if (_psm3.usdc() != address(_usdc)) revert InvalidConfig();
         if (_psm3.susds() != address(_susds)) revert InvalidConfig();

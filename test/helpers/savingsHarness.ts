@@ -102,7 +102,12 @@ export function withdrawParams(safeAddr: string, tokenId: bigint | number, overr
     };
 }
 
-export function switchParams(safeAddr: string, tokenId: bigint | number, poolParam: string, overrides: Record<string, any> = {}) {
+export function switchParams(
+    safeAddr: string,
+    tokenId: bigint | number,
+    poolParam: string,
+    overrides: Record<string, any> = {},
+) {
     return {
         onBehalfOf: safeAddr,
         tokenId,
@@ -132,7 +137,14 @@ export function collectParams(safeAddr: string, tokenId: bigint | number) {
     };
 }
 
-export function inKindParams(safeAddr: string, poolParam: string, token0: string, token1: string, amount0: bigint, amount1: bigint) {
+export function inKindParams(
+    safeAddr: string,
+    poolParam: string,
+    token0: string,
+    token1: string,
+    amount0: bigint,
+    amount1: bigint,
+) {
     return {
         onBehalfOf: safeAddr,
         token0,
@@ -415,6 +427,7 @@ export type SourceSpec = {
     breakPricing: (f: Harness) => Promise<void>;
     breakVenue: (f: Harness) => Promise<void>;
     deployBuild: (f: Harness, exposureBps?: number) => Promise<string>;
+    redeemDirect: (f: Harness, safe: any, shares: bigint) => Promise<any>;
     steps: { deposit: number; redeem: number };
     tooLow: { deposit: string; redeem: string };
 };
@@ -437,6 +450,8 @@ export const SKY_SRC: SourceSpec = {
         await (await f.ssr.setReverting(true)).wait();
     },
     breakVenue: async (f) => void (await (await f.psm3.setReverting(true)).wait()),
+    redeemDirect: (f, safe, shares) =>
+        f.psm3.connect(safe).swapExactIn(f.susdsAddr, f.usdcAddr, shares, 0, safe.address, 0),
     deployBuild: async (f, exposureBps = MAX_EXPOSURE_BPS) => {
         const build = await f.Handler.deploy(
             f.usdcAddr,
@@ -469,6 +484,7 @@ export const MOCK_SRC: SourceSpec = {
     },
     breakPricing: async (f) => void (await (await f.mockProvider.setReverting(true)).wait()),
     breakVenue: async (f) => void (await (await f.mockVenue.setReverting(true)).wait()),
+    redeemDirect: (f, safe, shares) => f.mockVenue.connect(safe).redeem(shares, 0, safe.address),
     deployBuild: async (f, exposureBps = MAX_EXPOSURE_BPS) => {
         const build = await f.MockSource.deploy(
             f.usdcAddr,
@@ -494,6 +510,11 @@ export async function registerSource(f: Harness, src: SourceSpec, handlerAddr = 
     await (await f.manager.connect(f.deployer).setPoolParamAllowed(src.protocol, src.param(f), true)).wait();
 }
 
+export async function registerBuild(f: Harness, src: SourceSpec, build: string) {
+    await (await timelockCall(f.timelock, f.manager, "setYieldHandler", [src.protocol, build])).wait();
+    await (await f.manager.connect(f.pauser).setProtocolEnabledForOpen(src.protocol, true)).wait();
+}
+
 export async function deployRegistered() {
     const f = await deploySavingsHarness();
     for (const src of SOURCES) await registerSource(f, src);
@@ -505,9 +526,7 @@ export function open(f: Harness, src: SourceSpec, safeAddr = f.safeAddr, overrid
 }
 
 export function close(f: Harness, src: SourceSpec, safeAddr = f.safeAddr, overrides: Record<string, any> = {}) {
-    return f.manager
-        .connect(f.operatorEOA)
-        .close(src.protocol, closeParams(safeAddr, tokenIdOf(safeAddr), overrides));
+    return f.manager.connect(f.operatorEOA).close(src.protocol, closeParams(safeAddr, tokenIdOf(safeAddr), overrides));
 }
 
 export function withdraw(f: Harness, src: SourceSpec, safeAddr = f.safeAddr, overrides: Record<string, any> = {}) {
