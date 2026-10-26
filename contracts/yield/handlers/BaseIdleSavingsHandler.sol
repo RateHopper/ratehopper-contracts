@@ -7,7 +7,7 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../../interfaces/safe/ISafe.sol";
 import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, WithdrawLpParams, OpenLpInKindParams} from "../../interfaces/IYieldHandler.sol";
-import {IIdleSavingsRateProvider} from "../idleSavings/IIdleSavingsRateProvider.sol";
+import {IIdleSavingsRateProvider} from "../../interfaces/IIdleSavingsRateProvider.sol";
 import {TokenReturnLib} from "../libraries/TokenReturnLib.sol";
 import {YieldStorage} from "./YieldStorage.sol";
 import {IdleSavingsStorage} from "./IdleSavingsStorage.sol";

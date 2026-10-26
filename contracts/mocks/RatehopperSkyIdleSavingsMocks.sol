@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISSRRateProvider} from "../interfaces/spark/ISSRRateProvider.sol";
-import {IIdleSavingsRateProvider} from "../yield/idleSavings/IIdleSavingsRateProvider.sol";
+import {IIdleSavingsRateProvider} from "../interfaces/IIdleSavingsRateProvider.sol";
 import {OpenLpInKindParams, WithdrawLpParams} from "../interfaces/IYieldHandler.sol";
 import {BaseIdleSavingsHandler} from "../yield/handlers/BaseIdleSavingsHandler.sol";
 

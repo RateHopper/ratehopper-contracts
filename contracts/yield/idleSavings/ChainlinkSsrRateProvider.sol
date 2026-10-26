@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IAggregatorV3} from "../../interfaces/chainlink/IAggregatorV3.sol";
 import {ISSRRateProvider} from "../../interfaces/spark/ISSRRateProvider.sol";
-import {IIdleSavingsRateProvider} from "./IIdleSavingsRateProvider.sol";
+import {IIdleSavingsRateProvider} from "../../interfaces/IIdleSavingsRateProvider.sol";
 
 /// @title ChainlinkSsrRateProvider
 /// @notice Price source for sUSDS: the Chainlink "sUSDS / USDS Exchange Rate"
