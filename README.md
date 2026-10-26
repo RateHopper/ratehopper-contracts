@@ -70,6 +70,8 @@ The system consists of several key components:
     - `V3StyleYieldHandler.sol` — the `BaseYieldHandler` hooks implemented once against the canonical Uniswap V3 interfaces (factory `getPool` by `uint24 feeTier`, 7-field `slot0`, SwapRouter02), with the protocol id as a constructor argument so V3-shaped protocols and tests reuse the hook bodies.
     - `UniV3YieldHandler.sol` (extends `V3StyleYieldHandler`) / `AerodromeYieldHandler.sol` (extends `BaseYieldHandler`) — concrete adapters holding protocol immutables.
     - `UniV4YieldHandler.sol` — implements `IYieldHandler` directly (the V4 singleton/actions model doesn't fit the V3-shaped hooks): pool params are the full V4 `PoolKey` tuple (`keccak256(poolParam)` IS the V4 PoolId), ERC20 sides route through two-step Permit2 approvals and UniversalRouter swaps, and native ETH pools (`currency0 == address(0)`) are supported.
+    - `BaseSavingsHandler.sol` / `SkySavingsYieldHandler.sol` (protocol id 3, `contracts/yield/handlers/`) — a savings source rather than an LP: a Safe's idle USDC goes into sUSDS through Spark PSM3 and comes back as USDC, no pool, no NFT, no swap leg. Records live in their own ERC-7201 namespace (`SavingsStorage`, `ratehopper.storage.savings`). The floor comes from the pinned `ChainlinkSsrRateProvider` (`contracts/yield/savings/`, Chainlink sUSDS/USDS vetoed by Spark's SSR oracle) instead of a TWAP (`poolTokens` reports `(USDC, USDC)`); `withdraw` releases the sUSDS in kind without reading a price. The oracle tolerance ceiling and the exposure cap are admin-tunable through `configureHandler` (`IYieldHandler.configure`), bounded by constants. See `docs/SECURITY_MODEL.md` ("Protocol 3 prices from Chainlink, not a pool").
+    - Adding a protocol: `docs/ADDING_A_YIELD_HANDLER.md`.
     - Shared mutable state lives in an ERC-7201 namespace (`YieldStorage`, `ratehopper.storage.yield`), so handler delegatecode can never collide with the manager's inherited storage. Handlers MUST NOT declare storage variables.
     - Pool selection params are ABI-encoded bytes carrying the PAIR plus the protocol key (`abi.encode(token0, token1, uint24 feeTier)` for Uniswap V3, `abi.encode(token0, token1, int24 tickSpacing)` for Aerodrome), allow-listed by `keccak256(poolParam)` — richer identifiers fit without interface changes (Uniswap V4 uses the full `PoolKey` tuple). A protocol whose mechanics don't fit `BaseYieldHandler` implements `IYieldHandler` directly.
 
@@ -217,6 +219,14 @@ SYM_UNIV3_MIN_POOL_LIQUIDITY=0     # Set independently after measuring the targe
 SYM_AERODROME_MIN_POOL_LIQUIDITY=0 # Set independently after measuring the target Slipstream pool
 SYM_UNIV4_MIN_POSITION_LIQUIDITY=10000
 SYM_UNIV4_MIN_POOL_LIQUIDITY=0     # Set independently after measuring the target V4 pool
+# Savings source (protocol 3) — defaults are the spec values; the ceilings can be
+# retuned later by the admin through configureHandler.
+SYM_SAVINGS_MAX_FEED_AGE=129600        # Oldest Chainlink round accepted (s). Default 36h
+SYM_SAVINGS_MAX_DISAGREEMENT_BPS=50    # Chainlink vs SSR oracle veto (bps). Default 50
+SYM_SAVINGS_MAX_RATE=2000000000000000000  # Ceiling on the sUSDS rate (18 dp). Default 2e18
+SYM_SAVINGS_MAX_TOLERANCE_BPS=50       # Default oracle tolerance ceiling (bps). Default 50, admin max 300
+SYM_SAVINGS_MAX_EXPOSURE_BPS=10000     # Default share of the PSM3 pocket the book may reach. Default 100%
+SYM_SAVINGS_REFERRAL_CODE=3014         # PSM3 referral code. Default 3014 (Osero)
 
 # Optional Uniswap V4 address overrides — default to the canonical Base
 # addresses in contractAddresses.ts; only set when targeting another network.

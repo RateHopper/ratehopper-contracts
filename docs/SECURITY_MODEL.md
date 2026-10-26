@@ -180,6 +180,62 @@ the pool's own two tokens, no router, no price read — and is gated only by
 measure. That does hand users a fee-free exit, which changes nothing
 economically given I-01 above.
 
+### Protocol 3 prices from Chainlink, not a pool
+
+The savings source (`SkySavingsYieldHandler`, protocol id 3) deposits a Safe's
+idle USDC into sUSDS through Spark PSM3 and redeems it the same way. There is no
+pool, no NFT and no swap leg, so the reference-TWAP rule above has nothing to
+reference: `poolTokens` reports `(USDC, USDC)` and the manager's "allow-listed
+implies a live reference" check passes trivially. The floor comes from
+somewhere else, and this subsection is where that exception is written down.
+
+**The floor is a pinned rate provider.** `ChainlinkSsrRateProvider` reads the
+Chainlink "sUSDS / USDS Exchange Rate" feed (18 decimals, 24 h heartbeat) and
+vetoes it against Spark's SSR oracle, the rate PSM3 itself prices with. It fails
+closed on a non-positive or future answer, an answer older than 36 h, an answer
+outside `[1e18, 2e18]`, an oracle that answers zero or reverts, and a
+disagreement above 50 bps. Either source alone can be wrong; both wrong in the
+same direction is the case the cross-check closes. PSM3 treats USDS and USDC as
+1:1, so the rate is also USDC per sUSDS.
+
+**Both legs floor the measured delta.** A deposit must leave at least
+`usdc / rate * (1 - tolerance)` sUSDS on the Safe, a redemption at least
+`shares * rate * (1 - tolerance)` USDC, measured as Safe balance deltas and also
+passed to PSM3 as `minAmountOut`; the caller's own `minUsdcOut` can only tighten
+the redeem floor. `slippageBps` is reused as the oracle tolerance and is bounded
+by the handler, not by the manager's `maxSlippageBps`: the default ceiling is
+50 bps (the observed Chainlink lag behind the SSR oracle is a few bps) and the
+admin may move it up to `MAX_SETTABLE_TOLERANCE_BPS` (300) through
+`configureHandler`, the same routine role as `setMaxSlippageBps`. The ceiling
+lives in the handler's namespace keyed by protocol id, so it binds every build
+under the id, including the one an open position is pinned to.
+
+**The oracle guard rails are critical, the ceiling is routine.** The feed, the
+oracle, the 36 h age, the 50 bps disagreement and the rate bounds are
+immutables of the provider, and the provider is an immutable of the handler
+build. Loosening any of them means a new build registered through
+`setYieldHandler` behind the timelock and a `switchPosition(3, 3)` rollover per
+position: the same path as repointing a TWAP reference, for the same reason.
+Only the tolerance ceiling and the exposure cap are admin-tunable, and both are
+bounded by constants.
+
+**The exposure cap is a rail, not the liquidity policy.** A deposit reverts
+`ExposureCapExceeded` when the book's tracked value plus the deposit would
+exceed `maxExposureBps` of what PSM3 can pay out right now (its USDC pocket,
+pinned at about 1.0M by Spark's ALM). The deposit itself lands in that pocket,
+so until the venue sweeps it the next deposit sees it as headroom; the rail
+catches a runaway backend, not a slow drift.
+
+**Exits never depend on the oracle or the venue.** `withdraw` releases the
+record with no Safe call and no price read; the sUSDS stays on the Safe, where
+the owner can redeem it at PSM3 or anywhere else. A full `close` with every
+share already moved out around the module reads no price either, so a record
+can be cleared while the feed is down. If PSM3's pocket is drained a redemption
+reverts inside PSM3's own USDC transfer and `withdraw` still works; if the feed
+and PSM3 are both down the same-id rollover still works, because neither leg
+touches them. The property of I-03 holds here as it does for LP positions:
+**no configuration of any role can trap a savings position.**
+
 ## M-02 — Switch residue is valued and carried, not forgotten
 
 A concentrated-liquidity mint consumes its two sides only in the ratio the
@@ -288,6 +344,9 @@ position.**
 - When disabling closes for a protocol, disable opens for it too — otherwise new
   positions enter a protocol they cannot leave through the module.
 - Every flip emits `ProtocolStatusChanged`; alert on it.
+- `configureHandler` (`DEFAULT_ADMIN_ROLE`) retunes a handler's own bounded
+  parameters (today: the savings tolerance ceiling and exposure cap); every
+  call emits `HandlerConfigured`. Alert on it like a fee change.
 
 ### Recovery
 

@@ -7,6 +7,8 @@ const contracts = {
     SafeDebtManager: "debt",
     SafeExecTransactionWrapper: "debt",
     SafeYieldManager: "yield",
+    SkySavingsYieldHandler: "yield/handlers",
+    ChainlinkSsrRateProvider: "yield/savings",
     RatehopperUniV3Positions: "legacy",
 };
 
