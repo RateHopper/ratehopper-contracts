@@ -226,6 +226,10 @@ SYM_SAVINGS_MAX_DISAGREEMENT_BPS=50    # Chainlink vs SSR oracle veto (bps). Def
 SYM_SAVINGS_MAX_RATE=2000000000000000000  # Ceiling on the sUSDS rate (18 dp). Default 2e18
 SYM_SAVINGS_MAX_TOLERANCE_BPS=50       # Default oracle tolerance ceiling (bps). Default 50, admin max 300
 SYM_SAVINGS_MAX_EXPOSURE_BPS=10000     # Default share of the PSM3 pocket the book may reach. Default 100%
+# TODO before the production deploy: decide the referral code. 3014 is Osero's and
+# only tags PSM3's Swap event (no on-chain effect); a Ratehopper-own code is issued
+# by Spark. It is an immutable on the handler build, so a later change means a new
+# build through the timelocked rollover.
 SYM_SAVINGS_REFERRAL_CODE=3014         # PSM3 referral code. Default 3014 (Osero)
 
 # Optional Uniswap V4 address overrides — default to the canonical Base

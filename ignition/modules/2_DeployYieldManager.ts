@@ -131,6 +131,9 @@ const TWAP_SEEDS = [
  *  - SYM_SAVINGS_MAX_EXPOSURE_BPS:    Default share of the PSM3 pocket the book may
  *                                     reach. Default 10000 (admin retunes likewise).
  *  - SYM_SAVINGS_REFERRAL_CODE:       PSM3 referral code. Default 3014 (Osero).
+ *                                     TODO before the production deploy: keep Osero's
+ *                                     code or use one Spark issues to Ratehopper
+ *                                     (attribution only, immutable on the handler build).
  *
  * Usage:
  *   npx hardhat ignition deploy ignition/modules/2_DeployYieldManager.ts \
