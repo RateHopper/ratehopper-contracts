@@ -13,12 +13,12 @@
             },
             {
                 "internalType": "uint16",
-                "name": "_maxToleranceBps",
+                "name": "_defaultMaxToleranceBps",
                 "type": "uint16"
             },
             {
                 "internalType": "uint16",
-                "name": "_maxExposureBps",
+                "name": "_defaultMaxExposureBps",
                 "type": "uint16"
             },
             {
