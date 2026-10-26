@@ -131,7 +131,7 @@ interface IYieldHandler {
     ///         `open` on the registry token whitelist. For Uniswap V4
     ///         `token0` may be address(0) — the native-ETH currency sentinel.
     ///         `view` rather than `pure` so a handler whose pair is fixed by
-    ///         its immutables (an idle savings source reports `(USDC, USDC)`)
+    ///         its immutables (an savings source reports `(USDC, USDC)`)
     ///         can answer; LP handlers still implement it as `pure`.
     function poolTokens(bytes calldata poolParam) external view returns (address token0, address token1);
 
@@ -178,4 +178,12 @@ interface IYieldHandler {
     ) external returns (uint256 tokenId, uint128 used0, uint128 used1);
 
     function collect(CollectParams calldata params) external;
+
+    /// @notice Routine tuning of the handler's own parameters, reached only
+    ///         through `SafeYieldManager.configureHandler` (admin role,
+    ///         delegatecall, so the values land in the handler's namespace on
+    ///         the manager and apply to every build under the protocol id).
+    ///         The handler decodes, bounds and stores `data` itself; a handler
+    ///         with nothing to tune reverts `ConfigureNotSupported`.
+    function configure(bytes calldata data) external;
 }

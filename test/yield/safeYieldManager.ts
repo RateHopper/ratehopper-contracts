@@ -1065,6 +1065,24 @@ describe("SafeYieldManager", function () {
             ).to.be.revertedWithCustomError(manager, "InvalidHandler");
         });
 
+        it("configureHandler is admin-only, needs a registered handler and is refused by LP handlers", async function () {
+            const { manager, deployer, stranger, uniHandler } = await loadFixture(deployYieldManagerHarness);
+            const data = ethers.AbiCoder.defaultAbiCoder().encode(["uint16", "uint16"], [100, 5_000]);
+            await expect(manager.connect(stranger).configureHandler(UNISWAP_V3, data)).to.be.revertedWithCustomError(
+                manager,
+                "AccessControlUnauthorizedAccount",
+            );
+            await expect(manager.connect(deployer).configureHandler(99, data)).to.be.revertedWithCustomError(
+                manager,
+                "HandlerNotSet",
+            );
+            await expect(manager.connect(deployer).configureHandler(UNISWAP_V3, data)).to.be.revertedWithCustomError(
+                uniHandler,
+                "ConfigureNotSupported",
+            );
+            await expect(uniHandler.configure(data)).to.be.revertedWithCustomError(uniHandler, "OnlyDelegatecall");
+        });
+
         it("admin setters enforce role and bounds", async function () {
             const { manager, deployer, stranger } = await loadFixture(deployYieldManagerHarness);
             await expect(manager.connect(stranger).setMaxSlippageBps(500)).to.be.revertedWithCustomError(

@@ -4,7 +4,7 @@ import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Unit suite for ChainlinkSsrRateProvider: the sUSDS price source behind
-//  the idle savings handler. Every revert path, the 36h staleness boundary,
+//  the savings handler. Every revert path, the 36h staleness boundary,
 //  the 50 bps oracle-disagreement boundary, and the deprecated-field rules
 //  (answeredInRound and roundId are ignored; only updatedAt governs age).
 // ─────────────────────────────────────────────────────────────────────────

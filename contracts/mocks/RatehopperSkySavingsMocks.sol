@@ -3,13 +3,13 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISSRRateProvider} from "../interfaces/spark/ISSRRateProvider.sol";
-import {IIdleSavingsRateProvider} from "../interfaces/IIdleSavingsRateProvider.sol";
+import {ISavingsRateProvider} from "../interfaces/ISavingsRateProvider.sol";
 import {OpenInKindParams, WithdrawParams} from "../interfaces/IYieldHandler.sol";
-import {BaseIdleSavingsHandler} from "../yield/handlers/BaseIdleSavingsHandler.sol";
+import {BaseSavingsHandler} from "../yield/handlers/BaseSavingsHandler.sol";
 
 // ─────────────────────────────────────────────────────────────────────────
-//  Mocks for the idle savings handler stack (BaseIdleSavingsHandler,
-//  SkyIdleSavingsYieldHandler, ChainlinkSsrRateProvider) unit and invariant
+//  Mocks for the savings handler stack (BaseSavingsHandler,
+//  SkySavingsYieldHandler, ChainlinkSsrRateProvider) unit and invariant
 //  suites. They let the full deposit / redeem / rollover lifecycle and every
 //  defensive revert branch run deterministically without Base, PSM3 or the
 //  live oracles. TEST-ONLY, never deployed.
@@ -76,7 +76,7 @@ contract MockRateProbe {
     event Rate(uint256 rate);
 
     function read(address provider, address token) external {
-        emit Rate(IIdleSavingsRateProvider(provider).rate(token));
+        emit Rate(ISavingsRateProvider(provider).rate(token));
     }
 }
 
@@ -223,9 +223,9 @@ contract MockUnderAdoptingYieldHandler {
     }
 }
 
-/// @notice Rate provider with no oracle logic, for proving BaseIdleSavingsHandler
+/// @notice Rate provider with no oracle logic, for proving BaseSavingsHandler
 ///         behaviour in isolation from ChainlinkSsrRateProvider.
-contract MockIdleSavingsRateProvider is IIdleSavingsRateProvider {
+contract MockSavingsRateProvider is ISavingsRateProvider {
     address public immutable token;
     uint256 public rate18;
     bool public reverting;
@@ -259,11 +259,11 @@ interface IMintableShare {
     function mint(address to, uint256 amount) external;
 }
 
-/// @notice A trivial idle savings venue: deposit mints shares at a settable
+/// @notice A trivial savings venue: deposit mints shares at a settable
 ///         rate, redeem pays USDC at that rate and can be told to short-pay
 ///         (ignoring the minimum, the way a vault with a withdrawal fee might)
 ///         or to revert.
-contract MockIdleSavingsVenue {
+contract MockSavingsVenue {
     IERC20 public immutable usdc;
     IERC20 public immutable share;
     uint256 public rate18;
@@ -305,21 +305,21 @@ contract MockIdleSavingsVenue {
     }
 }
 
-/// @notice A second concrete idle savings source (protocol id 250) over the
+/// @notice A second concrete savings source (protocol id 250) over the
 ///         mock venue, proving the base is generic: every base case runs
 ///         against it as well as against the Sky source. Step codes 90 to 95.
-contract MockIdleSavingsSource is BaseIdleSavingsHandler {
-    MockIdleSavingsVenue public immutable VENUE;
+contract MockSavingsSource is BaseSavingsHandler {
+    MockSavingsVenue public immutable VENUE;
     IERC20 public immutable SHARE;
 
     constructor(
         IERC20 _usdc,
-        IIdleSavingsRateProvider _rateProvider,
+        ISavingsRateProvider _rateProvider,
         uint16 _maxToleranceBps,
         uint16 _maxExposureBps,
-        MockIdleSavingsVenue _venue,
+        MockSavingsVenue _venue,
         IERC20 _share
-    ) BaseIdleSavingsHandler(250, _usdc, _rateProvider, _share, _maxToleranceBps, _maxExposureBps) {
+    ) BaseSavingsHandler(250, _usdc, _rateProvider, _share, _maxToleranceBps, _maxExposureBps) {
         VENUE = _venue;
         SHARE = _share;
     }
@@ -335,13 +335,13 @@ contract MockIdleSavingsSource is BaseIdleSavingsHandler {
 
     function _depositUsdc(address safe, uint256 usdc6, uint256 minShares) internal override {
         _safeApprove(safe, address(USDC), address(VENUE), usdc6, 90);
-        _safeExec(safe, address(VENUE), abi.encodeCall(MockIdleSavingsVenue.deposit, (usdc6, minShares, safe)), 91);
+        _safeExec(safe, address(VENUE), abi.encodeCall(MockSavingsVenue.deposit, (usdc6, minShares, safe)), 91);
         _safeApprove(safe, address(USDC), address(VENUE), 0, 92);
     }
 
     function _redeemShares(address safe, uint256 shares, uint256 minUsdc6) internal override {
         _safeApprove(safe, address(SHARE), address(VENUE), shares, 93);
-        _safeExec(safe, address(VENUE), abi.encodeCall(MockIdleSavingsVenue.redeem, (shares, minUsdc6, safe)), 94);
+        _safeExec(safe, address(VENUE), abi.encodeCall(MockSavingsVenue.redeem, (shares, minUsdc6, safe)), 94);
         _safeApprove(safe, address(SHARE), address(VENUE), 0, 95);
     }
 
@@ -352,7 +352,7 @@ contract MockIdleSavingsSource is BaseIdleSavingsHandler {
 
 /// @notice A "from" handler for switchPosition whose withdraw leg hands the open
 ///         leg a fixed `(token0, token1, amount0, amount1)` without moving
-///         anything, so every operand of the idle savings in-kind shape check
+///         anything, so every operand of the savings in-kind shape check
 ///         can be reached through the manager. Immutables only: it runs via
 ///         delegatecall and must not touch storage.
 contract MockInKindFeederYieldHandler {

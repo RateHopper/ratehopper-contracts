@@ -65,7 +65,7 @@ export const UNIVERSAL_ROUTER_ADDRESS = "0x6fF5693b99212Da76ad316178A184AB56D299
 // PositionManager.permit2()), NOT the older 0x...72F4d96f8 address.
 export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 
-// Spark PSM3 and the oracles behind the sUSDS idle savings handler (protocol
+// Spark PSM3 and the oracles behind the sUSDS savings handler (protocol
 // 3). PSM3's pocket is the PSM itself and its rateProvider is the SSR oracle;
 // the Chainlink feed is the 18-decimal "sUSDS / USDS Exchange Rate" custom
 // feed (24h heartbeat). Verified on-chain 2026-10-23.
@@ -119,7 +119,7 @@ export enum YieldProtocol {
     UNISWAP_V3,
     AERODROME,
     UNISWAP_V4,
-    SKY_IDLE_SAVINGS,
+    SKY_SAVINGS,
 }
 
 // SafeYieldManager pool params carry the pair: abi.encode(token0, token1, key).
@@ -150,10 +150,10 @@ export function encodeUniV4PoolParam(
     );
 }
 
-// Idle savings pool param pins the venue and the share token:
+// Savings pool param pins the venue and the share token:
 // abi.encode(psm3, susds). The handler reverts WrongPoolParam for anything
 // but its own immutables, so the allow-list is a kill switch, not a selector.
-export function encodeSkyIdleSavingsPoolParam(psm3: string, susds: string): string {
+export function encodeSkySavingsPoolParam(psm3: string, susds: string): string {
     return AbiCoder.defaultAbiCoder().encode(["address", "address"], [psm3, susds]);
 }
 

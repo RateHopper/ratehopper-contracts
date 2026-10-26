@@ -422,6 +422,16 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             ).to.be.revertedWithCustomError(v4Handler, "OnlyDelegatecall");
         });
 
+        it("has nothing to configure", async function () {
+            const f = await loadFixture(deployUniV4Harness);
+            const data = ethers.AbiCoder.defaultAbiCoder().encode(["uint16", "uint16"], [100, 5_000]);
+            await expect(f.manager.connect(f.deployer).configureHandler(UNISWAP_V4, data)).to.be.revertedWithCustomError(
+                f.v4Handler,
+                "ConfigureNotSupported",
+            );
+            await expect(f.v4Handler.configure(data)).to.be.revertedWithCustomError(f.v4Handler, "OnlyDelegatecall");
+        });
+
         it("admits a hooked pool key only through the timelock", async function () {
             const f = await loadFixture(deployUniV4Harness);
             const hooked = encodeUniV4PoolParam(f.wethAddr, f.usdcAddr, 500, 10, f.safeAddr);

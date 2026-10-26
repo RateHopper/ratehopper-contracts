@@ -2,10 +2,10 @@ import { expect } from "chai";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import * as fs from "fs";
 import * as path from "path";
-import { ONE, SOURCES, USDC, close, deployRegistered, expectZeroResidue, open, withdraw } from "../helpers/idleSavingsHarness";
+import { ONE, SOURCES, USDC, close, deployRegistered, expectZeroResidue, open, withdraw } from "../helpers/savingsHarness";
 
 // ─────────────────────────────────────────────────────────────────────────
-//  Source rules for idle savings handlers (spec 14.1). Inside a delegatecall
+//  Source rules for savings handlers (spec 14.1). Inside a delegatecall
 //  `address(this)` is the manager, so any token transfer written in a
 //  handler would move the manager's tokens: every movement must be a
 //  module call on the Safe, the manager namespace is read-only, every
@@ -14,15 +14,15 @@ import { ONE, SOURCES, USDC, close, deployRegistered, expectZeroResidue, open, w
 // ─────────────────────────────────────────────────────────────────────────
 
 const HANDLERS_DIR = path.join(__dirname, "..", "..", "contracts", "yield", "handlers");
-const BASE = "BaseIdleSavingsHandler.sol";
-const ENTRY_POINTS = ["open", "close", "withdraw", "openInKind", "collect"];
+const BASE = "BaseSavingsHandler.sol";
+const ENTRY_POINTS = ["open", "close", "withdraw", "openInKind", "collect", "configure"];
 
 function sourceFiles(): string[] {
-    const sources = fs.readdirSync(HANDLERS_DIR).filter((name) => name.endsWith("IdleSavingsYieldHandler.sol"));
+    const sources = fs.readdirSync(HANDLERS_DIR).filter((name) => name.endsWith("SavingsYieldHandler.sol"));
     return [BASE, ...sources];
 }
 
-describe("idle savings source rules", function () {
+describe("savings source rules", function () {
     it("covers the base and at least one concrete source", function () {
         expect(sourceFiles().length).to.be.greaterThanOrEqual(2);
     });

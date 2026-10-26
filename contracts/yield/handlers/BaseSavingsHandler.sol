@@ -7,13 +7,13 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../../interfaces/safe/ISafe.sol";
 import {IYieldHandler, OpenParams, CloseParams, CollectParams, WithdrawParams, OpenInKindParams} from "../../interfaces/IYieldHandler.sol";
-import {IIdleSavingsRateProvider} from "../../interfaces/IIdleSavingsRateProvider.sol";
+import {ISavingsRateProvider} from "../../interfaces/ISavingsRateProvider.sol";
 import {TokenReturnLib} from "../libraries/TokenReturnLib.sol";
 import {YieldStorage} from "./YieldStorage.sol";
-import {IdleSavingsStorage} from "./IdleSavingsStorage.sol";
+import {SavingsStorage} from "./SavingsStorage.sol";
 
-/// @title BaseIdleSavingsHandler
-/// @notice Shared flow for idle savings sources: a Safe's idle USDC goes into
+/// @title BaseSavingsHandler
+/// @notice Shared flow for savings sources: a Safe's idle USDC goes into
 ///         a yield-bearing share token (sUSDS through Spark PSM3, later an
 ///         ERC-4626 vault) and comes back as USDC. Implements IYieldHandler
 ///         directly, not through BaseYieldHandler: there is no pool, no NFT
@@ -30,8 +30,9 @@ import {IdleSavingsStorage} from "./IdleSavingsStorage.sol";
 ///         token with no deep pool, so `poolTokens` reports `(USDC, USDC)` and
 ///         the manager skips the reference requirement. The price floor comes
 ///         from `RATE_PROVIDER` instead, pinned per build, and `slippageBps`
-///         is reused as the oracle tolerance (bounded by `MAX_TOLERANCE_BPS`,
-///         not by the manager's `maxSlippageBps`). The base never trusts what
+///         is reused as the oracle tolerance (bounded by the ceiling the admin
+///         tunes through `configure`, not by the manager's `maxSlippageBps`).
+///         The base never trusts what
 ///         a hook claims: deposits and redemptions are measured as Safe
 ///         balance deltas and checked against the floor here.
 ///
@@ -50,9 +51,9 @@ import {IdleSavingsStorage} from "./IdleSavingsStorage.sol";
 ///         manager, so a direct `transfer` here would move the manager's
 ///         tokens. Only `balanceOf` reads are made directly.
 /// @dev    STATELESS: MUST NOT declare storage variables. Mutable state lives
-///         in the ERC-7201 `IdleSavingsStorage` namespace; `YieldStorage` is
+///         in the ERC-7201 `SavingsStorage` namespace; `YieldStorage` is
 ///         read (allow-list, pin) but never written. Immutables are fine.
-abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSavingsStorage {
+abstract contract BaseSavingsHandler is IYieldHandler, YieldStorage, SavingsStorage {
     using SafeCast for uint256;
 
     /// @notice Protocol id (canonical ids are the YIELD_PROTOCOL_* constants
@@ -62,16 +63,18 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     IERC20 public immutable USDC;
     /// @notice Price source for the share token. Pinned per build: replacing
     ///         it is a handler rollover behind the timelock.
-    IIdleSavingsRateProvider public immutable RATE_PROVIDER;
-    /// @notice Hard ceiling on the oracle tolerance a caller may pass as
-    ///         `slippageBps`. 50 bps covers the observed Chainlink lag behind
-    ///         the SSR oracle (a few bps) with room to spare.
-    uint16 public immutable MAX_TOLERANCE_BPS;
+    ISavingsRateProvider public immutable RATE_PROVIDER;
+    /// @notice Ceiling on the oracle tolerance a caller may pass as
+    ///         `slippageBps` until the admin sets one through `configure`.
+    ///         50 bps covers the observed Chainlink lag behind the SSR oracle
+    ///         (a few bps) with room to spare.
+    uint16 public immutable DEFAULT_MAX_TOLERANCE_BPS;
     /// @notice Share of the venue's live exit liquidity the whole book may
-    ///         reach. A rail against a backend bug, not the liquidity policy:
-    ///         the deposit itself lands in the venue, so until the venue sweeps
-    ///         it the next deposit sees it as headroom.
-    uint16 public immutable MAX_EXPOSURE_BPS;
+    ///         reach until the admin sets one through `configure`. A rail
+    ///         against a backend bug, not the liquidity policy: the deposit
+    ///         itself lands in the venue, so until the venue sweeps it the
+    ///         next deposit sees it as headroom.
+    uint16 public immutable DEFAULT_MAX_EXPOSURE_BPS;
 
     /// @dev Own deployment address, captured at construction to enforce
     ///      delegatecall-only entry (a direct call would run against the
@@ -84,16 +87,18 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     uint256 private constant USDC_TO_SHARE_SCALE = 1e12;
     /// @dev shares (18 dp) * rate (18 dp) / 1e30 = USDC (6 dp).
     uint256 private constant SHARES_TIMES_RATE_TO_USDC = 1e30;
-    uint16 private constant MAX_SETTABLE_TOLERANCE_BPS = 300;
+    /// @notice Hard bound on the tolerance ceiling, at construction and in
+    ///         `configure`.
+    uint16 public constant MAX_SETTABLE_TOLERANCE_BPS = 300;
 
-    event IdleSavingsDeposited(
+    event SavingsDeposited(
         address indexed onBehalfOf,
         uint256 indexed tokenId,
         uint256 usdcIn,
         uint256 sharesOut,
         uint256 rate
     );
-    event IdleSavingsRedeemed(
+    event SavingsRedeemed(
         address indexed onBehalfOf,
         uint256 indexed tokenId,
         uint256 sharesIn,
@@ -101,18 +106,14 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
         uint256 rate,
         uint16 exitBps
     );
-    event IdleSavingsReleased(address indexed onBehalfOf, uint256 indexed tokenId, uint256 shares);
+    event SavingsReleased(address indexed onBehalfOf, uint256 indexed tokenId, uint256 shares);
     /// @notice The Safe holds fewer shares than the record says: a user moved
     ///         them out around the module. The exit continues with what is
     ///         left; the manager still charges the fee against the full basis,
     ///         so the realized value is understated by the missing shares.
-    event IdleSavingsSharesShortfall(
-        address indexed onBehalfOf,
-        uint256 indexed tokenId,
-        uint256 tracked,
-        uint256 balance
-    );
-    event IdleSavingsAdopted(address indexed onBehalfOf, uint256 indexed tokenId, uint256 shares);
+    event SavingsSharesShortfall(address indexed onBehalfOf, uint256 indexed tokenId, uint256 tracked, uint256 balance);
+    event SavingsAdopted(address indexed onBehalfOf, uint256 indexed tokenId, uint256 shares);
+    event SavingsConfigUpdated(uint8 indexed protocol, uint16 maxToleranceBps, uint16 maxExposureBps);
 
     error OnlyDelegatecall();
     error TokenApprovalFailed(address token);
@@ -138,7 +139,7 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     constructor(
         uint8 _protocol,
         IERC20 _usdc,
-        IIdleSavingsRateProvider _rateProvider,
+        ISavingsRateProvider _rateProvider,
         IERC20 _sourceShareToken,
         uint16 _maxToleranceBps,
         uint16 _maxExposureBps
@@ -148,14 +149,13 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
         if (address(_sourceShareToken) == address(0)) revert ZeroAddress();
         if (_rateProvider.shareToken() != address(_sourceShareToken)) revert InvalidConfig();
         _rateProvider.rate(address(_sourceShareToken));
-        if (_maxToleranceBps == 0 || _maxToleranceBps > MAX_SETTABLE_TOLERANCE_BPS) revert InvalidConfig();
-        if (_maxExposureBps == 0 || _maxExposureBps > BPS) revert InvalidConfig();
+        _requireConfigBounds(_maxToleranceBps, _maxExposureBps);
 
         PROTOCOL = _protocol;
         USDC = _usdc;
         RATE_PROVIDER = _rateProvider;
-        MAX_TOLERANCE_BPS = _maxToleranceBps;
-        MAX_EXPOSURE_BPS = _maxExposureBps;
+        DEFAULT_MAX_TOLERANCE_BPS = _maxToleranceBps;
+        DEFAULT_MAX_EXPOSURE_BPS = _maxExposureBps;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -213,7 +213,7 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
         _validatePoolParam(p.poolParam);
         tokenId = _tokenIdOf(p.onBehalfOf);
         if (_yieldStorage().positionHandlerOf[PROTOCOL][tokenId] != address(0)) revert PositionAlreadyOpen();
-        IdleSavingsLayout storage $ = _idleSavingsStorage();
+        SavingsLayout storage $ = _savingsStorage();
         if ($.sharesOf[PROTOCOL][tokenId] != 0) revert StaleSharesRecord();
 
         uint256 rate = _rate();
@@ -229,7 +229,7 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
         $.sharesOf[PROTOCOL][tokenId] = received;
         $.totalShares[PROTOCOL] += received;
         basisUsd6 = p.usdcAmount.toUint128();
-        emit IdleSavingsDeposited(p.onBehalfOf, tokenId, p.usdcAmount, received, rate);
+        emit SavingsDeposited(p.onBehalfOf, tokenId, p.usdcAmount, received, rate);
         return (tokenId, basisUsd6, basisUsd6, received.toUint128());
     }
 
@@ -239,7 +239,7 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     ///         is enforced on the measured USDC delta, whatever the venue
     ///         claims.
     /// @dev    A Safe that moved shares out around the module redeems what is
-    ///         left (`IdleSavingsSharesShortfall`); the manager still prorates
+    ///         left (`SavingsSharesShortfall`); the manager still prorates
     ///         and charges against the full basis. With nothing left to redeem
     ///         no price is read, so the record can be cleared while the feed is
     ///         down; the event then reports a rate of zero.
@@ -249,7 +249,7 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
     ) external onlyDelegatecall returns (uint128 currentValueUsd6) {
         _requireTolerance(p.slippageBps);
         _requirePosition(p.onBehalfOf, p.tokenId);
-        IdleSavingsLayout storage $ = _idleSavingsStorage();
+        SavingsLayout storage $ = _savingsStorage();
         uint256 tracked = _reconcileShares($, p.onBehalfOf, p.tokenId);
         uint256 toRedeem = p.exitBps == BPS ? tracked : Math.mulDiv(tracked, p.exitBps, BPS);
         if (p.exitBps != BPS && basisForExit > 0 && toRedeem == 0) revert InvalidExitBps();
@@ -269,7 +269,7 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
             $.sharesOf[PROTOCOL][p.tokenId] = tracked - toRedeem;
             $.totalShares[PROTOCOL] -= toRedeem;
         }
-        emit IdleSavingsRedeemed(p.onBehalfOf, p.tokenId, toRedeem, currentValueUsd6, rate, p.exitBps);
+        emit SavingsRedeemed(p.onBehalfOf, p.tokenId, toRedeem, currentValueUsd6, rate, p.exitBps);
     }
 
     /// @notice Release the position in kind: the shares stay on the Safe and
@@ -284,11 +284,11 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
         WithdrawParams calldata p
     ) external onlyDelegatecall returns (address token0, address token1, uint256 amount0, uint256 amount1) {
         _requirePosition(p.onBehalfOf, p.tokenId);
-        IdleSavingsLayout storage $ = _idleSavingsStorage();
+        SavingsLayout storage $ = _savingsStorage();
         uint256 released = $.sharesOf[PROTOCOL][p.tokenId];
         delete $.sharesOf[PROTOCOL][p.tokenId];
         $.totalShares[PROTOCOL] -= released;
-        emit IdleSavingsReleased(p.onBehalfOf, p.tokenId, released);
+        emit SavingsReleased(p.onBehalfOf, p.tokenId, released);
         return (address(USDC), address(_shareToken()), 0, released);
     }
 
@@ -311,20 +311,35 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
         }
         tokenId = _tokenIdOf(p.onBehalfOf);
         if (_yieldStorage().positionHandlerOf[PROTOCOL][tokenId] != address(0)) revert PositionAlreadyOpen();
-        IdleSavingsLayout storage $ = _idleSavingsStorage();
+        SavingsLayout storage $ = _savingsStorage();
         if ($.sharesOf[PROTOCOL][tokenId] != 0) revert StaleSharesRecord();
         if (shares.balanceOf(p.onBehalfOf) < p.amount1) revert SharesNotOnSafe();
 
         $.sharesOf[PROTOCOL][tokenId] = p.amount1;
         $.totalShares[PROTOCOL] += p.amount1;
-        emit IdleSavingsAdopted(p.onBehalfOf, tokenId, p.amount1);
+        emit SavingsAdopted(p.onBehalfOf, tokenId, p.amount1);
         return (tokenId, 0, p.amount1.toUint128());
     }
 
-    /// @notice Idle savings accrue inside the share price; there is nothing
+    /// @notice Savings accrue inside the share price; there is nothing
     ///         to harvest.
     function collect(CollectParams calldata) external view onlyDelegatecall {
         revert CollectNotSupported();
+    }
+
+    /// @notice Admin tuning through `SafeYieldManager.configureHandler`:
+    ///         `abi.encode(uint16 maxToleranceBps, uint16 maxExposureBps)`,
+    ///         bounded like the constructor arguments and stored per protocol
+    ///         id, so every build under the id reads them, including the one
+    ///         an open position is pinned to. Zero in storage means unset and
+    ///         the build's defaults apply.
+    function configure(bytes calldata data) external onlyDelegatecall {
+        (uint16 maxToleranceBps, uint16 maxExposureBps) = abi.decode(data, (uint16, uint16));
+        _requireConfigBounds(maxToleranceBps, maxExposureBps);
+        SavingsConfig storage config = _savingsStorage().config[PROTOCOL];
+        config.maxToleranceBps = maxToleranceBps;
+        config.maxExposureBps = maxExposureBps;
+        emit SavingsConfigUpdated(PROTOCOL, maxToleranceBps, maxExposureBps);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -334,15 +349,22 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
 
     /// @notice Storage slot of `sharesOf[PROTOCOL][tokenId]` under the idle
     ///         savings namespace.
-    function idleSavingsSharesSlot(uint256 tokenId) external view returns (bytes32) {
-        bytes32 inner = keccak256(abi.encode(uint256(PROTOCOL), uint256(IDLE_SAVINGS_STORAGE_SLOT)));
+    function savingsSharesSlot(uint256 tokenId) external view returns (bytes32) {
+        bytes32 inner = keccak256(abi.encode(uint256(PROTOCOL), uint256(SAVINGS_STORAGE_SLOT)));
         return keccak256(abi.encode(tokenId, inner));
     }
 
-    /// @notice Storage slot of `totalShares[PROTOCOL]` under the idle savings
+    /// @notice Storage slot of `totalShares[PROTOCOL]` under the savings
     ///         namespace.
-    function idleSavingsTotalSharesSlot() external view returns (bytes32) {
-        return keccak256(abi.encode(uint256(PROTOCOL), uint256(IDLE_SAVINGS_STORAGE_SLOT) + 1));
+    function savingsTotalSharesSlot() external view returns (bytes32) {
+        return keccak256(abi.encode(uint256(PROTOCOL), uint256(SAVINGS_STORAGE_SLOT) + 1));
+    }
+
+    /// @notice Storage slot of `config[PROTOCOL]` under the savings namespace:
+    ///         `maxToleranceBps` in the low 16 bits, `maxExposureBps` in the
+    ///         next 16; zero means the build's defaults apply.
+    function savingsConfigSlot() external view returns (bytes32) {
+        return keccak256(abi.encode(uint256(PROTOCOL), uint256(SAVINGS_STORAGE_SLOT) + 2));
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -357,9 +379,25 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
         return RATE_PROVIDER.rate(address(_shareToken()));
     }
 
+    /// @dev Admin-set ceilings fall back to the build's defaults while unset.
+    function _maxToleranceBps() internal view returns (uint16) {
+        uint16 set = _savingsStorage().config[PROTOCOL].maxToleranceBps;
+        return set == 0 ? DEFAULT_MAX_TOLERANCE_BPS : set;
+    }
+
+    function _maxExposureBps() internal view returns (uint16) {
+        uint16 set = _savingsStorage().config[PROTOCOL].maxExposureBps;
+        return set == 0 ? DEFAULT_MAX_EXPOSURE_BPS : set;
+    }
+
+    function _requireConfigBounds(uint16 maxToleranceBps, uint16 maxExposureBps) internal pure {
+        if (maxToleranceBps == 0 || maxToleranceBps > MAX_SETTABLE_TOLERANCE_BPS) revert InvalidConfig();
+        if (maxExposureBps == 0 || maxExposureBps > BPS) revert InvalidConfig();
+    }
+
     function _requireTolerance(uint16 toleranceBps) internal view {
         if (toleranceBps == 0) revert SlippageTooLow();
-        if (toleranceBps > MAX_TOLERANCE_BPS) revert SlippageAboveMax();
+        if (toleranceBps > _maxToleranceBps()) revert SlippageAboveMax();
     }
 
     /// @dev The operator can never redeem Safe B's shares against Safe A's
@@ -399,24 +437,24 @@ abstract contract BaseIdleSavingsHandler is IYieldHandler, YieldStorage, IdleSav
 
     /// @dev Caps what the whole book could need to exit at what the venue can
     ///      pay right now.
-    function _requireExposureHeadroom(IdleSavingsLayout storage $, uint256 usdc6, uint256 rate) internal view {
+    function _requireExposureHeadroom(SavingsLayout storage $, uint256 usdc6, uint256 rate) internal view {
         uint256 available = _liquidityAvailable();
         uint256 tracked = Math.mulDiv($.totalShares[PROTOCOL], rate, SHARES_TIMES_RATE_TO_USDC);
         uint256 need = tracked + usdc6;
-        if (need > Math.mulDiv(available, MAX_EXPOSURE_BPS, BPS)) revert ExposureCapExceeded(need, available);
+        if (need > Math.mulDiv(available, _maxExposureBps(), BPS)) revert ExposureCapExceeded(need, available);
     }
 
     /// @dev Tracked shares for a position, lowered to the Safe's balance when
     ///      shares were moved out around the module.
     function _reconcileShares(
-        IdleSavingsLayout storage $,
+        SavingsLayout storage $,
         address safe,
         uint256 tokenId
     ) internal returns (uint256 tracked) {
         tracked = $.sharesOf[PROTOCOL][tokenId];
         uint256 balance = _shareToken().balanceOf(safe);
         if (balance < tracked) {
-            emit IdleSavingsSharesShortfall(safe, tokenId, tracked, balance);
+            emit SavingsSharesShortfall(safe, tokenId, tracked, balance);
             $.totalShares[PROTOCOL] -= tracked - balance;
             $.sharesOf[PROTOCOL][tokenId] = balance;
             tracked = balance;

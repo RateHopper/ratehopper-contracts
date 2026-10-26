@@ -92,6 +92,7 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     mapping(uint8 => bool) public protocolEnabledForClose;
 
     event YieldHandlerUpdated(uint8 indexed protocol, address indexed oldHandler, address indexed newHandler);
+    event HandlerConfigured(uint8 indexed protocol, address indexed handler, bytes data);
     event ProtocolStatusChanged(uint8 indexed protocol, bool indexed forOpen, bool enabled);
     event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
     event PerformanceFeeBpsUpdated(uint16 previousPerformanceFeeBps, uint16 newPerformanceFeeBps);
@@ -825,6 +826,21 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
         YieldLayout storage $ = _yieldStorage();
         emit MaxSlippageBpsUpdated($.maxSlippageBps, newMaxSlippageBps);
         $.maxSlippageBps = newMaxSlippageBps;
+    }
+
+    /// @notice Routine tuning of the registered handler's own parameters (a
+    ///         savings source's oracle tolerance ceiling and exposure cap, for
+    ///         instance). `data` is decoded, bounded and stored by the handler
+    ///         in its ERC-7201 namespace on this contract, keyed by protocol
+    ///         id, so the values survive a handler rollover and are read by
+    ///         every build under the id, including the build a position is
+    ///         pinned to. Handlers without parameters revert
+    ///         `ConfigureNotSupported`.
+    function configureHandler(uint8 protocol, bytes calldata data) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        address handler = yieldHandlers[protocol];
+        if (handler == address(0)) revert HandlerNotSet();
+        _delegateToHandler(handler, abi.encodeCall(IYieldHandler.configure, (data)));
+        emit HandlerConfigured(protocol, handler, data);
     }
 
     /// @notice Allow or disallow a protocol-specific pool param (ABI-encoded

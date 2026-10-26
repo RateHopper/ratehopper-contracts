@@ -9,7 +9,7 @@ import {
     SPARK_SSR_ORACLE_ADDRESS,
     USDC_ADDRESS,
     WETH_ADDRESS,
-    encodeSkyIdleSavingsPoolParam,
+    encodeSkySavingsPoolParam,
     sUSDS_ADDRESS,
 } from "../../contractAddresses";
 import { dealToken } from "../helpers/utils";
@@ -35,10 +35,10 @@ import {
     tokenIdOf,
     usdcFor,
     withdrawParams,
-} from "../helpers/idleSavingsHarness";
+} from "../helpers/savingsHarness";
 
 // ─────────────────────────────────────────────────────────────────────────
-//  Base-fork integration for SkyIdleSavingsYieldHandler against the REAL
+//  Base-fork integration for SkySavingsYieldHandler against the REAL
 //  Spark PSM3, sUSDS, Chainlink sUSDS/USDS feed and SSR oracle. The mock
 //  suites prove the handler's rules against mocks that mirror the venue;
 //  this suite proves the venue addresses, the PSM3 swapExactIn calldata
@@ -51,7 +51,7 @@ const FORK_BLOCK = Number(process.env.BASE_FORK_BLOCK_NUMBER ?? 53_100_000);
 const USDC_ADDR = ethers.getAddress(USDC_ADDRESS);
 const SUSDS_ADDR = ethers.getAddress(sUSDS_ADDRESS);
 const PSM3_ADDR = ethers.getAddress(SPARK_PSM3_ADDRESS);
-const SKY_PARAM = encodeSkyIdleSavingsPoolParam(SPARK_PSM3_ADDRESS, sUSDS_ADDRESS);
+const SKY_PARAM = encodeSkySavingsPoolParam(SPARK_PSM3_ADDRESS, sUSDS_ADDRESS);
 const AMOUNT = USDC(1_000);
 const FUNDING = USDC(10_000);
 const HOUR = 3_600;
@@ -92,7 +92,7 @@ async function deployStack() {
     await provider.waitForDeployment();
     const providerAddr = await provider.getAddress();
 
-    const Handler = await ethers.getContractFactory("SkyIdleSavingsYieldHandler");
+    const Handler = await ethers.getContractFactory("SkySavingsYieldHandler");
     const deployBuild = async (exposureBps = MAX_EXPOSURE_BPS, rateProvider = providerAddr) => {
         const build = await Handler.deploy(
             USDC_ADDR,
@@ -160,7 +160,7 @@ async function deployStack() {
     );
     await manager.waitForDeployment();
     const managerAddr = await manager.getAddress();
-    const managerEvents = await ethers.getContractAt("SkyIdleSavingsYieldHandler", managerAddr);
+    const managerEvents = await ethers.getContractAt("SkySavingsYieldHandler", managerAddr);
 
     const fundSafe = async (owner: HardhatEthersSigner) => {
         const safeAddr = await deployRealSafe(owner);
@@ -198,8 +198,8 @@ const open = (f: Stack, safeAddr: string, overrides: Record<string, any> = {}) =
 const close = (f: Stack, safeAddr: string, overrides: Record<string, any> = {}) =>
     f.manager.connect(f.operator).close(SKY, closeParams(safeAddr, tokenIdOf(safeAddr), overrides));
 const sharesOf = async (f: Stack, safeAddr: string) =>
-    slotValue(f.managerAddr, await f.handler.idleSavingsSharesSlot(tokenIdOf(safeAddr)));
-const totalShares = async (f: Stack) => slotValue(f.managerAddr, await f.handler.idleSavingsTotalSharesSlot());
+    slotValue(f.managerAddr, await f.handler.savingsSharesSlot(tokenIdOf(safeAddr)));
+const totalShares = async (f: Stack) => slotValue(f.managerAddr, await f.handler.savingsTotalSharesSlot());
 const touchedPsm3 = (receipt: any) =>
     receipt.logs.some((log: any) => log.address.toLowerCase() === PSM3_ADDR.toLowerCase());
 const quoteAt = (receipt: any, assetIn: string, assetOut: string, amountIn: bigint): Promise<bigint> =>
@@ -215,7 +215,7 @@ function logArgs(contract: any, receipt: any, name: string) {
     throw new Error(`${name} was not emitted`);
 }
 
-describe("SafeYieldManager + Sky idle savings - integration (Base fork)", function () {
+describe("SafeYieldManager + Sky savings - integration (Base fork)", function () {
     this.timeout(300_000);
 
     // network-helpers keeps its fixture snapshots in a module-global registry, so
@@ -285,7 +285,7 @@ describe("SafeYieldManager + Sky idle savings - integration (Base fork)", functi
             swapIn.amountOut,
             swapIn.referralCode,
         ]).to.deep.equal([USDC_ADDR, SUSDS_ADDR, safeAddr, AMOUNT, shares, OSERO_REFERRAL_CODE]);
-        const deposited = logArgs(managerEvents, openReceipt, "IdleSavingsDeposited");
+        const deposited = logArgs(managerEvents, openReceipt, "SavingsDeposited");
         expect([deposited.usdcIn, deposited.sharesOut, deposited.rate]).to.deep.equal([AMOUNT, shares, rate]);
         const opened = logArgs(manager, openReceipt, "PositionOpened");
         expect([opened.tokenId, opened.usdcInput, opened.used0, opened.used1, opened.currentValueUsd6]).to.deep.equal([
@@ -420,7 +420,7 @@ describe("SafeYieldManager + Sky idle savings - integration (Base fork)", functi
         const receipt = await (
             await manager.connect(f.operator).withdraw(SKY, withdrawParams(safeAddr, tokenId))
         ).wait();
-        expect(logArgs(managerEvents, receipt, "IdleSavingsReleased").shares).to.equal(shares);
+        expect(logArgs(managerEvents, receipt, "SavingsReleased").shares).to.equal(shares);
         const withdrawn = logArgs(manager, receipt, "PositionWithdrawn");
         expect([withdrawn.releasedBasisUsd6, withdrawn.amount0, withdrawn.amount1]).to.deep.equal([AMOUNT, 0n, shares]);
         expect(touchedPsm3(receipt)).to.equal(false);
@@ -469,8 +469,8 @@ describe("SafeYieldManager + Sky idle savings - integration (Base fork)", functi
             switched.used0,
             switched.used1,
         ]).to.deep.equal([tokenId, tokenId, AMOUNT, 0n, shares, 0n, shares]);
-        expect(logArgs(managerEvents, receipt, "IdleSavingsReleased").shares).to.equal(shares);
-        expect(logArgs(managerEvents, receipt, "IdleSavingsAdopted").shares).to.equal(shares);
+        expect(logArgs(managerEvents, receipt, "SavingsReleased").shares).to.equal(shares);
+        expect(logArgs(managerEvents, receipt, "SavingsAdopted").shares).to.equal(shares);
         expect(touchedPsm3(receipt)).to.equal(false);
         expect(await susds.balanceOf(safeAddr)).to.equal(shares);
         expect(await susds.balanceOf(PSM3_ADDR)).to.equal(venueSharesBefore);

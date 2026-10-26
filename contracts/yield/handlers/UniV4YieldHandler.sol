@@ -421,6 +421,12 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         _requireOwnedBy(a.onBehalfOf, tokenId);
     }
 
+    /// @notice Nothing to tune: the floors are the manager's TWAP references
+    ///         and slippage cap.
+    function configure(bytes calldata) external view onlyDelegatecall {
+        revert ConfigureNotSupported();
+    }
+
     /// @inheritdoc IYieldHandler
     function collect(CollectParams calldata p) external onlyDelegatecall {
         // V4 has no stakePool: `swapRewardToUsdc` / `rewardSwap` are ignored,

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IAggregatorV3} from "../../interfaces/chainlink/IAggregatorV3.sol";
 import {ISSRRateProvider} from "../../interfaces/spark/ISSRRateProvider.sol";
-import {IIdleSavingsRateProvider} from "../../interfaces/IIdleSavingsRateProvider.sol";
+import {ISavingsRateProvider} from "../../interfaces/ISavingsRateProvider.sol";
 
 /// @title ChainlinkSsrRateProvider
 /// @notice Price source for sUSDS: the Chainlink "sUSDS / USDS Exchange Rate"
@@ -22,7 +22,7 @@ import {IIdleSavingsRateProvider} from "../../interfaces/IIdleSavingsRateProvide
 ///         `answeredInRound` is deprecated and `roundId` is zero on Spark's
 ///         Chainlink-format wrapper, so only `updatedAt` governs staleness.
 ///         Holds no state; replacing it is a handler rollover.
-contract ChainlinkSsrRateProvider is IIdleSavingsRateProvider {
+contract ChainlinkSsrRateProvider is ISavingsRateProvider {
     IAggregatorV3 public immutable FEED;
     ISSRRateProvider public immutable SSR_ORACLE;
     IERC20 public immutable SHARE_TOKEN;
@@ -77,7 +77,7 @@ contract ChainlinkSsrRateProvider is IIdleSavingsRateProvider {
         MAX_RATE = _maxRate;
     }
 
-    /// @inheritdoc IIdleSavingsRateProvider
+    /// @inheritdoc ISavingsRateProvider
     function rate(address token) external view returns (uint256 r) {
         if (token != address(SHARE_TOKEN)) revert WrongShareToken(token);
         (, int256 answer, , uint256 updatedAt, ) = FEED.latestRoundData();
@@ -94,7 +94,7 @@ contract ChainlinkSsrRateProvider is IIdleSavingsRateProvider {
         if (diff * BPS > ssrRate * MAX_DISAGREEMENT_BPS) revert OracleDisagreement(r, ssrRate);
     }
 
-    /// @inheritdoc IIdleSavingsRateProvider
+    /// @inheritdoc ISavingsRateProvider
     function shareToken() external view returns (address) {
         return address(SHARE_TOKEN);
     }

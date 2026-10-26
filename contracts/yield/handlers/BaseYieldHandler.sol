@@ -480,6 +480,12 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         );
     }
 
+    /// @notice Nothing to tune: the floors are the manager's TWAP references
+    ///         and slippage cap.
+    function configure(bytes calldata) external view onlyDelegatecall {
+        revert ConfigureNotSupported();
+    }
+
     /// @inheritdoc IYieldHandler
     function collect(CollectParams calldata p) external onlyDelegatecall {
         // A staked position earns stakePool emissions INSTEAD of trading fees —

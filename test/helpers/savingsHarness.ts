@@ -4,13 +4,13 @@ import { loadFixture, time, impersonateAccount, setBalance } from "@nomicfoundat
 import {
     YieldProtocol,
     OSERO_REFERRAL_CODE,
-    encodeSkyIdleSavingsPoolParam,
+    encodeSkySavingsPoolParam,
     encodeUniV3PoolParam,
 } from "../../contractAddresses";
 import { ZERO_LEG, leg } from "../helpers/utils";
 
 // ─────────────────────────────────────────────────────────────────────────
-//  Shared harness for the idle savings handler suites: the mock stack for
+//  Shared harness for the savings handler suites: the mock stack for
 //  both sources (Sky over PSM3 + ChainlinkSsrRateProvider, and the mock
 //  source over a trivial venue), param builders, slot math and the source
 //  descriptors the parametrized cases iterate over.
@@ -31,7 +31,7 @@ export const TWAP_WINDOW = 1800;
 export const TWAP_CARDINALITY = 60;
 
 export const UNISWAP_V3 = YieldProtocol.UNISWAP_V3;
-export const SKY = YieldProtocol.SKY_IDLE_SAVINGS;
+export const SKY = YieldProtocol.SKY_SAVINGS;
 export const MOCK = 250;
 
 export const ONE = 10n ** 18n;
@@ -187,7 +187,7 @@ export async function safeSigner(safeAddr: string) {
     return ethers.getSigner(safeAddr);
 }
 
-export async function deployIdleSavingsHarness() {
+export async function deploySavingsHarness() {
     const [deployer, operatorEOA, treasury, stranger, pauser] = await ethers.getSigners();
 
     const Usdc = await ethers.getContractFactory("MockFiatTokenUsdc");
@@ -254,8 +254,8 @@ export async function deployIdleSavingsHarness() {
     const psm3Addr = await psm3.getAddress();
     await (await usdc.mint(psm3Addr, USDC(10_000_000))).wait();
     await (await susds.mint(psm3Addr, 10_000_000n * ONE)).wait();
-    const skyParam = encodeSkyIdleSavingsPoolParam(psm3Addr, susdsAddr);
-    const Handler = await ethers.getContractFactory("SkyIdleSavingsYieldHandler");
+    const skyParam = encodeSkySavingsPoolParam(psm3Addr, susdsAddr);
+    const Handler = await ethers.getContractFactory("SkySavingsYieldHandler");
     const handler = await Handler.deploy(
         usdcAddr,
         providerAddr,
@@ -269,18 +269,18 @@ export async function deployIdleSavingsHarness() {
     const handlerAddr = await handler.getAddress();
 
     // Mock source stack
-    const MockProvider = await ethers.getContractFactory("MockIdleSavingsRateProvider");
+    const MockProvider = await ethers.getContractFactory("MockSavingsRateProvider");
     const mockProvider = await MockProvider.deploy(mockShareAddr);
     await mockProvider.waitForDeployment();
     await (await mockProvider.set(RATE)).wait();
-    const Venue = await ethers.getContractFactory("MockIdleSavingsVenue");
+    const Venue = await ethers.getContractFactory("MockSavingsVenue");
     const mockVenue = await Venue.deploy(usdcAddr, mockShareAddr);
     await mockVenue.waitForDeployment();
     const mockVenueAddr = await mockVenue.getAddress();
     await (await mockVenue.setRate(RATE)).wait();
     await (await usdc.mint(mockVenueAddr, USDC(10_000_000))).wait();
     const mockParam = encodeParam(mockVenueAddr, mockShareAddr);
-    const MockSource = await ethers.getContractFactory("MockIdleSavingsSource");
+    const MockSource = await ethers.getContractFactory("MockSavingsSource");
     const mockSource = await MockSource.deploy(
         usdcAddr,
         await mockProvider.getAddress(),
@@ -342,7 +342,7 @@ export async function deployIdleSavingsHarness() {
     const managerAddr = await manager.getAddress();
     // Handler events are emitted from the manager's address (delegatecall);
     // both sources share the base's event ABI.
-    const managerEvents = await ethers.getContractAt("SkyIdleSavingsYieldHandler", managerAddr);
+    const managerEvents = await ethers.getContractAt("SkySavingsYieldHandler", managerAddr);
 
     await (await usdc.mint(safeAddr, USDC(2_000_000))).wait();
     await (await usdc.mint(safe2Addr, USDC(2_000_000))).wait();
@@ -400,7 +400,7 @@ export async function deployIdleSavingsHarness() {
     };
 }
 
-export type Harness = Awaited<ReturnType<typeof deployIdleSavingsHarness>>;
+export type Harness = Awaited<ReturnType<typeof deploySavingsHarness>>;
 
 export type SourceSpec = {
     name: string;
@@ -420,7 +420,7 @@ export type SourceSpec = {
 };
 
 export const SKY_SRC: SourceSpec = {
-    name: "SkyIdleSavingsYieldHandler (protocol 3)",
+    name: "SkySavingsYieldHandler (protocol 3)",
     protocol: SKY,
     param: (f) => f.skyParam,
     handler: (f) => f.handler,
@@ -455,7 +455,7 @@ export const SKY_SRC: SourceSpec = {
 };
 
 export const MOCK_SRC: SourceSpec = {
-    name: "MockIdleSavingsSource (protocol 250)",
+    name: "MockSavingsSource (protocol 250)",
     protocol: MOCK,
     param: (f) => f.mockParam,
     handler: (f) => f.mockSource,
@@ -495,7 +495,7 @@ export async function registerSource(f: Harness, src: SourceSpec, handlerAddr = 
 }
 
 export async function deployRegistered() {
-    const f = await deployIdleSavingsHarness();
+    const f = await deploySavingsHarness();
     for (const src of SOURCES) await registerSource(f, src);
     return f;
 }
@@ -523,11 +523,11 @@ export function roll(f: Harness, src: SourceSpec, safeAddr = f.safeAddr) {
 }
 
 export async function sharesOf(f: Harness, src: SourceSpec, safeAddr = f.safeAddr) {
-    return slotValue(f.managerAddr, await src.handler(f).idleSavingsSharesSlot(tokenIdOf(safeAddr)));
+    return slotValue(f.managerAddr, await src.handler(f).savingsSharesSlot(tokenIdOf(safeAddr)));
 }
 
 export async function totalShares(f: Harness, src: SourceSpec) {
-    return slotValue(f.managerAddr, await src.handler(f).idleSavingsTotalSharesSlot());
+    return slotValue(f.managerAddr, await src.handler(f).savingsTotalSharesSlot());
 }
 
 export async function expectZeroResidue(f: Harness) {

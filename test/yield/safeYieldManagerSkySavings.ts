@@ -37,7 +37,7 @@ import {
     slotValue,
     setSlot,
     safeSigner,
-    deployIdleSavingsHarness,
+    deploySavingsHarness,
     Harness,
     SKY_SRC,
     MOCK_SRC,
@@ -50,14 +50,14 @@ import {
     sharesOf,
     totalShares,
     expectZeroResidue,
-} from "../helpers/idleSavingsHarness";
+} from "../helpers/savingsHarness";
 
 // ─────────────────────────────────────────────────────────────────────────
-//  Mock-driven suite for the idle savings handlers behind the untouched
+//  Mock-driven suite for the savings handlers behind the untouched
 //  SafeYieldManager. The shared cases run twice: against
-//  SkyIdleSavingsYieldHandler (protocol 3, PSM3 + Chainlink/SSR provider)
-//  and against MockIdleSavingsSource (protocol 250, a trivial venue + a
-//  mock provider), which proves BaseIdleSavingsHandler is generic. Covers
+//  SkySavingsYieldHandler (protocol 3, PSM3 + Chainlink/SSR provider)
+//  and against MockSavingsSource (protocol 250, a trivial venue + a
+//  mock provider), which proves BaseSavingsHandler is generic. Covers
 //  registration through the timelock the way a new id lands on the deployed
 //  manager, the deposit / redeem lifecycle, the exposure rail, the in-kind
 //  exit, the same-id handler rollover through switchPosition, and the storage
@@ -65,12 +65,12 @@ import {
 //  oracle guards and mock short-pay cases follow in their own blocks.
 // ─────────────────────────────────────────────────────────────────────────
 
-describe("SafeYieldManager + idle savings handlers", function () {
+describe("SafeYieldManager + savings handlers", function () {
     for (const src of SOURCES) {
         describe(src.name, function () {
             describe("registration", function () {
                 it("registers through the timelock and rejects a PROTOCOL mismatch", async function () {
-                    const f = await loadFixture(deployIdleSavingsHarness);
+                    const f = await loadFixture(deploySavingsHarness);
                     const { manager, timelock } = f;
                     const handlerAddr = src.handlerAddr(f);
                     expect(await src.handler(f).PROTOCOL()).to.equal(src.protocol);
@@ -84,7 +84,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                 });
 
                 it("starts a new id with both switches off", async function () {
-                    const f = await loadFixture(deployIdleSavingsHarness);
+                    const f = await loadFixture(deploySavingsHarness);
                     const { manager, timelock, deployer, pauser } = f;
                     await expect(
                         manager.connect(deployer).setPoolParamAllowed(src.protocol, src.param(f), true),
@@ -164,7 +164,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                         .to.emit(manager, "PositionOpened")
                         .withArgs(safeAddr, src.protocol, tokenId, DEPOSIT, DEPOSIT, shares, DEPOSIT);
                     await expect(tx)
-                        .to.emit(managerEvents, "IdleSavingsDeposited")
+                        .to.emit(managerEvents, "SavingsDeposited")
                         .withArgs(safeAddr, tokenId, DEPOSIT, shares, RATE);
 
                     expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore - DEPOSIT);
@@ -266,8 +266,63 @@ describe("SafeYieldManager + idle savings handlers", function () {
 
                 it("reverts StaleSharesRecord when a shares record survives without a pin", async function () {
                     const f = await loadFixture(deployRegistered);
-                    await setSlot(f.managerAddr, await src.handler(f).idleSavingsSharesSlot(tokenIdOf(f.safeAddr)), 1n);
+                    await setSlot(f.managerAddr, await src.handler(f).savingsSharesSlot(tokenIdOf(f.safeAddr)), 1n);
                     await expect(open(f, src)).to.be.revertedWithCustomError(src.handler(f), "StaleSharesRecord");
+                });
+            });
+
+            describe("admin configuration", function () {
+                const encodeConfig = (maxToleranceBps: number, maxExposureBps: number) =>
+                    abi.encode(["uint16", "uint16"], [maxToleranceBps, maxExposureBps]);
+
+                it("lets the admin tune the tolerance ceiling and the exposure cap within the constructor bounds", async function () {
+                    const f = await loadFixture(deployRegistered);
+                    const { manager, managerEvents, managerAddr, deployer, stranger, timelock, usdc } = f;
+                    const handler = src.handler(f);
+                    expect(await handler.MAX_SETTABLE_TOLERANCE_BPS()).to.equal(300);
+                    await expect(
+                        manager.connect(stranger).configureHandler(src.protocol, encodeConfig(100, 5_000)),
+                    ).to.be.revertedWithCustomError(manager, "AccessControlUnauthorizedAccount");
+                    for (const [tol, exp] of [
+                        [0, 10_000],
+                        [301, 10_000],
+                        [50, 0],
+                        [50, 10_001],
+                    ]) {
+                        await expect(
+                            manager.connect(deployer).configureHandler(src.protocol, encodeConfig(tol, exp)),
+                        ).to.be.revertedWithCustomError(handler, "InvalidConfig");
+                    }
+                    await expect(
+                        open(f, src, f.safeAddr, { slippageBps: MAX_TOLERANCE_BPS + 1 }),
+                    ).to.be.revertedWithCustomError(handler, "SlippageAboveMax");
+
+                    const tx = manager.connect(deployer).configureHandler(src.protocol, encodeConfig(100, 5_000));
+                    await expect(tx).to.emit(managerEvents, "SavingsConfigUpdated").withArgs(src.protocol, 100, 5_000);
+                    await expect(tx)
+                        .to.emit(manager, "HandlerConfigured")
+                        .withArgs(src.protocol, src.handlerAddr(f), encodeConfig(100, 5_000));
+                    expect(await slotValue(managerAddr, await handler.savingsConfigSlot())).to.equal(
+                        100n | (5_000n << 16n),
+                    );
+
+                    await (await open(f, src, f.safeAddr, { slippageBps: 100 })).wait();
+                    await expect(close(f, src, f.safeAddr, { slippageBps: 101 })).to.be.revertedWithCustomError(
+                        handler,
+                        "SlippageAboveMax",
+                    );
+                    await (
+                        await timelockCall(timelock, manager, "setYieldHandler", [src.protocol, await src.deployBuild(f)])
+                    ).wait();
+                    await (await close(f, src, f.safeAddr, { slippageBps: 100 })).wait();
+
+                    const venue = src.venueAddr(f);
+                    await (await usdc.burn(venue, (await usdc.balanceOf(venue)) - USDC(1_000_000))).wait();
+                    await expect(open(f, src, f.safeAddr, { usdcAmount: USDC(500_000) + 1n }))
+                        .to.be.revertedWithCustomError(handler, "ExposureCapExceeded")
+                        .withArgs(USDC(500_000) + 1n, USDC(1_000_000));
+                    await (await open(f, src, f.safeAddr, { usdcAmount: USDC(500_000) })).wait();
+                    await expectZeroResidue(f);
                 });
             });
 
@@ -351,7 +406,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                         .to.emit(manager, "PositionClosed")
                         .withArgs(safeAddr, src.protocol, tokenId, DEPOSIT, value, fee, 10_000, 0);
                     await expect(tx)
-                        .to.emit(managerEvents, "IdleSavingsRedeemed")
+                        .to.emit(managerEvents, "SavingsRedeemed")
                         .withArgs(safeAddr, tokenId, shares, value, newRate, 10_000);
 
                     expect(await usdc.balanceOf(treasury.address)).to.equal(fee);
@@ -385,7 +440,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                         .to.emit(manager, "PositionClosed")
                         .withArgs(safeAddr, src.protocol, tokenId, basisForExit, value, fee, 2_500, carryForExit);
                     await expect(tx)
-                        .to.emit(managerEvents, "IdleSavingsRedeemed")
+                        .to.emit(managerEvents, "SavingsRedeemed")
                         .withArgs(safeAddr, tokenId, toRedeem, value, RATE, 2_500);
                     expect(await manager.residualBasisUsd6Of(src.protocol, tokenId)).to.equal(DEPOSIT - basisForExit);
                     expect(await manager.carryProfitUsd6Of(src.protocol, tokenId)).to.equal(carry - carryForExit);
@@ -402,7 +457,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                 it("reverts InvalidExitBps when a basis decrement would stand without shares leaving", async function () {
                     const f = await loadFixture(deployRegistered);
                     await (await open(f, src)).wait();
-                    await setSlot(f.managerAddr, await src.handler(f).idleSavingsSharesSlot(tokenIdOf(f.safeAddr)), 1n);
+                    await setSlot(f.managerAddr, await src.handler(f).savingsSharesSlot(tokenIdOf(f.safeAddr)), 1n);
                     await expect(close(f, src, f.safeAddr, { exitBps: 1 })).to.be.revertedWithCustomError(
                         src.handler(f),
                         "InvalidExitBps",
@@ -422,7 +477,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                     const value = usdcFor(shares - half, RATE);
                     const tx = close(f, src);
                     await expect(tx)
-                        .to.emit(managerEvents, "IdleSavingsSharesShortfall")
+                        .to.emit(managerEvents, "SavingsSharesShortfall")
                         .withArgs(safeAddr, tokenId, shares, shares - half);
                     await expect(tx)
                         .to.emit(manager, "PositionClosed")
@@ -446,9 +501,9 @@ describe("SafeYieldManager + idle savings handlers", function () {
 
                     const tx = close(f, src);
                     await expect(tx)
-                        .to.emit(managerEvents, "IdleSavingsSharesShortfall")
+                        .to.emit(managerEvents, "SavingsSharesShortfall")
                         .withArgs(safeAddr, tokenId, shares, 0);
-                    await expect(tx).to.emit(managerEvents, "IdleSavingsRedeemed").withArgs(safeAddr, tokenId, 0, 0, 0, 10_000);
+                    await expect(tx).to.emit(managerEvents, "SavingsRedeemed").withArgs(safeAddr, tokenId, 0, 0, 0, 10_000);
                     await expect(tx)
                         .to.emit(manager, "PositionClosed")
                         .withArgs(safeAddr, src.protocol, tokenId, DEPOSIT, 0, 0, 10_000, 0);
@@ -499,7 +554,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                     }
 
                     const tx = withdraw(f, src);
-                    await expect(tx).to.emit(managerEvents, "IdleSavingsReleased").withArgs(safeAddr, tokenId, shares);
+                    await expect(tx).to.emit(managerEvents, "SavingsReleased").withArgs(safeAddr, tokenId, shares);
                     await expect(tx)
                         .to.emit(manager, "PositionWithdrawn")
                         .withArgs(safeAddr, src.protocol, tokenId, DEPOSIT, carry, 0, shares);
@@ -548,6 +603,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                         handler,
                         "OnlyDelegatecall",
                     );
+                    await expect(handler.configure("0x")).to.be.revertedWithCustomError(handler, "OnlyDelegatecall");
                 });
 
                 it("never redeems or releases one Safe's shares against another Safe's record", async function () {
@@ -637,7 +693,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
                     await (await open(f, src)).wait();
                     await expect(feed(usdcAddr, shareAddr, 0n, 1n)).to.be.revertedWithCustomError(src.handler(f), "PositionAlreadyOpen");
                     await (await close(f, src)).wait();
-                    await setSlot(managerAddr, await src.handler(f).idleSavingsSharesSlot(tokenId), 1n);
+                    await setSlot(managerAddr, await src.handler(f).savingsSharesSlot(tokenId), 1n);
                     await expect(feed(usdcAddr, shareAddr, 0n, 1n)).to.be.revertedWithCustomError(src.handler(f), "StaleSharesRecord");
                 });
 
@@ -656,8 +712,8 @@ describe("SafeYieldManager + idle savings handlers", function () {
                     const venueShareBefore = await share.balanceOf(src.venueAddr(f));
 
                     const tx = roll(f, src);
-                    await expect(tx).to.emit(managerEvents, "IdleSavingsReleased").withArgs(safeAddr, tokenId, shares);
-                    await expect(tx).to.emit(managerEvents, "IdleSavingsAdopted").withArgs(safeAddr, tokenId, shares);
+                    await expect(tx).to.emit(managerEvents, "SavingsReleased").withArgs(safeAddr, tokenId, shares);
+                    await expect(tx).to.emit(managerEvents, "SavingsAdopted").withArgs(safeAddr, tokenId, shares);
                     await expect(tx)
                         .to.emit(manager, "PositionSwitched")
                         .withArgs(safeAddr, src.protocol, src.protocol, tokenId, tokenId, DEPOSIT, 0, shares, 0, shares);
@@ -754,13 +810,13 @@ describe("SafeYieldManager + idle savings handlers", function () {
                     const { managerAddr, safeAddr } = f;
                     const handler = src.handler(f);
                     const tokenId = tokenIdOf(safeAddr);
-                    const namespaceId = BigInt(ethers.keccak256(ethers.toUtf8Bytes("ratehopper.storage.idleSavings"))) - 1n;
+                    const namespaceId = BigInt(ethers.keccak256(ethers.toUtf8Bytes("ratehopper.storage.savings"))) - 1n;
                     const base = BigInt(ethers.keccak256(abi.encode(["uint256"], [namespaceId]))) & ~0xffn;
                     expect(base).to.not.equal(YIELD_SLOT);
-                    expect(await handler.idleSavingsSharesSlot(tokenId)).to.equal(
+                    expect(await handler.savingsSharesSlot(tokenId)).to.equal(
                         mapSlot(tokenId, BigInt(mapSlot(BigInt(src.protocol), base))),
                     );
-                    expect(await handler.idleSavingsTotalSharesSlot()).to.equal(mapSlot(BigInt(src.protocol), base + 1n));
+                    expect(await handler.savingsTotalSharesSlot()).to.equal(mapSlot(BigInt(src.protocol), base + 1n));
 
                     const watched: Record<string, string> = { scalar: ethers.toBeHex(YIELD_SLOT, 32) };
                     for (const protocol of [0, 1, 2, SKY, MOCK]) {
@@ -854,7 +910,7 @@ describe("SafeYieldManager + idle savings handlers", function () {
 
             const edge = await deploy({ tol: 300, exp: 1 });
             await edge.waitForDeployment();
-            expect(await edge.MAX_TOLERANCE_BPS()).to.equal(300);
+            expect(await edge.DEFAULT_MAX_TOLERANCE_BPS()).to.equal(300);
             await (await feed.setReverting(true)).wait();
             await expect(deploy({})).to.be.revertedWith("feed down");
         });

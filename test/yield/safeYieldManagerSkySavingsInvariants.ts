@@ -22,18 +22,18 @@ import {
     totalShares,
     withdraw,
     yieldSlot,
-} from "../helpers/idleSavingsHarness";
+} from "../helpers/savingsHarness";
 
 // ─────────────────────────────────────────────────────────────────────────
-//  Invariant suite for the Sky idle savings handler: a seeded random walk
+//  Invariant suite for the Sky savings handler: a seeded random walk
 //  of opens, closes with random exitBps, in-kind withdrawals, feed and SSR
 //  moves inside and outside the tolerance, pocket drains and refills, and
 //  Safe-side share transfers around the module, across three Safes. Every
 //  action may revert; the properties below must hold after every step.
 // ─────────────────────────────────────────────────────────────────────────
 
-const STEPS = Number(process.env.IDLE_INVARIANT_STEPS ?? 200);
-const SEED = Number(process.env.IDLE_INVARIANT_SEED ?? 1);
+const STEPS = Number(process.env.SAVINGS_INVARIANT_STEPS ?? 200);
+const SEED = Number(process.env.SAVINGS_INVARIANT_SEED ?? 1);
 const EXIT_BPS = [1, 250, 2_500, 5_000, 9_999, 10_000];
 
 function mulberry32(seed: number) {
@@ -47,7 +47,7 @@ function mulberry32(seed: number) {
     };
 }
 
-describe("idle savings invariants (Sky)", function () {
+describe("savings invariants (Sky)", function () {
     it(`holds every property over ${STEPS} random steps (seed ${SEED})`, async function () {
         const f: Harness = await loadFixture(deployRegistered);
         const src = SKY_SRC;

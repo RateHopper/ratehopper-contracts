@@ -3,12 +3,12 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISparkPSM3} from "../../interfaces/spark/ISparkPSM3.sol";
-import {ChainlinkSsrRateProvider} from "../idleSavings/ChainlinkSsrRateProvider.sol";
-import {BaseIdleSavingsHandler} from "./BaseIdleSavingsHandler.sol";
+import {ChainlinkSsrRateProvider} from "../savings/ChainlinkSsrRateProvider.sol";
+import {BaseSavingsHandler} from "./BaseSavingsHandler.sol";
 import "../../common/Types.sol";
 
-/// @title SkyIdleSavingsYieldHandler
-/// @notice Idle savings source for sUSDS on Base through Spark PSM3 (what the
+/// @title SkySavingsYieldHandler
+/// @notice Savings source for sUSDS on Base through Spark PSM3 (what the
 ///         Osero Earn SDK calls under the hood): deposit is
 ///         `USDC.approve(PSM3)` + `PSM3.swapExactIn(USDC -> sUSDS)`, redeem is
 ///         `sUSDS.approve(PSM3)` + `PSM3.swapExactIn(sUSDS -> USDC)`, each
@@ -29,7 +29,7 @@ import "../../common/Types.sol";
 /// @dev    Step codes 80 to 85: 80 approve USDC, 81 deposit swap, 82 reset,
 ///         83 approve sUSDS, 84 redeem swap, 85 reset. A PSM3 failure
 ///         (81, 84) is therefore distinguishable from an approval failure.
-contract SkyIdleSavingsYieldHandler is BaseIdleSavingsHandler {
+contract SkySavingsYieldHandler is BaseSavingsHandler {
     ISparkPSM3 public immutable PSM3;
     IERC20 public immutable SUSDS;
     uint256 public immutable REFERRAL_CODE;
@@ -45,16 +45,7 @@ contract SkyIdleSavingsYieldHandler is BaseIdleSavingsHandler {
         ISparkPSM3 _psm3,
         IERC20 _susds,
         uint256 _referralCode
-    )
-        BaseIdleSavingsHandler(
-            YIELD_PROTOCOL_SKY_IDLE_SAVINGS,
-            _usdc,
-            _rateProvider,
-            _susds,
-            _maxToleranceBps,
-            _maxExposureBps
-        )
-    {
+    ) BaseSavingsHandler(YIELD_PROTOCOL_SKY_SAVINGS, _usdc, _rateProvider, _susds, _maxToleranceBps, _maxExposureBps) {
         if (address(_psm3) == address(0)) revert ZeroAddress();
         if (_psm3.usdc() != address(_usdc)) revert InvalidConfig();
         if (_psm3.susds() != address(_susds)) revert InvalidConfig();

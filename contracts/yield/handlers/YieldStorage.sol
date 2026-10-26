@@ -226,4 +226,5 @@ abstract contract YieldStorage {
     error TwapPoolPairMismatch();
     error InvalidTwapReferencePool(address pool);
     error TwapReferenceRemovalNotAllowed(address token);
+    error ConfigureNotSupported();
 }

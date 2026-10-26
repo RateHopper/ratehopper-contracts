@@ -137,6 +137,11 @@
     },
     {
         "inputs": [],
+        "name": "ConfigureNotSupported",
+        "type": "error"
+    },
+    {
+        "inputs": [],
         "name": "DeadlineExpired",
         "type": "error"
     },
@@ -589,6 +594,31 @@
             }
         ],
         "name": "FeesCollected",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "uint8",
+                "name": "protocol",
+                "type": "uint8"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "handler",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "internalType": "bytes",
+                "name": "data",
+                "type": "bytes"
+            }
+        ],
+        "name": "HandlerConfigured",
         "type": "event"
     },
     {
@@ -1734,6 +1764,24 @@
             }
         ],
         "name": "collect",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint8",
+                "name": "protocol",
+                "type": "uint8"
+            },
+            {
+                "internalType": "bytes",
+                "name": "data",
+                "type": "bytes"
+            }
+        ],
+        "name": "configureHandler",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
