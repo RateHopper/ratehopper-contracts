@@ -31,3 +31,4 @@ ignition/deployments/yield-v2/
 yarn-error.log
 eth-sdk/abis/*
 .claude
+ignition/deployments/local-operator-yield-v3/

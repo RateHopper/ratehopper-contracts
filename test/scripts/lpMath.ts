@@ -264,12 +264,12 @@ describe("scripts/lpMath", function () {
         }
 
         for (const fixture of FIXTURES) {
-            it(`openLp calldata carries the exact mint minima (${fixture.name})`, async function () {
+            it(`open calldata carries the exact mint minima (${fixture.name})`, async function () {
                 const iface = await managerInterface();
                 const range = { sqrtPriceX96: getSqrtRatioAtTick(IN_RANGE_TICK + fixture.offset), ...RANGE };
                 const mint = mintMinimums(range, WETH, 4_000n * USDC, 100n);
 
-                const data = iface.encodeFunctionData("openLp", [
+                const data = iface.encodeFunctionData("open", [
                     0,
                     {
                         onBehalfOf: ethers.ZeroAddress,
@@ -282,23 +282,23 @@ describe("scripts/lpMath", function () {
                         swap1: { amountOutMin: 0n, poolParam: "0x" },
                         slippageBps: 100,
                         deadline: 1n,
-                        lpPoolParam: "0x",
+                        poolParam: "0x",
                         stake: false,
                     },
                 ]);
-                const decoded = iface.decodeFunctionData("openLp", data)[1];
+                const decoded = iface.decodeFunctionData("open", data)[1];
                 expect(decoded.mintAmount0Min).to.equal(mint.amount0Min);
                 expect(decoded.mintAmount1Min).to.equal(mint.amount1Min);
                 // The unused side is zero, the used side is a real floor.
                 expect(decoded.mintAmount0Min + decoded.mintAmount1Min).to.be.greaterThan(0n);
             });
 
-            it(`closeLp calldata carries the exact decrease minima (${fixture.name})`, async function () {
+            it(`close calldata carries the exact decrease minima (${fixture.name})`, async function () {
                 const iface = await managerInterface();
                 const range = { sqrtPriceX96: getSqrtRatioAtTick(IN_RANGE_TICK + fixture.offset), ...RANGE };
                 const decrease = decreaseMinimums(range, 10n ** 15n, 10_000n, 100n);
 
-                const data = iface.encodeFunctionData("closeLp", [
+                const data = iface.encodeFunctionData("close", [
                     0,
                     {
                         onBehalfOf: ethers.ZeroAddress,
@@ -313,19 +313,19 @@ describe("scripts/lpMath", function () {
                         minUsdcOut: 0n,
                     },
                 ]);
-                const decoded = iface.decodeFunctionData("closeLp", data)[1];
+                const decoded = iface.decodeFunctionData("close", data)[1];
                 expect(decoded.decreaseAmount0Min).to.equal(decrease.amount0Min);
                 expect(decoded.decreaseAmount1Min).to.equal(decrease.amount1Min);
                 expect(decoded.decreaseAmount0Min + decoded.decreaseAmount1Min).to.be.greaterThan(0n);
             });
 
-            it(`switchLp calldata carries both floors, mint sized off the withdraw floor (${fixture.name})`, async function () {
+            it(`switchPosition calldata carries both floors, mint sized off the withdraw floor (${fixture.name})`, async function () {
                 const iface = await managerInterface();
                 const range = { sqrtPriceX96: getSqrtRatioAtTick(IN_RANGE_TICK + fixture.offset), ...RANGE };
                 const decrease = decreaseMinimums(range, 10n ** 15n, 10_000n, 100n);
                 const mint = switchMintMinimums(range, decrease.amount0Min, decrease.amount1Min, 100n);
 
-                const data = iface.encodeFunctionData("switchLp", [
+                const data = iface.encodeFunctionData("switchPosition", [
                     0,
                     1,
                     {
@@ -337,11 +337,11 @@ describe("scripts/lpMath", function () {
                         tickUpper: range.tickUpper,
                         mintAmount0Min: mint.amount0Min,
                         mintAmount1Min: mint.amount1Min,
-                        lpPoolParam: "0x",
+                        poolParam: "0x",
                         deadline: 1n,
                     },
                 ]);
-                const decoded = iface.decodeFunctionData("switchLp", data)[2];
+                const decoded = iface.decodeFunctionData("switchPosition", data)[2];
                 expect(decoded.decreaseAmount0Min).to.equal(decrease.amount0Min);
                 expect(decoded.decreaseAmount1Min).to.equal(decrease.amount1Min);
                 expect(decoded.mintAmount0Min).to.equal(mint.amount0Min);

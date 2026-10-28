@@ -9,7 +9,7 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../../interfaces/safe/ISafe.sol";
 import {INonfungiblePositionManager} from "../../interfaces/uniswapV3/INonfungiblePositionManager.sol";
-import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, WithdrawLpParams, OpenLpInKindParams, SwapLeg} from "../../interfaces/IYieldHandler.sol";
+import {IYieldHandler, OpenParams, CloseParams, CollectParams, WithdrawParams, OpenInKindParams, SwapLeg} from "../../interfaces/IYieldHandler.sol";
 import {TokenReturnLib} from "../libraries/TokenReturnLib.sol";
 import {TwapOracle} from "../libraries/TwapOracle.sol";
 import {YieldStorage} from "./YieldStorage.sol";
@@ -63,19 +63,19 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
     error OnlyDelegatecall();
     error TokenApprovalFailed(address token);
-    /// @notice Thrown when `OpenLpParams.stake` is set for a protocol whose
+    /// @notice Thrown when `OpenParams.stake` is set for a protocol whose
     ///         handler has no stakePool (e.g. Uniswap V3) or whose stakePool
     ///         no longer accepts deposits (`_stakePoolAcceptsDeposits`).
     error StakingNotSupported();
 
-    /// @dev Inputs for `_mintFromAmounts`, the mint half shared by `openLp`
-    ///      and `openLpInKind`. Grouped in a struct so the shared helper takes
+    /// @dev Inputs for `_mintFromAmounts`, the mint half shared by `open`
+    ///      and `openInKind`. Grouped in a struct so the shared helper takes
     ///      three arguments instead of eleven — the flat form pushes both
     ///      callers past the stack limit once coverage instrumentation is
     ///      layered on (viaIR, see .solcover.js).
     struct MintArgs {
         address onBehalfOf;
-        bytes lpPoolParam;
+        bytes poolParam;
         int24 tickLower;
         int24 tickUpper;
         uint256 amount0;
@@ -112,8 +112,8 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     function _poolTokens(bytes memory poolParam) internal pure virtual returns (address token0, address token1);
 
     /// @inheritdoc IYieldHandler
-    function poolTokens(bytes calldata lpPoolParam) external pure returns (address token0, address token1) {
-        return _poolTokens(lpPoolParam);
+    function poolTokens(bytes calldata poolParam) external pure returns (address token0, address token1) {
+        return _poolTokens(poolParam);
     }
 
     /// @inheritdoc IYieldHandler
@@ -137,7 +137,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
     /// @dev Build NPM mint calldata (MintParams shapes differ per protocol).
     function _buildMintCalldata(
-        bytes memory lpPoolParam,
+        bytes memory poolParam,
         int24 tickLower,
         int24 tickUpper,
         uint256 amount0Desired,
@@ -151,11 +151,11 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev Decode `positions(tokenId)` (fee vs tickSpacing slot differs).
     function _position(
         uint256 tokenId
-    ) internal view virtual returns (address token0, address token1, bytes memory lpPoolParam, uint128 liquidity);
+    ) internal view virtual returns (address token0, address token1, bytes memory poolParam, uint128 liquidity);
 
     /// @dev Stake the just-minted NFT into the protocol's stakePool. Default: the
     ///      protocol has no stakePool, so opting in reverts. Aerodrome overrides it.
-    function _stake(address /* _onBehalfOf */, uint256 /* tokenId */, bytes memory /* lpPoolParam */) internal virtual {
+    function _stake(address /* _onBehalfOf */, uint256 /* tokenId */, bytes memory /* poolParam */) internal virtual {
         revert StakingNotSupported();
     }
 
@@ -264,12 +264,12 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     // ─────────────────────────────────────────────────────────────────────
 
     /// @inheritdoc IYieldHandler
-    function openLp(
-        OpenLpParams calldata p
+    function open(
+        OpenParams calldata p
     ) external onlyDelegatecall returns (uint256 tokenId, uint128 basisUsd6, uint128 used0, uint128 used1) {
-        _validatePoolParamAllowed(p.lpPoolParam);
-        (address token0, address token1) = _poolTokens(p.lpPoolParam);
-        _validatePool(_getPool(p.lpPoolParam), token0, token1);
+        _validatePoolParamAllowed(p.poolParam);
+        (address token0, address token1) = _poolTokens(p.poolParam);
+        _validatePool(_getPool(p.poolParam), token0, token1);
 
         uint256 half0 = p.usdcAmount / 2;
         uint256 half1 = p.usdcAmount - half0;
@@ -282,7 +282,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
             token1,
             MintArgs({
                 onBehalfOf: p.onBehalfOf,
-                lpPoolParam: p.lpPoolParam,
+                poolParam: p.poolParam,
                 tickLower: p.tickLower,
                 tickUpper: p.tickUpper,
                 amount0: desired0,
@@ -299,15 +299,15 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
         // Opt-in stakePool stake. Runs AFTER the ownerOf==Safe check and basis so
         // the mint accounting is unaffected; staking then moves the NFT to the
-        // stakePool (closeLp unstakes it first).
+        // stakePool (close unstakes it first).
         if (p.stake) {
-            _stake(p.onBehalfOf, tokenId, p.lpPoolParam);
+            _stake(p.onBehalfOf, tokenId, p.poolParam);
         }
     }
 
     /// @inheritdoc IYieldHandler
-    function closeLp(
-        CloseLpParams calldata p,
+    function close(
+        CloseParams calldata p,
         uint128 basisForExit
     ) external onlyDelegatecall returns (uint128 currentValueUsd6) {
         (address token0, address token1, , uint128 liquidity) = _position(p.tokenId);
@@ -400,9 +400,9 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev In-kind close leg of a switch: decrease-all + collect + burn with
     ///      NO swaps — both pool tokens land on the Safe as-is. Fees are
     ///      harvested first through the manager so `feeCollectBps` applies to
-    ///      fees only, exactly as in closeLp.
-    function withdrawLp(
-        WithdrawLpParams calldata p
+    ///      fees only, exactly as in close.
+    function withdraw(
+        WithdrawParams calldata p
     ) external onlyDelegatecall returns (address token0, address token1, uint256 amount0, uint256 amount1) {
         uint128 liquidity;
         (token0, token1, , liquidity) = _position(p.tokenId);
@@ -453,22 +453,22 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     /// @dev In-kind open leg of a switch: mint straight from the withdrawn
     ///      token amounts — no swaps, so the only price protection is the
     ///      mint minimums (the withdraw leg's decrease minimums bound the
-    ///      input side). Never staked: staking stays an explicit openLp
+    ///      input side). Never staked: staking stays an explicit open
     ///      opt-in.
-    function openLpInKind(
-        OpenLpInKindParams calldata p
+    function openInKind(
+        OpenInKindParams calldata p
     ) external onlyDelegatecall returns (uint256 tokenId, uint128 used0, uint128 used1) {
-        _validatePoolParamAllowed(p.lpPoolParam);
-        (address token0, address token1) = _poolTokens(p.lpPoolParam);
+        _validatePoolParamAllowed(p.poolParam);
+        (address token0, address token1) = _poolTokens(p.poolParam);
         if (token0 != p.token0 || token1 != p.token1) revert WrongTokenPair();
-        _validatePool(_getPool(p.lpPoolParam), token0, token1);
+        _validatePool(_getPool(p.poolParam), token0, token1);
 
         (tokenId, used0, used1) = _mintFromAmounts(
             token0,
             token1,
             MintArgs({
                 onBehalfOf: p.onBehalfOf,
-                lpPoolParam: p.lpPoolParam,
+                poolParam: p.poolParam,
                 tickLower: p.tickLower,
                 tickUpper: p.tickUpper,
                 amount0: p.amount0,
@@ -480,8 +480,14 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         );
     }
 
+    /// @notice Nothing to tune: the floors are the manager's TWAP references
+    ///         and slippage cap.
+    function configure(bytes calldata) external view onlyDelegatecall {
+        revert ConfigureNotSupported();
+    }
+
     /// @inheritdoc IYieldHandler
-    function collectLp(CollectLpParams calldata p) external onlyDelegatecall {
+    function collect(CollectParams calldata p) external onlyDelegatecall {
         // A staked position earns stakePool emissions INSTEAD of trading fees —
         // the pool redirects its fees away from staked liquidity — so claiming
         // the emissions IS the complete harvest and the NFT never leaves the
@@ -546,7 +552,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     ///      leg-validated swap for any other token. Returns the amount now
     ///      available for the mint.
     function _acquireSide(
-        OpenLpParams calldata p,
+        OpenParams calldata p,
         address token,
         uint256 halfUsdc,
         SwapLeg calldata leg,
@@ -595,7 +601,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
 
     /// @dev Require the Safe to own `tokenId` on the position manager.
     function _requireOwnedBy(address _onBehalfOf, uint256 tokenId) internal view {
-        if (IERC721(POSITION_MANAGER).ownerOf(tokenId) != _onBehalfOf) revert LpNotOnSafe();
+        if (IERC721(POSITION_MANAGER).ownerOf(tokenId) != _onBehalfOf) revert PositionNotOnSafe();
     }
 
     /// @dev Collect accrued fees through the manager so `feeCollectBps` can
@@ -763,13 +769,13 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
     ///      checked against a number the same caller supplied.
     ///
     ///      Deriving rather than merely validating also fixes the case that has
-    ///      no honest answer otherwise: `collectLp` swaps fees whose size is
+    ///      no honest answer otherwise: `collect` swaps fees whose size is
     ///      unknown until the collect executes, so no caller-supplied absolute
     ///      minimum can be right. Such callers pass 0 and get the floor.
     ///
     ///      Reverts when the token has no reference configured — swapping a
     ///      token nobody has priced is exactly the case that must not proceed,
-    ///      and `withdrawLp` still exits such a position in kind.
+    ///      and `withdraw` still exits such a position in kind.
     function _twapMinOut(
         address tokenIn,
         address tokenOut,
@@ -830,7 +836,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         }
     }
 
-    /// @dev The mint half shared by `openLp` and `openLpInKind`: approve the
+    /// @dev The mint half shared by `open` and `openInKind`: approve the
     ///      position manager for both sides, mint through the Safe, enforce the
     ///      per-protocol liquidity floor, reset both allowances, and confirm the
     ///      Safe owns the new NFT. The (tokenId, liquidity, amount0, amount1)
@@ -844,7 +850,7 @@ abstract contract BaseYieldHandler is IYieldHandler, YieldStorage {
         _safeApprove(a.onBehalfOf, token1, POSITION_MANAGER, a.amount1, 23);
 
         bytes memory mintCall = _buildMintCalldata(
-            a.lpPoolParam,
+            a.poolParam,
             a.tickLower,
             a.tickUpper,
             a.amount0,

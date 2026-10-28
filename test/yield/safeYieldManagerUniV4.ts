@@ -17,10 +17,10 @@ import { ZERO_LEG, leg } from "../helpers/utils";
 //  two-hop allowance enforcement, an actions-decoding MockV4PositionManager,
 //  a V4_SWAP MockUniversalRouter, MockStateView) plus the shared mocks from
 //  RatehopperMocks.sol. Covers ERC20 (WETH/USDC-shaped) and native ETH
-//  (currency0 == address(0)) pools through the full openLp / closeLp /
-//  collectLp lifecycle, every handler revert branch, the Permit2/ERC20
+//  (currency0 == address(0)) pools through the full open / close /
+//  collect lifecycle, every handler revert branch, the Permit2/ERC20
 //  approval-reset invariant, the Safe-side collect-fee skim, and V3<->V4 /
-//  Aerodrome<->V4 switchLp through the untouched manager.
+//  Aerodrome<->V4 switchPosition through the untouched manager.
 // ─────────────────────────────────────────────────────────────────────────
 
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -57,7 +57,7 @@ let V4_WRONG1_KEY: string; // trades {WETH, other} — wrong currency1 for a WET
 
 const USDC_AMOUNT = 1_000_000n;
 const HALF = USDC_AMOUNT / 2n;
-const WETH_OUT = 2_000_000n; // token/ETH produced by the openLp swap
+const WETH_OUT = 2_000_000n; // token/ETH produced by the open swap
 const CLOSE_OUT = 600_000n; // USDC produced by a close/collect swap
 
 function openParams(safeAddr: string, poolParam: string, overrides: Record<string, any> = {}) {
@@ -72,7 +72,7 @@ function openParams(safeAddr: string, poolParam: string, overrides: Record<strin
         swap1: ZERO_LEG,
         slippageBps: SLIP,
         deadline: DEADLINE,
-        lpPoolParam: poolParam,
+        poolParam: poolParam,
         stake: false,
         ...overrides,
     };
@@ -154,7 +154,7 @@ async function deployUniV4Harness() {
     V4_USDC0_KEY = encodeUniV4PoolParam(usdcAddr, tokenCAddr, 500, 10, ZERO);
     V4_WRONG1_KEY = encodeUniV4PoolParam(wethAddr, tokenCAddr, 500, 10, ZERO);
 
-    // Uniswap V3 side (switchLp counterparty)
+    // Uniswap V3 side (switchPosition counterparty)
     const UniPool = await ethers.getContractFactory("MockUniswapV3Pool");
     const uniPool = await UniPool.deploy(wethAddr, usdcAddr, Q96, 10n ** 18n);
     await uniPool.waitForDeployment();
@@ -169,7 +169,7 @@ async function deployUniV4Harness() {
     const uniRouter = await UniRouter.deploy();
     await uniRouter.waitForDeployment();
 
-    // Aerodrome side (switchLp counterparty)
+    // Aerodrome side (switchPosition counterparty)
     const CLPool = await ethers.getContractFactory("MockCLPool");
     const clPool = await CLPool.deploy(wethAddr, usdcAddr, Q96, 10n ** 18n);
     await clPool.waitForDeployment();
@@ -258,7 +258,7 @@ async function deployUniV4Harness() {
     // address(0), pointed at a WETH/USDC pool — WETH is substituted only for the
     // tick math. Both keys are needed: swaps on a native pool read address(0),
     // while the in-kind switch values its residue under WETH, because
-    // `withdrawLp` hands a native side back wrapped.
+    // `withdraw` hands a native side back wrapped.
     const [c0, c1] =
         tokenCAddr.toLowerCase() < usdcAddr.toLowerCase() ? [tokenCAddr, usdcAddr] : [usdcAddr, tokenCAddr];
     const tokenCRef = await UniPool.deploy(c0, c1, Q96, 10n ** 18n);
@@ -384,20 +384,20 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
         it("rejects direct (non-delegatecall) entry", async function () {
             const { v4Handler, safeAddr } = await loadFixture(deployUniV4Harness);
-            await expect(v4Handler.openLp(openParams(safeAddr, V4_KEY))).to.be.revertedWithCustomError(
+            await expect(v4Handler.open(openParams(safeAddr, V4_KEY))).to.be.revertedWithCustomError(
                 v4Handler,
                 "OnlyDelegatecall",
             );
-            await expect(v4Handler.closeLp(closeParams(safeAddr, 1, V4_KEY), 0)).to.be.revertedWithCustomError(
+            await expect(v4Handler.close(closeParams(safeAddr, 1, V4_KEY), 0)).to.be.revertedWithCustomError(
                 v4Handler,
                 "OnlyDelegatecall",
             );
-            await expect(v4Handler.collectLp(collectParams(safeAddr, 1, V4_KEY))).to.be.revertedWithCustomError(
+            await expect(v4Handler.collect(collectParams(safeAddr, 1, V4_KEY))).to.be.revertedWithCustomError(
                 v4Handler,
                 "OnlyDelegatecall",
             );
             await expect(
-                v4Handler.withdrawLp({
+                v4Handler.withdraw({
                     onBehalfOf: safeAddr,
                     tokenId: 1,
                     decreaseAmount0Min: 0,
@@ -406,7 +406,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 }),
             ).to.be.revertedWithCustomError(v4Handler, "OnlyDelegatecall");
             await expect(
-                v4Handler.openLpInKind({
+                v4Handler.openInKind({
                     onBehalfOf: safeAddr,
                     token0: safeAddr,
                     token1: safeAddr,
@@ -416,10 +416,20 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                     tickUpper: 100,
                     mintAmount0Min: 0,
                     mintAmount1Min: 0,
-                    lpPoolParam: V4_KEY,
+                    poolParam: V4_KEY,
                     deadline: DEADLINE,
                 }),
             ).to.be.revertedWithCustomError(v4Handler, "OnlyDelegatecall");
+        });
+
+        it("has nothing to configure", async function () {
+            const f = await loadFixture(deployUniV4Harness);
+            const data = ethers.AbiCoder.defaultAbiCoder().encode(["uint16", "uint16"], [100, 5_000]);
+            await expect(f.manager.connect(f.deployer).configureHandler(UNISWAP_V4, data)).to.be.revertedWithCustomError(
+                f.v4Handler,
+                "ConfigureNotSupported",
+            );
+            await expect(f.v4Handler.configure(data)).to.be.revertedWithCustomError(f.v4Handler, "OnlyDelegatecall");
         });
 
         it("admits a hooked pool key only through the timelock", async function () {
@@ -484,20 +494,20 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             } = await loadFixture(deployUniV4Harness);
             const hooked = encodeUniV4PoolParam(wethAddr, usdcAddr, 500, 10, safeAddr);
             await (await stateView.setPool(ethers.keccak256(hooked), Q96, 10n ** 18n)).wait();
-            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY));
             await (await universalRouter.setOutputFor(usdcAddr, CLOSE_OUT)).wait();
 
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(CLOSE_OUT, hooked) })),
+                    .close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(CLOSE_OUT, hooked) })),
             ).to.be.revertedWithCustomError(v4Handler, "PoolParamNotAllowed");
 
             await (await timelockCall(timelock, manager, "allowHookedPoolParam", [UNISWAP_V4, hooked])).wait();
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(CLOSE_OUT, hooked) })),
+                    .close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(CLOSE_OUT, hooked) })),
             ).to.emit(manager, "PositionClosed");
         });
 
@@ -541,11 +551,11 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         });
     });
 
-    describe("openLp (ERC20 pair)", function () {
+    describe("open (ERC20 pair)", function () {
         it("opens a V4 position: swap leg, liquidity mint, basis at executed rate", async function () {
             const { manager, operatorEOA, safeAddr, v4Pm, weth, usdc } = await loadFixture(deployUniV4Harness);
 
-            await expect(manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY)))
+            await expect(manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY)))
                 .to.emit(manager, "PositionOpened")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, WETH_OUT, HALF, USDC_AMOUNT);
 
@@ -558,7 +568,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         it("resets both Permit2 hops after the mint", async function () {
             const { manager, operatorEOA, safeAddr, permit2, v4Pm, universalRouter, weth, usdc, wethAddr, usdcAddr } =
                 await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY));
 
             const pmAddr = await v4Pm.getAddress();
             const urAddr = await universalRouter.getAddress();
@@ -580,28 +590,28 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { mintAmount0Min: WETH_OUT })),
+                    .open(UNISWAP_V4, openParams(safeAddr, V4_KEY, { mintAmount0Min: WETH_OUT })),
             ).to.be.revertedWithCustomError(v4Handler, "MintAmountBelowMin");
         });
 
         it("rejects staking (V4 has no stakePool)", async function () {
             const { manager, operatorEOA, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
             await expect(
-                manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { stake: true })),
+                manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY, { stake: true })),
             ).to.be.revertedWithCustomError(v4Handler, "StakingNotSupported");
         });
 
         it("rejects a pool param outside the allow-list", async function () {
             const { manager, operatorEOA, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
             await expect(
-                manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_BAD_KEY)),
+                manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_BAD_KEY)),
             ).to.be.revertedWithCustomError(v4Handler, "PoolParamNotAllowed");
         });
 
         it("rejects an uninitialized pool (lazy V4 pools read a zero sqrt price)", async function () {
             const { manager, operatorEOA, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
             await expect(
-                manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_UNINIT_KEY)),
+                manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_UNINIT_KEY)),
             ).to.be.revertedWithCustomError(v4Handler, "PoolNotInitialized");
         });
 
@@ -609,7 +619,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const { manager, operatorEOA, deployer, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
             await (await manager.connect(deployer).setMinPoolLiquidity(UNISWAP_V4, 10n ** 19n)).wait();
             await expect(
-                manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY)),
+                manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY)),
             ).to.be.revertedWithCustomError(v4Handler, "PoolTooThin");
         });
 
@@ -617,7 +627,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const { manager, operatorEOA, deployer, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
             await (await manager.connect(deployer).setMinPositionLiquidity(UNISWAP_V4, (1n << 127n) - 1n)).wait();
             await expect(
-                manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY)),
+                manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY)),
             ).to.be.revertedWithCustomError(v4Handler, "PositionLiquidityTooLow");
         });
 
@@ -629,7 +639,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { tickLower: -887_200, tickUpper: 887_200 })),
+                    .open(UNISWAP_V4, openParams(safeAddr, V4_KEY, { tickLower: -887_200, tickUpper: 887_200 })),
             ).to.be.revertedWithCustomError(v4Handler, "PositionLiquidityTooLow");
         });
 
@@ -639,7 +649,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { mintAmount1Min: 200_000n })),
+                    .open(UNISWAP_V4, openParams(safeAddr, V4_KEY, { mintAmount1Min: 200_000n })),
             ).to.be.revertedWithCustomError(v4Handler, "MintAmountBelowMin");
         });
 
@@ -648,7 +658,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(WETH_OUT, V4_WRONG1_KEY) })),
+                    .open(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(WETH_OUT, V4_WRONG1_KEY) })),
             ).to.be.revertedWithCustomError(v4Handler, "WrongTokenPair");
         });
 
@@ -657,7 +667,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 await loadFixture(deployUniV4Harness);
             await (await universalRouter.setOutput(0)).wait();
             await expect(
-                manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY)),
+                manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY)),
             ).to.be.revertedWithCustomError(v4Handler, "SwapFailed");
         });
 
@@ -665,14 +675,14 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const { manager, operatorEOA, safeAddr, stranger, v4Pm, v4Handler } = await loadFixture(deployUniV4Harness);
             await (await v4Pm.setMintOwnerOverride(stranger.address)).wait();
             await expect(
-                manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY)),
-            ).to.be.revertedWithCustomError(v4Handler, "LpNotOnSafe");
+                manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY)),
+            ).to.be.revertedWithCustomError(v4Handler, "PositionNotOnSafe");
         });
 
         it("validates the swap leg: slippage bounds and route", async function () {
             const { manager, operatorEOA, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
             const open = (overrides: Record<string, any>) =>
-                manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, overrides));
+                manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY, overrides));
 
             await expect(open({ slippageBps: 0 })).to.be.revertedWithCustomError(v4Handler, "SlippageTooLow");
             await expect(open({ slippageBps: 301 })).to.be.revertedWithCustomError(v4Handler, "SlippageAboveMax");
@@ -697,7 +707,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await (
                 await manager
                     .connect(operatorEOA)
-                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) }))
+                    .open(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) }))
             ).wait();
             expect(await universalRouter.lastAmountIn()).to.equal(halfUsdc);
             expect(await universalRouter.lastAmountOutMinimum()).to.equal(floor);
@@ -712,14 +722,14 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) })),
+                    .open(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) })),
             ).to.be.revertedWith("ur: too little received");
 
             await (await universalRouter.setOutput(floor)).wait();
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) })),
+                    .open(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(1n, V4_KEY) })),
             ).to.emit(manager, "PositionOpened");
             expect(await universalRouter.lastAmountOutMinimum()).to.equal(floor);
         });
@@ -730,14 +740,14 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(0, V4_KEY) })),
+                    .open(UNISWAP_V4, openParams(safeAddr, V4_KEY, { swap0: leg(0, V4_KEY) })),
             ).to.be.revertedWithCustomError(v4Handler, "InvalidSwapAmountOutMin");
         });
 
         it("maps module-call failures to their step codes", async function () {
             const { manager, operatorEOA, safeAddr, safe, usdcAddr, permit2, universalRouter, v4Pm, v4Handler } =
                 await loadFixture(deployUniV4Harness);
-            const open = () => manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            const open = () => manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY));
 
             // Leg swap: ERC20 approve USDC -> Permit2 is the first module call.
             await (await safe.setFail(usdcAddr, 1)).wait();
@@ -765,7 +775,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await (await safe.setFailData(reason)).wait();
             await (await safe.setFail(await universalRouter.getAddress(), 2)).wait();
             await expect(
-                manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY)),
+                manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY)),
             ).to.be.revertedWith("boom");
         });
 
@@ -773,17 +783,17 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const { manager, operatorEOA, safeAddr, usdc, v4Handler, usdcAddr } = await loadFixture(deployUniV4Harness);
             // The zero-reset after the leg swap returns false — must revert.
             await (await usdc.setFalseApproveZero(true)).wait();
-            await expect(manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY)))
+            await expect(manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY)))
                 .to.be.revertedWithCustomError(v4Handler, "TokenApprovalFailed")
                 .withArgs(usdcAddr);
         });
     });
 
-    describe("openLp (native ETH pair)", function () {
+    describe("open (native ETH pair)", function () {
         it("opens a native position: ETH swap output, value-settled mint", async function () {
             const { manager, operatorEOA, safeAddr, v4Pm } = await loadFixture(deployUniV4Harness);
 
-            await expect(manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY)))
+            await expect(manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY)))
                 .to.emit(manager, "PositionOpened")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, WETH_OUT, HALF, USDC_AMOUNT);
 
@@ -798,7 +808,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await (await v4Pm.setMintUse(1_500_000n, (1n << 128n) - 1n)).wait();
 
             // basis = 1.5M * (500k USDC / 2M wei) + 500k = 875k
-            await expect(manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY)))
+            await expect(manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY)))
                 .to.emit(manager, "PositionOpened")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, 1_500_000n, HALF, 875_000n);
 
@@ -806,10 +816,10 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         });
     });
 
-    describe("closeLp (ERC20 pair)", function () {
+    describe("close (ERC20 pair)", function () {
         async function openedFixture() {
             const ctx = await loadFixture(deployUniV4Harness);
-            await ctx.manager.connect(ctx.operatorEOA).openLp(UNISWAP_V4, openParams(ctx.safeAddr, V4_KEY));
+            await ctx.manager.connect(ctx.operatorEOA).open(UNISWAP_V4, openParams(ctx.safeAddr, V4_KEY));
             await (await ctx.universalRouter.setOutputFor(ctx.usdcAddr, CLOSE_OUT)).wait();
             return ctx;
         }
@@ -820,7 +830,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await (await v4Pm.setOwed(1, 40_000n, 20_000n)).wait();
 
             const usdcBefore = await usdc.balanceOf(safeAddr);
-            const tx = manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY));
+            const tx = manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY));
 
             // collected 40k WETH / 20k USDC, 2.5% skim = 1000 / 500
             await expect(tx)
@@ -845,7 +855,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const { manager, operatorEOA, safeAddr, v4Pm } = ctx;
 
             await expect(
-                manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { exitBps: 5000 })),
+                manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { exitBps: 5000 })),
             )
                 .to.emit(manager, "PositionClosed")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, HALF, anyValue, anyValue, 5000, 0n);
@@ -859,7 +869,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 await loadFixture(deployUniV4Harness);
             // Full-range small mint => liquidity (~5000) far below basis (10_000),
             // so exitBps=1 rounds liquidity to 0 while basisForExit is 1.
-            await manager.connect(operatorEOA).openLp(
+            await manager.connect(operatorEOA).open(
                 UNISWAP_V4,
                 openParams(safeAddr, V4_KEY, {
                     usdcAmount: 10_000n,
@@ -869,7 +879,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             );
             await (await universalRouter.setOutputFor(usdcAddr, CLOSE_OUT)).wait();
             await expect(
-                manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { exitBps: 1 })),
+                manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { exitBps: 1 })),
             ).to.be.revertedWithCustomError(v4Handler, "InvalidExitBps");
         });
 
@@ -879,7 +889,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { minUsdcOut: 10n ** 12n })),
+                    .close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { minUsdcOut: 10n ** 12n })),
             ).to.be.revertedWithCustomError(v4Handler, "MinUsdcOutNotMet");
         });
 
@@ -890,7 +900,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await (await weth.setRevertTransferTo(treasury.address)).wait();
             await (await usdc.setFalseTransferTo(treasury.address)).wait();
 
-            const tx = manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY));
+            const tx = manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY));
             await expect(tx).to.emit(manager, "CollectFeeTransferFailed").withArgs(safeAddr, 1n, ctx.wethAddr, 1_000n);
             await expect(tx).to.emit(manager, "CollectFeeTransferFailed").withArgs(safeAddr, 1n, ctx.usdcAddr, 500n);
             await expect(tx)
@@ -903,7 +913,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const ctx = await openedFixture();
             const { manager, operatorEOA, safeAddr, safe, v4Pm, v4Handler } = ctx;
             await (await safe.setFail(await v4Pm.getAddress(), 1)).wait();
-            await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY)))
+            await expect(manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY)))
                 .to.be.revertedWithCustomError(v4Handler, "ModuleCallFailed")
                 .withArgs(60);
         });
@@ -918,12 +928,12 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .collectLp(
+                    .collect(
                         UNISWAP_V4,
                         collectParams(safeAddr, 1, V4_KEY, { swapFeesToUsdc: true, swap0: leg(0, V4_KEY) }),
                     ),
             ).to.emit(manager, "FeesCollected");
-            await expect(manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY))).to.emit(
+            await expect(manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY))).to.emit(
                 manager,
                 "PositionClosed",
             );
@@ -939,7 +949,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
             const tx = manager
                 .connect(operatorEOA)
-                .closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(0, V4_KEY) }));
+                .close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { swap0: leg(0, V4_KEY) }));
             await expect(tx)
                 .to.emit(manager, "PositionClosed")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, 500_000n, 0n, 10_000, 0n);
@@ -950,10 +960,10 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         });
     });
 
-    describe("closeLp (native ETH pair)", function () {
+    describe("close (native ETH pair)", function () {
         async function openedNativeFixture() {
             const ctx = await loadFixture(deployUniV4Harness);
-            await ctx.manager.connect(ctx.operatorEOA).openLp(UNISWAP_V4, openParams(ctx.safeAddr, V4_NATIVE_KEY));
+            await ctx.manager.connect(ctx.operatorEOA).open(UNISWAP_V4, openParams(ctx.safeAddr, V4_NATIVE_KEY));
             await (await ctx.universalRouter.setOutputFor(ctx.usdcAddr, CLOSE_OUT)).wait();
             return ctx;
         }
@@ -964,7 +974,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await (await v4Pm.setOwed(1, 40_000n, 20_000n)).wait();
 
             const treasuryEthBefore = await ethers.provider.getBalance(treasury.address);
-            const tx = manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_NATIVE_KEY));
+            const tx = manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_NATIVE_KEY));
 
             await expect(tx)
                 .to.emit(manager, "FeesCollected")
@@ -986,7 +996,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await (await timelockCall(timelock, manager, "setTreasury", [await reg.getAddress()])).wait();
             await (await v4Pm.setOwed(1, 40_000n, 0n)).wait();
 
-            const tx = manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_NATIVE_KEY));
+            const tx = manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_NATIVE_KEY));
             await expect(tx).to.emit(manager, "CollectFeeTransferFailed").withArgs(safeAddr, 1n, ZERO, 1_000n);
             await expect(tx)
                 .to.emit(manager, "FeesCollected")
@@ -994,10 +1004,10 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         });
     });
 
-    describe("collectLp", function () {
+    describe("collect", function () {
         async function openedWithFees() {
             const ctx = await loadFixture(deployUniV4Harness);
-            await ctx.manager.connect(ctx.operatorEOA).openLp(UNISWAP_V4, openParams(ctx.safeAddr, V4_KEY));
+            await ctx.manager.connect(ctx.operatorEOA).open(UNISWAP_V4, openParams(ctx.safeAddr, V4_KEY));
             await (await ctx.v4Pm.setOwed(1, 40_000n, 20_000n)).wait();
             return ctx;
         }
@@ -1008,7 +1018,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const wethBefore = await weth.balanceOf(safeAddr);
             const usdcBefore = await usdc.balanceOf(safeAddr);
 
-            await expect(manager.connect(operatorEOA).collectLp(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY)))
+            await expect(manager.connect(operatorEOA).collect(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY)))
                 .to.emit(manager, "FeesCollected")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, ctx.wethAddr, 40_000n, 1_000n, ctx.usdcAddr, 20_000n, 500n);
 
@@ -1027,7 +1037,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
             await manager
                 .connect(operatorEOA)
-                .collectLp(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY, { swapFeesToUsdc: true }));
+                .collect(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY, { swapFeesToUsdc: true }));
 
             // 39k net WETH fees swapped for 600k USDC + 19.5k net USDC fees.
             expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore);
@@ -1037,13 +1047,13 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         it("leaves a dynamic V4 fee delta in kind when its independent floor rounds to zero", async function () {
             const ctx = await loadFixture(deployUniV4Harness);
             const { manager, operatorEOA, safeAddr, universalRouter, v4Pm, weth } = ctx;
-            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY));
             await (await v4Pm.setOwed(1, 1n, 0n)).wait();
             const callsBefore = await universalRouter.callCount();
             const wethBefore = await weth.balanceOf(safeAddr);
 
             await expect(
-                manager.connect(operatorEOA).collectLp(
+                manager.connect(operatorEOA).collect(
                     UNISWAP_V4,
                     collectParams(safeAddr, 1, V4_KEY, {
                         swapFeesToUsdc: true,
@@ -1062,27 +1072,27 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .collectLp(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY, { swapFeesToUsdc: true, deadline: 1 })),
+                    .collect(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY, { swapFeesToUsdc: true, deadline: 1 })),
             ).to.be.revertedWithCustomError(v4Handler, "DeadlineExpired");
             // The no-swap path ignores the stale deadline.
             await expect(
-                manager.connect(operatorEOA).collectLp(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY, { deadline: 1 })),
+                manager.connect(operatorEOA).collect(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY, { deadline: 1 })),
             ).to.emit(manager, "FeesCollected");
         });
 
         it("handles a fee-less harvest and a skim rounded to zero", async function () {
             const ctx = await loadFixture(deployUniV4Harness);
             const { manager, operatorEOA, safeAddr, v4Pm, treasury, usdc } = ctx;
-            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY));
 
             // No fees at all: amounts 0, fee 0.
-            await expect(manager.connect(operatorEOA).collectLp(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY)))
+            await expect(manager.connect(operatorEOA).collect(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY)))
                 .to.emit(manager, "FeesCollected")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, ctx.wethAddr, 0n, 0n, ctx.usdcAddr, 0n, 0n);
 
             // 39 * 250 / 10000 = 0 — fee rounds to zero, nothing skimmed.
             await (await v4Pm.setOwed(1, 0n, 39n)).wait();
-            await expect(manager.connect(operatorEOA).collectLp(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY)))
+            await expect(manager.connect(operatorEOA).collect(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY)))
                 .to.emit(manager, "FeesCollected")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, ctx.wethAddr, 0n, 0n, ctx.usdcAddr, 39n, 0n);
             expect(await usdc.balanceOf(treasury.address)).to.equal(0n);
@@ -1093,18 +1103,18 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const { manager, operatorEOA, safeAddr, stranger, v4Pm, v4Handler } = ctx;
             await (await v4Pm.setOwner(1, stranger.address)).wait();
             await expect(
-                manager.connect(operatorEOA).collectLp(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY)),
-            ).to.be.revertedWithCustomError(v4Handler, "LpNotOnSafe");
+                manager.connect(operatorEOA).collect(UNISWAP_V4, collectParams(safeAddr, 1, V4_KEY)),
+            ).to.be.revertedWithCustomError(v4Handler, "PositionNotOnSafe");
         });
 
         it("harvests native ETH fees", async function () {
             const ctx = await loadFixture(deployUniV4Harness);
             const { manager, operatorEOA, safeAddr, v4Pm, treasury } = ctx;
-            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(ctx.safeAddr, V4_NATIVE_KEY));
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(ctx.safeAddr, V4_NATIVE_KEY));
             await (await v4Pm.setOwed(1, 40_000n, 0n)).wait();
             const treasuryEthBefore = await ethers.provider.getBalance(treasury.address);
 
-            await expect(manager.connect(operatorEOA).collectLp(UNISWAP_V4, collectParams(safeAddr, 1, V4_NATIVE_KEY)))
+            await expect(manager.connect(operatorEOA).collect(UNISWAP_V4, collectParams(safeAddr, 1, V4_NATIVE_KEY)))
                 .to.emit(manager, "FeesCollected")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, ZERO, 40_000n, 1_000n, ctx.usdcAddr, 0n, 0n);
 
@@ -1128,7 +1138,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const { manager, operatorEOA, safeAddr, universalRouter, usdcAddr, tokenC, tokenCAddr, v4Pm, usdc } =
                 await loadFixture(deployUniV4Harness);
 
-            await expect(manager.connect(operatorEOA).openLp(UNISWAP_V4, usdc0Open(safeAddr)))
+            await expect(manager.connect(operatorEOA).open(UNISWAP_V4, usdc0Open(safeAddr)))
                 .to.emit(manager, "PositionOpened")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, HALF, WETH_OUT, USDC_AMOUNT);
 
@@ -1138,7 +1148,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             // Harvest with the tokenC (currency1) fees swapped to USDC.
             const usdcBefore = await usdc.balanceOf(safeAddr);
             await expect(
-                manager.connect(operatorEOA).collectLp(
+                manager.connect(operatorEOA).collect(
                     UNISWAP_V4,
                     collectParams(safeAddr, 1, V4_USDC0_KEY, {
                         swapFeesToUsdc: true,
@@ -1153,7 +1163,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore + 19_500n + CLOSE_OUT);
 
             await expect(
-                manager.connect(operatorEOA).closeLp(
+                manager.connect(operatorEOA).close(
                     UNISWAP_V4,
                     closeParams(safeAddr, 1, V4_USDC0_KEY, {
                         swap0: ZERO_LEG,
@@ -1171,7 +1181,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 await loadFixture(deployUniV4Harness);
             // Full-range mint => liquidity (~4000) below basis (8000); exitBps=1
             // rounds BOTH the liquidity and the basis slice to zero.
-            await manager.connect(operatorEOA).openLp(
+            await manager.connect(operatorEOA).open(
                 UNISWAP_V4,
                 openParams(safeAddr, V4_KEY, {
                     usdcAmount: 8_000n,
@@ -1183,7 +1193,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             const liquidityBefore = await v4Pm.getPositionLiquidity(1);
 
             await expect(
-                manager.connect(operatorEOA).closeLp(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { exitBps: 1 })),
+                manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { exitBps: 1 })),
             )
                 .to.emit(manager, "PositionClosed")
                 .withArgs(safeAddr, UNISWAP_V4, 1n, 0n, 0n, 0n, 1, 0n);
@@ -1193,7 +1203,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         });
     });
 
-    describe("switchLp across V3, Aerodrome and V4", function () {
+    describe("switchPosition across V3, Aerodrome and V4", function () {
         function switchParams(
             safeAddr: string,
             tokenId: bigint | number,
@@ -1209,7 +1219,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
                 tickUpper: 100,
                 mintAmount0Min: 0,
                 mintAmount1Min: 0,
-                lpPoolParam: openPoolParam,
+                poolParam: openPoolParam,
                 deadline: DEADLINE,
                 ...overrides,
             };
@@ -1217,10 +1227,10 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
         it("switches V3 -> V4 in kind with zero manager changes", async function () {
             const { manager, operatorEOA, safeAddr, v4Handler, v4Pm } = await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
+            await manager.connect(operatorEOA).open(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
 
             await expect(
-                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)),
+                manager.connect(operatorEOA).switchPosition(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)),
             )
                 .to.emit(manager, "PositionSwitched")
                 .withArgs(safeAddr, UNISWAP_V3, UNISWAP_V4, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
@@ -1233,10 +1243,10 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
         it("switches V3 -> native V4, unwrapping the withdrawn WETH", async function () {
             const { manager, operatorEOA, safeAddr, weth, v4Pm } = await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
+            await manager.connect(operatorEOA).open(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
 
             await expect(
-                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_NATIVE_KEY)),
+                manager.connect(operatorEOA).switchPosition(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_NATIVE_KEY)),
             )
                 .to.emit(manager, "PositionSwitched")
                 .withArgs(safeAddr, UNISWAP_V3, UNISWAP_V4, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
@@ -1248,10 +1258,10 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
         it("switches V4 -> V3, wrapping the native side of the withdrawal", async function () {
             const { manager, operatorEOA, safeAddr, weth, uniHandler, uniNpm } = await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY));
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY));
 
             await expect(
-                manager.connect(operatorEOA).switchLp(UNISWAP_V4, UNISWAP_V3, switchParams(safeAddr, 1, FEE_TIER)),
+                manager.connect(operatorEOA).switchPosition(UNISWAP_V4, UNISWAP_V3, switchParams(safeAddr, 1, FEE_TIER)),
             )
                 .to.emit(manager, "PositionSwitched")
                 .withArgs(safeAddr, UNISWAP_V4, UNISWAP_V3, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
@@ -1265,10 +1275,10 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
         it("switches Aerodrome -> V4 in kind with zero manager changes", async function () {
             const { manager, operatorEOA, safeAddr, v4Handler, v4Pm } = await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(AERODROME, openParams(safeAddr, TICK_SPACING));
+            await manager.connect(operatorEOA).open(AERODROME, openParams(safeAddr, TICK_SPACING));
 
             await expect(
-                manager.connect(operatorEOA).switchLp(AERODROME, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)),
+                manager.connect(operatorEOA).switchPosition(AERODROME, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)),
             )
                 .to.emit(manager, "PositionSwitched")
                 .withArgs(safeAddr, AERODROME, UNISWAP_V4, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
@@ -1281,10 +1291,10 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
         it("switches V4 -> Aerodrome, wrapping the native side of the withdrawal", async function () {
             const { manager, operatorEOA, safeAddr, aeroHandler, clNpm } = await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY));
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY));
 
             await expect(
-                manager.connect(operatorEOA).switchLp(UNISWAP_V4, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
+                manager.connect(operatorEOA).switchPosition(UNISWAP_V4, AERODROME, switchParams(safeAddr, 1, TICK_SPACING)),
             )
                 .to.emit(manager, "PositionSwitched")
                 .withArgs(safeAddr, UNISWAP_V4, AERODROME, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
@@ -1297,26 +1307,26 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
         it("rejects an in-kind open whose tokens do not match the destination pool", async function () {
             const { manager, operatorEOA, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
+            await manager.connect(operatorEOA).open(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
 
             // currency1 mismatch: the destination trades {WETH, tokenC}, not {WETH, USDC}.
             await expect(
-                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_WRONG1_KEY)),
+                manager.connect(operatorEOA).switchPosition(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_WRONG1_KEY)),
             ).to.be.revertedWithCustomError(v4Handler, "WrongTokenPair");
 
             // currency0 mismatch: the destination's currency0 is USDC, the withdrawal delivered WETH.
             await expect(
-                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_USDC0_KEY)),
+                manager.connect(operatorEOA).switchPosition(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_USDC0_KEY)),
             ).to.be.revertedWithCustomError(v4Handler, "WrongTokenPair");
         });
 
         it("switches an ERC20-currency0 V4 position out without wrapping", async function () {
             const { manager, operatorEOA, safeAddr, uniHandler, uniNpm, weth } = await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY));
             const safeWethBefore = await weth.balanceOf(safeAddr);
 
             await expect(
-                manager.connect(operatorEOA).switchLp(UNISWAP_V4, UNISWAP_V3, switchParams(safeAddr, 1, FEE_TIER)),
+                manager.connect(operatorEOA).switchPosition(UNISWAP_V4, UNISWAP_V3, switchParams(safeAddr, 1, FEE_TIER)),
             )
                 .to.emit(manager, "PositionSwitched")
                 .withArgs(safeAddr, UNISWAP_V4, UNISWAP_V3, 1n, 1n, USDC_AMOUNT, WETH_OUT, HALF, WETH_OUT, HALF);
@@ -1329,22 +1339,22 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
 
         it("rejects a destination mint below the position-liquidity floor", async function () {
             const { manager, deployer, operatorEOA, safeAddr } = await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
+            await manager.connect(operatorEOA).open(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
             await (await manager.connect(deployer).setMinPositionLiquidity(UNISWAP_V4, 10n ** 18n)).wait();
 
             await expect(
-                manager.connect(operatorEOA).switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)),
+                manager.connect(operatorEOA).switchPosition(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY)),
             ).to.be.revertedWithCustomError(manager, "PositionLiquidityTooLow");
         });
 
         it("enforces the destination mint minimums on each side", async function () {
             const { manager, operatorEOA, safeAddr, v4Handler } = await loadFixture(deployUniV4Harness);
-            await manager.connect(operatorEOA).openLp(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
+            await manager.connect(operatorEOA).open(UNISWAP_V3, openParams(safeAddr, FEE_TIER));
 
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .switchLp(
+                    .switchPosition(
                         UNISWAP_V3,
                         UNISWAP_V4,
                         switchParams(safeAddr, 1, V4_KEY, { mintAmount0Min: WETH_OUT + 1n }),
@@ -1354,7 +1364,7 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             await expect(
                 manager
                     .connect(operatorEOA)
-                    .switchLp(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY, { mintAmount1Min: HALF + 1n })),
+                    .switchPosition(UNISWAP_V3, UNISWAP_V4, switchParams(safeAddr, 1, V4_KEY, { mintAmount1Min: HALF + 1n })),
             ).to.be.revertedWithCustomError(v4Handler, "MintAmountBelowMin");
         });
     });

@@ -152,8 +152,8 @@ contract MockCLNonfungiblePositionManager {
         mintOwnerOverride = account;
     }
 
-    /// @dev Seed a position directly (for collectLp/closeLp tests that bypass
-    ///      openLp via a storage-overridden basis).
+    /// @dev Seed a position directly (for collect/close tests that bypass
+    ///      open via a storage-overridden basis).
     function seedPosition(
         uint256 tokenId,
         address owner,
@@ -375,7 +375,7 @@ contract MockStakePool {
         rewardAmount = amount;
     }
 
-    /// @dev Mock reward claim — records the call so tests can assert collectLp
+    /// @dev Mock reward claim — records the call so tests can assert collect
     ///      routed a staked position to the stakePool, and pays the configured
     ///      emission (if armed) like the real stakePool pays AERO.
     function getReward(uint256 tokenId) external {

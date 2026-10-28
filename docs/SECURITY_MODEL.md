@@ -11,7 +11,7 @@ October 2026 against the same properties.
 
 ## I-01 — The performance fee is cooperative, by construction
 
-`SafeYieldManager.closeLp` charges `performanceFeeBps` on realized profit only,
+`SafeYieldManager.close` charges `performanceFeeBps` on realized profit only,
 and collects it by asking the Safe to send USDC to the treasury:
 
 ```solidity
@@ -144,16 +144,16 @@ validated pool replaces it atomically. New pool parameters cannot be
 allow-listed, and a protocol's open side cannot be re-enabled, unless every
 non-USDC currency decoded by its registered handler has a live reference.
 Native ETH checks BOTH the `address(0)` key (swap legs on a native pool) and
-the WETH key (`withdrawLp` hands a native side back wrapped, so a switch out of
+the WETH key (`withdraw` hands a native side back wrapped, so a switch out of
 that pool values its residue under WETH). The close-side emergency switch
-remains oracle-independent so it can re-enable `withdrawLp`; close/collect swap
+remains oracle-independent so it can re-enable `withdraw`; close/collect swap
 paths still fail closed inside the handlers. If an active reference fails
-before a replacement is executed, `withdrawLp` remains available.
+before a replacement is executed, `withdraw` remains available.
 `twapMinimumOut` exposes the exact contract-derived floor for operations and
 deployment verification.
 
-The allow-list gates OPENS only. An exit's swap leg (`closeLp`, the
-`collectLp` swap path) is validated for pair shape, the per-protocol
+The allow-list gates OPENS only. An exit's swap leg (`close`, the
+`collect` swap path) is validated for pair shape, the per-protocol
 `minPoolLiquidity` floor (zero, i.e. disabled, in the shipped deployment) and
 the reference-TWAP floor, but not for allow-list membership. The TWAP floor is
 what protects the price: whatever pool the leg names, the Safe receives at
@@ -164,26 +164,119 @@ pool. A dynamic exit delta whose floor rounds to zero stays on the Safe in kind
 rather than failing the exit — the same rule the harvest paths already follow.
 
 Hooked Uniswap V4 pools are the exception on both counts. A hook runs on every
-liquidity and swap path, including the oracle-free `withdrawLp` exit, so
+liquidity and swap path, including the oracle-free `withdraw` exit, so
 admitting one is a timelocked critical change (`allowHookedPoolParam`, after the
 hook has been reviewed; routine `setPoolParamAllowed` refuses it), and an exit
 leg may route through a hooked pool only if it is allow-listed — a hookless
 route for the same pair is always available instead.
 
-### `withdrawLp`: the exit that reads no price
+### `withdraw`: the exit that reads no price
 
-Flooring `closeLp` on an oracle would otherwise mean a broken reference strands
-a position. `withdrawLp` takes a position out in kind — liquidity and fees as
+Flooring `close` on an oracle would otherwise mean a broken reference strands
+a position. `withdraw` takes a position out in kind — liquidity and fees as
 the pool's own two tokens, no router, no price read — and is gated only by
 `protocolEnabledForClose`. It charges no performance fee, for the same reason
-`switchLp` charges none: nothing is realized in USDC, so there is no profit to
+`switchPosition` charges none: nothing is realized in USDC, so there is no profit to
 measure. That does hand users a fee-free exit, which changes nothing
 economically given I-01 above.
+
+### Protocol 3 prices from Chainlink, not a pool
+
+The savings source (`SkySavingsYieldHandler`, protocol id 3) deposits a Safe's
+idle USDC into sUSDS through Spark PSM3 and redeems it the same way. There is no
+pool, no NFT and no swap leg, so the reference-TWAP rule above has nothing to
+reference: `poolTokens` reports `(USDC, USDC)` and the manager's "allow-listed
+implies a live reference" check passes trivially. The floor comes from
+somewhere else, and this subsection is where that exception is written down.
+
+**The floor is a pinned rate provider.** `ChainlinkSsrRateProvider` reads the
+Chainlink "sUSDS / USDS Exchange Rate" feed (18 decimals, 24 h heartbeat) and
+vetoes it against Spark's SSR oracle, the rate PSM3 itself prices with. It fails
+closed on a non-positive or future answer, an answer older than 36 h, an answer
+outside `[1e18, 2e18]`, an oracle that answers zero or reverts, and a
+disagreement above 50 bps. PSM3 treats USDS and USDC as 1:1, so the rate is
+also USDC per sUSDS.
+
+**What the cross-check does and does not do.** It rejects excessive
+disagreement between the feed and the oracle; it does not make an agreeing
+pair right. Two separate widths are involved and they stack:
+
+- `MAX_DISAGREEMENT_BPS` (50, immutable on the provider) bounds the feed
+  against the oracle: the provider reverts when
+  `|chainlink - ssr| > ssr * 50 / 10000`, with the SSR value as the
+  denominator, and the boundary itself passes.
+- The handler tolerance (`slippageBps`, default ceiling 50 bps, admin-settable
+  up to 300) is a haircut applied to the Chainlink value, which is the floor
+  input. It is not a disagreement bound.
+
+Three things stay in the threat model:
+
+- A single source wrong within these widths passes. If only the SSR oracle
+  (which PSM3 prices with) is off by 49 bps while Chainlink is right, PSM3
+  executes at the wrong rate, the Chainlink floor accepts it, and a 1,000 USDC
+  deposit settles about 5 USDC below its true value. Against PSM3's own rate the
+  floor can sit up to the disagreement band plus the tolerance away (about
+  1 %, roughly 10 USDC on a 1,000 USDC leg, at the defaults; more if the admin
+  raises the tolerance). This is the deliberate allowance, not a gap, and it is
+  the size to keep in mind when retuning the tolerance.
+- Correlated failure is not prevented. If the feed and the oracle both report
+  2.0 while the true rate is 1.1, they agree, 2.0 is inside the inclusive
+  range, a deposit prices at 2.0 and every guard passes; the loss surfaces when
+  the sources return. The guards bound each source against the other and
+  against a fixed range, never against the world.
+- `[1e18, 2e18]` is an absolute range, not a limit on how fast the rate may
+  move between two reads, and the sUSDS/USDS exchange rate says nothing about
+  USDS/USD solvency or PSM3's USDC liquidity.
+
+Independent rate-change, depeg, sequencer and SSR-update freshness controls
+would be additional safeguards; this implementation does not supply them. What
+it does supply is the exit that needs none of this: `withdraw` reads no price
+(below).
+
+**Both legs floor the measured delta.** A deposit must leave at least
+`usdc / rate * (1 - tolerance)` sUSDS on the Safe, a redemption at least
+`shares * rate * (1 - tolerance)` USDC, measured as Safe balance deltas and also
+passed to PSM3 as `minAmountOut`; the caller's own `minUsdcOut` can only tighten
+the redeem floor. `slippageBps` is reused as the oracle tolerance and is bounded
+by the handler, not by the manager's `maxSlippageBps`: the default ceiling is
+50 bps (the observed Chainlink lag behind the SSR oracle is a few bps) and the
+admin may move it up to `MAX_SETTABLE_TOLERANCE_BPS` (300) through
+`configureHandler`, the same routine role as `setMaxSlippageBps`. The ceiling
+lives in the handler's namespace keyed by protocol id, so it binds every build
+under the id, including the one an open position is pinned to.
+
+**The oracle guard rails are critical, the ceiling is routine.** The feed, the
+oracle, the 36 h age, the 50 bps disagreement and the rate bounds are
+immutables of the provider, and the provider is an immutable of the handler
+build. Loosening any of them means a new build registered through
+`setYieldHandler` behind the timelock and a `switchPosition(3, 3)` rollover per
+position: the same path as repointing a TWAP reference, for the same reason.
+Only the tolerance ceiling and the exposure cap are admin-tunable, and both are
+bounded by constants.
+
+**The exposure cap is a per-deposit rail, not the liquidity policy.** A
+deposit reverts `ExposureCapExceeded` when it alone exceeds `maxExposureBps` of
+what PSM3 can pay out right now (its USDC pocket, pinned at about 1.0M by
+Spark's ALM). It deliberately does not count the book: a Safe can redeem its
+sUSDS directly at PSM3 and leave its record behind, so a counter of tracked
+shares is an upper bound anyone can inflate at no cost and use to block every
+other Safe's deposit. The fleet-wide cap belongs to the backend, which can read
+balances; the on-chain rail catches a single runaway deposit.
+
+**`withdraw` and the rollover never depend on the oracle or the venue.**
+`withdraw` releases the record with no Safe call and no price read; the sUSDS stays on the Safe, where
+the owner can redeem it at PSM3 or anywhere else. A full `close` with every
+share already moved out around the module reads no price either, so a record
+can be cleared while the feed is down. If PSM3's pocket is drained a redemption
+reverts inside PSM3's own USDC transfer and `withdraw` still works; if the feed
+and PSM3 are both down the same-id rollover still works, because neither leg
+touches them. The property of I-03 holds here as it does for LP positions:
+**no configuration of any role can trap a savings position.**
 
 ## M-02 — Switch residue is valued and carried, not forgotten
 
 A concentrated-liquidity mint consumes its two sides only in the ratio the
-range demands, so it stops at whichever side runs out. An in-kind `switchLp`
+range demands, so it stops at whichever side runs out. An in-kind `switchPosition`
 therefore always hands some of the withdrawal back to the Safe. Measured on a
 Base fork, that residue is **4.8%–5.3% of the position's basis** (9.55% of the
 token0 side across protocols, 2.75% when the range is carried over) — money,
@@ -211,7 +304,7 @@ able to nudge a pool under-report the residue and shrink the fee the eventual
 close charges. A switch that redeploys everything reads no price at all, and a
 switch that cannot price its residue reverts rather than guessing.
 
-`withdrawLp` releases any carry without charging it, and says so in
+`withdraw` releases any carry without charging it, and says so in
 `PositionWithdrawn.releasedCarryUsd6`. That is the same fee-free-exit property
 as I-01, made visible rather than silent.
 
@@ -219,7 +312,7 @@ as I-01, made visible rather than silent.
 
 The September 2026 Shred audit identifies the case where a partial close removes
 non-zero liquidity but its proportional cost-basis slice rounds down to zero.
-`SafeYieldManager.closeLp` computes `basisForExit = floor(residualBasis *
+`SafeYieldManager.close` computes `basisForExit = floor(residualBasis *
 exitBps / 10_000)` in raw USDC units. The handlers independently round the
 liquidity slice down, so the two slices need not become non-zero together.
 
@@ -232,7 +325,7 @@ The zero slice can slightly overstate this close's taxable profit, with fees
 still subject to the configured performance-fee rate and integer rounding.
 
 A zero basis is also a legitimate state, not just a rounding artifact:
-`switchLp` sets the replacement basis to zero when the residue returned to the
+`switchPosition` sets the replacement basis to zero when the residue returned to the
 Safe repays all of the previous basis, and carries any excess as profit. The
 replacement may still have substantial liquidity. Reverting whenever
 `basisForExit == 0 && liquidityToRemove > 0`, as suggested in L-2, would disable
@@ -257,8 +350,8 @@ the floor.
 The pauser is a single address, set by `DEFAULT_ADMIN_ROLE` via `setPauser`. It
 holds `pause`/`unpause` and the two per-protocol switches.
 
-Pausing is deliberately **exit-only**, not a freeze. `closeLp`, `withdrawLp` and
-`collectLp` carry no `whenNotPaused` modifier and do not consult the current
+Pausing is deliberately **exit-only**, not a freeze. `close`, `withdraw` and
+`collect` carry no `whenNotPaused` modifier and do not consult the current
 `yieldHandlers` registration — they run through the handler pinned at open
 time, so a paused or re-registered protocol still lets positions out.
 
@@ -268,7 +361,7 @@ One switch is the exception:
 function setProtocolEnabledForClose(uint8 protocol, bool enabled) external onlyPauser
 ```
 
-`closeLp`, `switchLp` and `collectLp` all check `protocolEnabledForClose`. A
+`close`, `switchPosition` and `collect` all check `protocolEnabledForClose`. A
 pauser can therefore stop module-mediated exits for a protocol. This is
 intentional and is reserved for one scenario: **a compromised or malfunctioning
 handler**, where letting exits continue would route user funds through code we
@@ -288,6 +381,9 @@ position.**
 - When disabling closes for a protocol, disable opens for it too — otherwise new
   positions enter a protocol they cannot leave through the module.
 - Every flip emits `ProtocolStatusChanged`; alert on it.
+- `configureHandler` (`DEFAULT_ADMIN_ROLE`) retunes a handler's own bounded
+  parameters (today: the savings tolerance ceiling and exposure cap); every
+  call emits `HandlerConfigured`. Alert on it like a fee change.
 
 ### Recovery
 
@@ -296,7 +392,10 @@ position.**
 2. The new pauser calls `setProtocolEnabledForClose(protocol, true)`.
 3. If a handler was genuinely compromised, register a fixed handler before
    re-enabling. Existing positions still exit through their pinned handler, so
-   re-registration does not disturb them.
+   re-registration does not disturb them. Registering a build also turns opens
+   for its id off until the pauser re-enables them, and `configureHandler` is
+   refused meanwhile, so a replacement never serves a new entry, a rollover or a
+   configuration call before a second party has looked at it.
 4. In the worst case, `rescueERC721` (`DEFAULT_ADMIN_ROLE`) returns a stranded
    NFT held by the module itself.
 

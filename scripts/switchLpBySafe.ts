@@ -197,7 +197,7 @@ async function main() {
         const token0: string = position[2];
         const token1: string = position[3];
         // A staked Aerodrome position is owned by its gauge, not the Safe;
-        // switchLp's close leg unstakes it on-chain. Accept the Safe OR the
+        // switchPosition's close leg unstakes it on-chain. Accept the Safe OR the
         // pool's gauge as owner.
         let ownerOk = owner.toLowerCase() === SAFE_ADDRESS.toLowerCase();
         if (!ownerOk && FROM_PROTOCOL_NAME === "aerodrome") {
@@ -274,7 +274,7 @@ async function main() {
         tickUpper,
         mintAmount0Min: mint.amount0Min,
         mintAmount1Min: mint.amount1Min,
-        lpPoolParam: target.poolParam,
+        poolParam: target.poolParam,
         deadline,
     };
 
@@ -297,9 +297,9 @@ async function main() {
     console.log("- Mint minimums (token0/token1):", mint.amount0Min.toString(), "/", mint.amount1Min.toString());
     console.log("- Deadline:", deadline.toString());
 
-    const switchLpData = manager.interface.encodeFunctionData("switchLp", [source.protocol, target.protocol, params]);
+    const switchLpData = manager.interface.encodeFunctionData("switchPosition", [source.protocol, target.protocol, params]);
     if (DRY_RUN) {
-        console.log("\nDRY_RUN — switchLp calldata:");
+        console.log("\nDRY_RUN — switchPosition calldata:");
         console.log(switchLpData);
         return;
     }

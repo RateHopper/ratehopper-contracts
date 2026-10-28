@@ -8,7 +8,7 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ISafe} from "../../interfaces/safe/ISafe.sol";
 import {IWETH9} from "../../interfaces/IWETH9.sol";
-import {IYieldHandler, OpenLpParams, CloseLpParams, CollectLpParams, WithdrawLpParams, OpenLpInKindParams, SwapLeg} from "../../interfaces/IYieldHandler.sol";
+import {IYieldHandler, OpenParams, CloseParams, CollectParams, WithdrawParams, OpenInKindParams, SwapLeg} from "../../interfaces/IYieldHandler.sol";
 import {PoolKey, ExactInputSingleParams} from "../../interfaces/uniswapV4/V4Types.sol";
 import {IV4PositionManager} from "../../interfaces/uniswapV4/IV4PositionManager.sol";
 import {IStateView} from "../../interfaces/uniswapV4/IStateView.sol";
@@ -33,7 +33,7 @@ import "../../common/Types.sol";
 ///         Hooked pools are admitted only through the manager's timelocked
 ///         `allowHookedPoolParam` after the hook has been reviewed — a hook
 ///         runs on every liquidity and swap path, including the oracle-free
-///         `withdrawLp` exit — and an exit swap leg may route through a
+///         `withdraw` exit — and an exit swap leg may route through a
 ///         hooked pool only if it is allow-listed.
 /// @dev    STATELESS: MUST NOT declare storage variables — all mutable state
 ///         lives in the ERC-7201 `YieldStorage` namespace (delegatecall from
@@ -81,15 +81,15 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
 
     error OnlyDelegatecall();
     error TokenApprovalFailed(address token);
-    /// @notice V4 has no stakePool; `OpenLpParams.stake` must be false.
+    /// @notice V4 has no stakePool; `OpenParams.stake` must be false.
     error StakingNotSupported();
     /// @notice V4 mint has no native amount minimums (only settle caps), so
     ///         the caller's mintAmount0Min/1Min are enforced after the mint
     ///         against the amounts actually consumed.
     error MintAmountBelowMin();
 
-    /// @dev Inputs for `_mintFromAmounts`, the mint half shared by `openLp`
-    ///      and `openLpInKind`. Grouped in a struct so the shared helper takes
+    /// @dev Inputs for `_mintFromAmounts`, the mint half shared by `open`
+    ///      and `openInKind`. Grouped in a struct so the shared helper takes
     ///      three arguments instead of ten — the flat form pushes both callers
     ///      past the stack limit once coverage instrumentation is layered on.
     struct MintArgs {
@@ -147,23 +147,23 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     // ─────────────────────────────────────────────────────────────────────
 
     /// @inheritdoc IYieldHandler
-    function poolTokens(bytes calldata lpPoolParam) external pure returns (address token0, address token1) {
-        PoolKey memory key = _decodePoolParam(lpPoolParam);
+    function poolTokens(bytes calldata poolParam) external pure returns (address token0, address token1) {
+        PoolKey memory key = _decodePoolParam(poolParam);
         return (key.currency0, key.currency1);
     }
 
     /// @inheritdoc IYieldHandler
-    function poolParamHasHooks(bytes calldata lpPoolParam) external pure returns (bool) {
-        return _decodePoolParam(lpPoolParam).hooks != address(0);
+    function poolParamHasHooks(bytes calldata poolParam) external pure returns (bool) {
+        return _decodePoolParam(poolParam).hooks != address(0);
     }
 
     /// @inheritdoc IYieldHandler
-    function openLp(
-        OpenLpParams calldata p
+    function open(
+        OpenParams calldata p
     ) external onlyDelegatecall returns (uint256 tokenId, uint128 basisUsd6, uint128 used0, uint128 used1) {
         if (p.stake) revert StakingNotSupported();
-        _validatePoolParamAllowed(p.lpPoolParam);
-        (PoolKey memory key, ) = _validatePoolReady(p.lpPoolParam);
+        _validatePoolParamAllowed(p.poolParam);
+        (PoolKey memory key, ) = _validatePoolReady(p.poolParam);
 
         uint256 half0 = p.usdcAmount / 2;
         uint256 half1 = p.usdcAmount - half0;
@@ -173,7 +173,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
 
         // The leg swaps above moved the pool price, so the mint must price
         // against a FRESH read — not the one `_validatePoolReady` returned.
-        (uint160 sqrtPriceX96, , , ) = STATE_VIEW.getSlot0(keccak256(p.lpPoolParam));
+        (uint160 sqrtPriceX96, , , ) = STATE_VIEW.getSlot0(keccak256(p.poolParam));
         (tokenId, used0, used1) = _mintFromAmounts(
             key,
             sqrtPriceX96,
@@ -195,8 +195,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     }
 
     /// @inheritdoc IYieldHandler
-    function closeLp(
-        CloseLpParams calldata p,
+    function close(
+        CloseParams calldata p,
         uint128 basisForExit
     ) external onlyDelegatecall returns (uint128 currentValueUsd6) {
         (PoolKey memory key, ) = POSITION_MANAGER.getPoolAndPositionInfo(p.tokenId);
@@ -293,8 +293,8 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     /// @dev In-kind close leg of a switch: fee harvest + full BURN_POSITION
     ///      with NO swaps. A native side is wrapped to WETH so the caller
     ///      always receives ERC20 addresses and amounts.
-    function withdrawLp(
-        WithdrawLpParams calldata p
+    function withdraw(
+        WithdrawParams calldata p
     ) external onlyDelegatecall returns (address token0, address token1, uint256 amount0, uint256 amount1) {
         (PoolKey memory key, ) = POSITION_MANAGER.getPoolAndPositionInfo(p.tokenId);
         _requireOwnedBy(p.onBehalfOf, p.tokenId);
@@ -340,11 +340,11 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     ///      token amounts — no swaps. A native pool side settles in ETH, so
     ///      the provided WETH is unwrapped first (1:1, no price exposure);
     ///      SWEEP returns any unconsumed ETH to the Safe.
-    function openLpInKind(
-        OpenLpInKindParams calldata p
+    function openInKind(
+        OpenInKindParams calldata p
     ) external onlyDelegatecall returns (uint256 tokenId, uint128 used0, uint128 used1) {
-        _validatePoolParamAllowed(p.lpPoolParam);
-        (PoolKey memory key, uint160 sqrtPriceX96) = _validatePoolReady(p.lpPoolParam);
+        _validatePoolParamAllowed(p.poolParam);
+        (PoolKey memory key, uint160 sqrtPriceX96) = _validatePoolReady(p.poolParam);
         bool native0 = key.currency0 == NATIVE;
         address want0 = native0 ? address(WETH) : key.currency0;
         if (p.token0 != want0 || p.token1 != key.currency1) revert WrongTokenPair();
@@ -370,7 +370,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         );
     }
 
-    /// @dev The mint half shared by `openLp` and `openLpInKind`. Derives the
+    /// @dev The mint half shared by `open` and `openInKind`. Derives the
     ///      liquidity for `amount0/amount1` at `sqrtPriceX96`, grants the
     ///      two-step Permit2 allowances (a native side rides as call value and
     ///      needs none), mints, resets BOTH allowance hops, and reports what
@@ -421,8 +421,14 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
         _requireOwnedBy(a.onBehalfOf, tokenId);
     }
 
+    /// @notice Nothing to tune: the floors are the manager's TWAP references
+    ///         and slippage cap.
+    function configure(bytes calldata) external view onlyDelegatecall {
+        revert ConfigureNotSupported();
+    }
+
     /// @inheritdoc IYieldHandler
-    function collectLp(CollectLpParams calldata p) external onlyDelegatecall {
+    function collect(CollectParams calldata p) external onlyDelegatecall {
         // V4 has no stakePool: `swapRewardToUsdc` / `rewardSwap` are ignored,
         // matching how unstaked positions behave on the staking protocols.
         (PoolKey memory key, ) = POSITION_MANAGER.getPoolAndPositionInfo(p.tokenId);
@@ -473,7 +479,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     ///      leg-validated swap for any other currency (incl. native ETH).
     ///      The swap input is always USDC, so all five module steps apply.
     function _acquireSide(
-        OpenLpParams calldata p,
+        OpenParams calldata p,
         address currency,
         uint256 halfUsdc,
         SwapLeg calldata leg,
@@ -563,7 +569,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             abi.encodePacked(V4Actions.DECREASE_LIQUIDITY, V4Actions.TAKE_PAIR),
             params,
             // Fee harvest carries no price exposure; the flows' own deadline
-            // checks (manager openLp/closeLp, collectLp swap path) still gate.
+            // checks (manager open/close, collect swap path) still gate.
             block.timestamp,
             60
         );
@@ -818,7 +824,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
 
     /// @dev Require the Safe to own `tokenId` on the position manager.
     function _requireOwnedBy(address _onBehalfOf, uint256 tokenId) internal view {
-        if (IERC721(address(POSITION_MANAGER)).ownerOf(tokenId) != _onBehalfOf) revert LpNotOnSafe();
+        if (IERC721(address(POSITION_MANAGER)).ownerOf(tokenId) != _onBehalfOf) revert PositionNotOnSafe();
     }
 
     /// @dev Module-mediated `modifyLiquidities` batch (no call value — the

@@ -31,7 +31,10 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 
 - **BaseYieldHandler.sol** owns the shared LP flow, protocol diffs in virtual hooks; **V3StyleYieldHandler.sol** implements the hooks against canonical Uniswap V3 interfaces (protocol id as constructor arg); **UniV3YieldHandler.sol** extends V3StyleYieldHandler, **AerodromeYieldHandler.sol** extends BaseYieldHandler directly
 - **UniV4YieldHandler.sol** implements `IYieldHandler` directly (V4 singleton/actions model doesn't fit the V3-shaped hooks): PoolKey pool params (`keccak256(poolParam)` == V4 PoolId), Permit2 two-step approvals, UniversalRouter swaps, native ETH pools supported; V4 math imported from exact-pinned npm packages (`@uniswap/v4-core@1.0.2`, `@uniswap/v4-periphery@1.0.3` — keep exact versions, no `^`); V4 interfaces remain hand-written minimal versions vendored under `contracts/interfaces/uniswapV4/` (do not replace with official interfaces — their `Currency`/`PositionInfo` types would leak into handler code)
-- Stateless delegatecall targets: MUST NOT declare storage variables; mutable state only via `YieldStorage._yieldStorage()`
+- **BaseSavingsHandler.sol** is the savings-source base (USDC in, a share token out, no pool/NFT/swap): hooks `_shareToken`, `_poolParamMatches`, `_depositUsdc`, `_redeemShares`, `_liquidityAvailable`; **SkySavingsYieldHandler.sol** (protocol id 3) is sUSDS through Spark PSM3, priced by **ChainlinkSsrRateProvider.sol** (`contracts/yield/savings/`, Chainlink feed vetoed by Spark's SSR oracle) instead of a TWAP; records live in the ERC-7201 namespace `SavingsStorage` (`ratehopper.storage.savings`, keyed by protocol id); `withdraw` reads no price
+- Handler tunables go through `IYieldHandler.configure(bytes)` reached only by `SafeYieldManager.configureHandler` (DEFAULT_ADMIN_ROLE); bound them with constants, store them in the handler's own namespace, LP handlers revert `ConfigureNotSupported`
+- Stateless delegatecall targets: MUST NOT declare storage variables; mutable state only via `YieldStorage._yieldStorage()` (or the handler's own ERC-7201 namespace, never a plain variable)
+- Adding a protocol: follow `docs/ADDING_A_YIELD_HANDLER.md`; the floor/exit invariants are in `docs/SECURITY_MODEL.md`
 - Pool selection params are ABI-encoded bytes (`uint24` feeTier / `int24` tickSpacing / full V4 `PoolKey` tuple)
 
 ### Access Control
@@ -58,6 +61,7 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 ## Key Files
 
 - `contractAddresses.ts`: Token and protocol addresses
+- `docs/ADDING_A_YIELD_HANDLER.md`: checklist for a new yield handler; `docs/SECURITY_MODEL.md`: the invariants a change must keep
 - `test/helpers/constants.ts`, `test/helpers/utils.ts`, `test/helpers/deployUtils.ts`: Test helpers
 
 ## Security Requirements

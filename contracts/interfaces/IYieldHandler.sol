@@ -16,8 +16,8 @@ struct SwapLeg {
     bytes poolParam;
 }
 
-/// @notice Parameters for opening an LP position. Pool selection is carried
-///         in `lpPoolParam` / `SwapLeg.poolParam` as ABI-encoded bytes so new
+/// @notice Parameters for opening a position. Pool selection is carried
+///         in `poolParam` / `SwapLeg.poolParam` as ABI-encoded bytes so new
 ///         protocols with richer pool identifiers (e.g. Uniswap V4 `PoolKey`)
 ///         fit without changing this interface. The pair is part of the pool
 ///         identity:
@@ -27,8 +27,8 @@ struct SwapLeg {
 ///         each non-USDC side is swapped through its leg's pool.
 /// @dev    `stake` is an opt-in: when true the freshly-minted NFT is
 ///         staked into the protocol's stakePool (Aerodrome only — handlers without
-///         a stakePool revert `StakingNotSupported`). closeLp auto-unstakes.
-struct OpenLpParams {
+///         a stakePool revert `StakingNotSupported`). close auto-unstakes.
+struct OpenParams {
     address onBehalfOf;
     uint256 usdcAmount;
     int24 tickLower;
@@ -41,13 +41,13 @@ struct OpenLpParams {
     SwapLeg swap1;
     uint16 slippageBps;
     uint256 deadline;
-    bytes lpPoolParam;
+    bytes poolParam;
     bool stake;
 }
 
-/// @notice Parameters for closing (partially or fully) an LP position.
+/// @notice Parameters for closing (partially or fully) a position.
 ///         Withdrawn non-USDC legs are swapped back to USDC.
-struct CloseLpParams {
+struct CloseParams {
     address onBehalfOf;
     uint256 tokenId;
     uint16 exitBps;
@@ -67,7 +67,7 @@ struct CloseLpParams {
 ///         the Safe as-is. A handler whose pool side is native ETH wraps that
 ///         side to its ERC20, so callers always receive ERC20 addresses and
 ///         amounts.
-struct WithdrawLpParams {
+struct WithdrawParams {
     address onBehalfOf;
     uint256 tokenId;
     uint256 decreaseAmount0Min;
@@ -81,7 +81,7 @@ struct WithdrawLpParams {
 ///         side is native ETH unwraps its side itself. The handler reverts
 ///         `WrongTokenPair` when the provided tokens do not match the
 ///         destination pool's pair.
-struct OpenLpInKindParams {
+struct OpenInKindParams {
     address onBehalfOf;
     address token0;
     address token1;
@@ -91,12 +91,12 @@ struct OpenLpInKindParams {
     int24 tickUpper;
     uint256 mintAmount0Min;
     uint256 mintAmount1Min;
-    bytes lpPoolParam;
+    bytes poolParam;
     uint256 deadline;
 }
 
 /// @notice Parameters for harvesting accrued LP fees without exiting.
-struct CollectLpParams {
+struct CollectParams {
     address onBehalfOf;
     uint256 tokenId;
     /// @dev Swap harvested non-USDC fees to USDC through the legs below.
@@ -126,32 +126,35 @@ interface IYieldHandler {
     ///         handler registration.
     function PROTOCOL() external view returns (uint8);
 
-    /// @notice Decode the pair carried by an LP pool param. Used by
+    /// @notice Decode the pair carried by a pool param. Used by
     ///         SafeYieldManager (via staticcall, not delegatecall) to gate
-    ///         openLp on the registry token whitelist. For Uniswap V4
+    ///         `open` on the registry token whitelist. For Uniswap V4
     ///         `token0` may be address(0) — the native-ETH currency sentinel.
-    function poolTokens(bytes calldata lpPoolParam) external pure returns (address token0, address token1);
+    ///         `view` rather than `pure` so a handler whose pair is fixed by
+    ///         its immutables (an savings source reports `(USDC, USDC)`)
+    ///         can answer; LP handlers still implement it as `pure`.
+    function poolTokens(bytes calldata poolParam) external view returns (address token0, address token1);
 
-    /// @notice Whether the pool named by `lpPoolParam` runs third-party hook
+    /// @notice Whether the pool named by `poolParam` runs third-party hook
     ///         code on its liquidity and swap paths (Uniswap V4 hooks). A hook
-    ///         also runs inside the oracle-free `withdrawLp` exit, so the
+    ///         also runs inside the oracle-free `withdraw` exit, so the
     ///         manager admits such a pool only through the timelock. Protocols
     ///         without hooks always return false.
-    function poolParamHasHooks(bytes calldata lpPoolParam) external pure returns (bool);
+    function poolParamHasHooks(bytes calldata poolParam) external pure returns (bool);
 
-    /// @return tokenId   Newly minted LP NFT id (owned by the Safe).
-    /// @return basisUsd6 USDC-equivalent value of the freshly minted LP.
+    /// @return tokenId   Position id (LP handlers: the newly minted NFT, owned by the Safe).
+    /// @return basisUsd6 USDC-equivalent value of the freshly opened position.
     /// @return used0     token0 consumed by the mint.
     /// @return used1     token1 consumed by the mint.
-    function openLp(
-        OpenLpParams calldata params
+    function open(
+        OpenParams calldata params
     ) external returns (uint256 tokenId, uint128 basisUsd6, uint128 used0, uint128 used1);
 
     /// @param basisForExit The manager-computed (exitBps-prorated) basis for
     ///                     this close; used only for the zero-liquidity
     ///                     rounding guard, never trusted from the caller.
     /// @return currentValueUsd6 Gross realized USDC credited to the Safe.
-    function closeLp(CloseLpParams calldata params, uint128 basisForExit) external returns (uint128 currentValueUsd6);
+    function close(CloseParams calldata params, uint128 basisForExit) external returns (uint128 currentValueUsd6);
 
     /// @notice In-kind close leg of a switch: full decrease + collect + burn,
     ///         NO swaps — both pool tokens land on the Safe (native ETH
@@ -160,19 +163,27 @@ interface IYieldHandler {
     /// @return token1  ERC20 address of the withdrawn token1 side.
     /// @return amount0 token0 delivered to the Safe by this withdrawal.
     /// @return amount1 token1 delivered to the Safe by this withdrawal.
-    function withdrawLp(
-        WithdrawLpParams calldata params
+    function withdraw(
+        WithdrawParams calldata params
     ) external returns (address token0, address token1, uint256 amount0, uint256 amount1);
 
     /// @notice In-kind open leg of a switch: mint from the provided token
     ///         amounts, NO swaps. Amounts the mint cannot consume stay on the
     ///         Safe.
-    /// @return tokenId Newly minted LP NFT id (owned by the Safe).
+    /// @return tokenId Position id (LP handlers: the newly minted NFT, owned by the Safe).
     /// @return used0   token0 consumed by the mint.
     /// @return used1   token1 consumed by the mint.
-    function openLpInKind(
-        OpenLpInKindParams calldata params
+    function openInKind(
+        OpenInKindParams calldata params
     ) external returns (uint256 tokenId, uint128 used0, uint128 used1);
 
-    function collectLp(CollectLpParams calldata params) external;
+    function collect(CollectParams calldata params) external;
+
+    /// @notice Routine tuning of the handler's own parameters, reached only
+    ///         through `SafeYieldManager.configureHandler` (admin role,
+    ///         delegatecall, so the values land in the handler's namespace on
+    ///         the manager and apply to every build under the protocol id).
+    ///         The handler decodes, bounds and stores `data` itself; a handler
+    ///         with nothing to tune reverts `ConfigureNotSupported`.
+    function configure(bytes calldata data) external;
 }

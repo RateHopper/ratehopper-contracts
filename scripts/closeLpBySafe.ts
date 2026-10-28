@@ -49,7 +49,7 @@ import {
  * 2. Estimates the WETH/USDC amounts the close will withdraw and derives
  *    `expectedSwapOut` (withdrawn WETH -> USDC), `swapAmountOutMin` and
  *    `minUsdcOut` from the pool spot price minus slippage.
- * 3. Executes `closeLp` via the Safe (protocol-kit). Threshold must be 1 —
+ * 3. Executes `close` via the Safe (protocol-kit). Threshold must be 1 —
  *    for multi-sig Safes set DRY_RUN = true and propose the printed calldata
  *    through the Safe UI instead.
  */
@@ -211,9 +211,9 @@ async function main() {
     );
     console.log("- Deadline:", deadline.toString());
 
-    const closeLpData = manager.interface.encodeFunctionData("closeLp", [protocol, closeParams]);
+    const closeLpData = manager.interface.encodeFunctionData("close", [protocol, closeParams]);
     if (DRY_RUN) {
-        console.log("\nDRY_RUN — closeLp calldata:");
+        console.log("\nDRY_RUN — close calldata:");
         console.log(closeLpData);
         return;
     }
