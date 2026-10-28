@@ -199,16 +199,31 @@ also USDC per sUSDS.
 
 **What the cross-check does and does not do.** It rejects excessive
 disagreement between the feed and the oracle; it does not make an agreeing
-pair right. Three things stay in the threat model:
+pair right. Two separate widths are involved and they stack:
 
-- A single source wrong by less than the tolerance passes, and the floor then
-  lets that much through: at the default 50 bps, a 1,000 USDC leg can settle up
-  to 5 USDC below the true value. This is the deliberate allowance the
-  tolerance buys, not a gap.
+- `MAX_DISAGREEMENT_BPS` (50, immutable on the provider) bounds the feed
+  against the oracle: the provider reverts when
+  `|chainlink - ssr| > ssr * 50 / 10000`, with the SSR value as the
+  denominator, and the boundary itself passes.
+- The handler tolerance (`slippageBps`, default ceiling 50 bps, admin-settable
+  up to 300) is a haircut applied to the Chainlink value, which is the floor
+  input. It is not a disagreement bound.
+
+Three things stay in the threat model:
+
+- A single source wrong within these widths passes. If only the SSR oracle
+  (which PSM3 prices with) is off by 49 bps while Chainlink is right, PSM3
+  executes at the wrong rate, the Chainlink floor accepts it, and a 1,000 USDC
+  deposit settles about 5 USDC below its true value. Against PSM3's own rate the
+  floor can sit up to the disagreement band plus the tolerance away (about
+  1 %, roughly 10 USDC on a 1,000 USDC leg, at the defaults; more if the admin
+  raises the tolerance). This is the deliberate allowance, not a gap, and it is
+  the size to keep in mind when retuning the tolerance.
 - Correlated failure is not prevented. If the feed and the oracle both report
-  2.0 while the true rate is 1.1, a deposit prices at 2.0 and every guard
-  passes; the loss surfaces when the sources return. The guards bound each
-  source against the other, never against the world.
+  2.0 while the true rate is 1.1, they agree, 2.0 is inside the inclusive
+  range, a deposit prices at 2.0 and every guard passes; the loss surfaces when
+  the sources return. The guards bound each source against the other and
+  against a fixed range, never against the world.
 - `[1e18, 2e18]` is an absolute range, not a limit on how fast the rate may
   move between two reads, and the sUSDS/USDS exchange rate says nothing about
   USDS/USD solvency or PSM3's USDC liquidity.

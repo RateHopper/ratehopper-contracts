@@ -11,12 +11,13 @@ import {ISavingsRateProvider} from "../../interfaces/ISavingsRateProvider.sol";
 ///         feed on Base (18 decimals, 24h heartbeat), vetoed by Spark's SSR
 ///         oracle, the rate provider PSM3 itself prices with. The Chainlink
 ///         value is the floor input; the SSR value is a veto only. The
-///         cross-check rejects a disagreement above `MAX_DISAGREEMENT_BPS`;
-///         it does not make an agreeing pair right. A single source wrong by
-///         less than the tolerance passes, two sources wrong together pass,
-///         and `[1e18, MAX_RATE]` is an absolute range, not a bound on how
-///         fast the rate may move. PSM3 treats USDS and USDC as 1:1, so USDS
-///         per sUSDS is also USDC per sUSDS.
+///         cross-check rejects `|chainlink - ssr| > ssr * MAX_DISAGREEMENT_BPS`
+///         (the boundary passes); it does not make an agreeing pair right. A
+///         single source wrong within that band passes, and two sources wrong
+///         together pass whenever they still agree within it and the answer
+///         stays inside `[1e18, MAX_RATE]` (inclusive), which is an absolute
+///         range, not a bound on how fast the rate may move. PSM3 treats USDS
+///         and USDC as 1:1, so USDS per sUSDS is also USDC per sUSDS.
 /// @dev    Fails closed on every doubt: a non-positive answer, an answer
 ///         older than `MAX_FEED_AGE`, an answer outside [1e18, MAX_RATE], an
 ///         SSR oracle that answers zero or reverts, or a disagreement above

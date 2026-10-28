@@ -176,8 +176,16 @@ describe("scripts/savingsBySafe - recovery actions never depend on diagnostics (
         expect(shares).to.be.greaterThan(0n);
 
         await printStatus(readConfig(envFor(f, "status")));
-        // A new open would price through the broken replacement: that one has to fail.
-        await expect(build(f, "open", { SAFE_ADDRESS: f.safe2Addr })).to.be.rejected;
+        // Registration turns opens off; with the pauser's activation a new open prices through the
+        // broken replacement, and that is what must fail it (not the switch).
+        await (await f.manager.connect(f.pauser).setProtocolEnabledForOpen(SKY, true)).wait();
+        const refused = await build(f, "open", { SAFE_ADDRESS: f.safe2Addr }).then(
+            () => null,
+            (error: Error) => error,
+        );
+        expect(refused).to.be.instanceOf(Error);
+        expect(refused!.message).to.not.match(/disabled for open|already has an open/);
+        expect(decodeManager(f, (await build(f, "withdraw")).data).name).to.equal("withdraw");
     });
 
     it("a confirmed transaction's report survives failing diagnostics", async function () {
