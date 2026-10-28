@@ -194,9 +194,29 @@ Chainlink "sUSDS / USDS Exchange Rate" feed (18 decimals, 24 h heartbeat) and
 vetoes it against Spark's SSR oracle, the rate PSM3 itself prices with. It fails
 closed on a non-positive or future answer, an answer older than 36 h, an answer
 outside `[1e18, 2e18]`, an oracle that answers zero or reverts, and a
-disagreement above 50 bps. Either source alone can be wrong; both wrong in the
-same direction is the case the cross-check closes. PSM3 treats USDS and USDC as
-1:1, so the rate is also USDC per sUSDS.
+disagreement above 50 bps. PSM3 treats USDS and USDC as 1:1, so the rate is
+also USDC per sUSDS.
+
+**What the cross-check does and does not do.** It rejects excessive
+disagreement between the feed and the oracle; it does not make an agreeing
+pair right. Three things stay in the threat model:
+
+- A single source wrong by less than the tolerance passes, and the floor then
+  lets that much through: at the default 50 bps, a 1,000 USDC leg can settle up
+  to 5 USDC below the true value. This is the deliberate allowance the
+  tolerance buys, not a gap.
+- Correlated failure is not prevented. If the feed and the oracle both report
+  2.0 while the true rate is 1.1, a deposit prices at 2.0 and every guard
+  passes; the loss surfaces when the sources return. The guards bound each
+  source against the other, never against the world.
+- `[1e18, 2e18]` is an absolute range, not a limit on how fast the rate may
+  move between two reads, and the sUSDS/USDS exchange rate says nothing about
+  USDS/USD solvency or PSM3's USDC liquidity.
+
+Independent rate-change, depeg, sequencer and SSR-update freshness controls
+would be additional safeguards; this implementation does not supply them. What
+it does supply is the exit that needs none of this: `withdraw` reads no price
+(below).
 
 **Both legs floor the measured delta.** A deposit must leave at least
 `usdc / rate * (1 - tolerance)` sUSDS on the Safe, a redemption at least
