@@ -423,16 +423,19 @@ abstract contract BaseSavingsHandler is IYieldHandler, YieldStorage, SavingsStor
     }
 
     /// @dev USDC the floor demands for `shares` at `rate`, less the tolerance,
-    ///      never below the caller's own minimum.
+    ///      never below the caller's own minimum. Fails closed like
+    ///      `_minSharesOut`: a slice whose floor rounds to zero would let the
+    ///      venue keep the shares and pay nothing.
     function _minUsdcOut(
         uint256 shares,
         uint256 rate,
         uint16 toleranceBps,
         uint256 callerMin
-    ) internal pure returns (uint256) {
+    ) internal pure returns (uint256 minOut) {
         uint256 expected = Math.mulDiv(shares, rate, SHARES_TIMES_RATE_TO_USDC);
         uint256 floor = Math.mulDiv(expected, BPS - toleranceBps, BPS);
-        return floor > callerMin ? floor : callerMin;
+        minOut = floor > callerMin ? floor : callerMin;
+        if (shares > 0 && minOut == 0) revert InvalidSwapAmountOutMin();
     }
 
     /// @dev Caps one deposit at what the venue can pay out right now. A cap on

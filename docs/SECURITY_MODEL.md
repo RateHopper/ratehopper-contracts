@@ -237,7 +237,11 @@ it does supply is the exit that needs none of this: `withdraw` reads no price
 `usdc / rate * (1 - tolerance)` sUSDS on the Safe, a redemption at least
 `shares * rate * (1 - tolerance)` USDC, measured as Safe balance deltas and also
 passed to PSM3 as `minAmountOut`; the caller's own `minUsdcOut` can only tighten
-the redeem floor. `slippageBps` is reused as the oracle tolerance and is bounded
+the redeem floor. Both floors fail closed: a deposit whose share floor rounds to
+zero, and a redemption whose USDC floor rounds to zero with no caller minimum,
+revert `InvalidSwapAmountOutMin` (Shred November 2026 L-1), so a dust slice is
+never handed to PSM3 with `minAmountOut = 0`; the owner releases such a slice
+through `withdraw` instead. `slippageBps` is reused as the oracle tolerance and is bounded
 by the handler, not by the manager's `maxSlippageBps`: the default ceiling is
 50 bps (the observed Chainlink lag behind the SSR oracle is a few bps) and the
 admin may move it up to `MAX_SETTABLE_TOLERANCE_BPS` (300) through

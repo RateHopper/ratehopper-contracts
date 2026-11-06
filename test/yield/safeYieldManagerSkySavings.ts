@@ -513,6 +513,20 @@ describe("SafeYieldManager + savings handlers", function () {
                     );
                 });
 
+                it("fails closed when the redeem floor rounds to zero and the caller sets none", async function () {
+                    const f = await loadFixture(deployRegistered);
+                    const { managerAddr, safeAddr } = f;
+                    await (await open(f, src)).wait();
+                    // 1e11 shares are worth 0.11 raw USDC at RATE: the oracle floor
+                    // rounds to zero and the venue may pay nothing for them.
+                    await setSlot(managerAddr, await src.handler(f).savingsSharesSlot(tokenIdOf(safeAddr)), 10n ** 11n);
+                    await expect(close(f, src)).to.be.revertedWithCustomError(
+                        src.handler(f),
+                        "InvalidSwapAmountOutMin",
+                    );
+                    await expect(close(f, src, safeAddr, { minUsdcOut: 1n })).to.be.revertedWith(src.tooLow.redeem);
+                });
+
                 it("redeems what is left after the Safe moved shares out around the module", async function () {
                     const f = await loadFixture(deployRegistered);
                     const { manager, managerEvents, stranger, safeAddr } = f;
