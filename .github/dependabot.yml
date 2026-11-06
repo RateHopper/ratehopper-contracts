@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      # Exact pins kept by hand: the vendored V4 interfaces under
+      # contracts/interfaces/uniswapV4 are written against these versions.
+      - dependency-name: "@uniswap/v4-core"
+      - dependency-name: "@uniswap/v4-periphery"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
