@@ -295,7 +295,7 @@ yarn test
 
 Slither reads the Hardhat build-info; `slither.config.json` filters `node_modules`, the frozen `contracts/legacy` module and `contracts/mocks`. It runs twice:
 
-- **Report run**: no exclusions, every finding is uploaded as SARIF to Security → Code scanning. The backlog it shows today is mostly medium findings (`unused-return`, `reentrancy-no-eth`, `incorrect-equality`, `uninitialized-local`, `divide-before-multiply`) that still need a triage pass with inline `slither-disable` comments before the gate can be raised to medium.
+- **Report run**: no detector excluded; every finding inside the analysed scope (the filtered paths above are out of it) is uploaded as SARIF to Security → Code scanning. The backlog it shows today is mostly medium findings (`unused-return`, `reentrancy-no-eth`, `incorrect-equality`, `uninitialized-local`, `divide-before-multiply`) that still need a triage pass with inline `slither-disable` comments before the gate can be raised to medium.
 - **Gate run**: fails the job on a High finding. Three High detectors are excluded because they flag this architecture by design: `controlled-delegatecall` (the debt and yield managers delegatecall handlers that only the registry or the timelock can set), `arbitrary-send-erc20` (handlers pull tokens from the Safe they act for, under the module authorization checked at the entry point) and `reentrancy-balance` (every handler measures Safe balance deltas around a venue call; the managers' entry points are `nonReentrant`).
 
 To run it locally without installing Slither:

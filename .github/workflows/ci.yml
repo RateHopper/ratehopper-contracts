@@ -84,8 +84,9 @@ jobs:
       - name: Compile
         run: yarn compile
 
-      # Two runs on the same build-info. The report run excludes nothing and
-      # uploads every finding to Security > Code scanning. The gate run fails
+      # Two runs on the same build-info, both inside the scope slither.config.json
+      # filters. The report run excludes no detector and uploads every finding
+      # to Security > Code scanning. The gate run fails
       # the job on a High finding, minus three detectors that flag this
       # architecture by design (see README "Continuous integration").
       - name: Run Slither (full report)
