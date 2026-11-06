@@ -43,7 +43,7 @@ import {
  * 2. Reads the pool's current tick, aligns a symmetric range around it.
  * 3. Derives `expectedSwapOut` (USDC/2 -> WETH) from the pool spot price and
  *    sets `swapAmountOutMin = expectedSwapOut * (1 - slippage)`.
- * 4. Executes `openLp` via the Safe (protocol-kit). Threshold must be 1 —
+ * 4. Executes `open` via the Safe (protocol-kit). Threshold must be 1 —
  *    for multi-sig Safes set DRY_RUN = true and propose the printed calldata
  *    through the Safe UI instead.
  */
@@ -188,7 +188,7 @@ async function main() {
         swap1: { amountOutMin: 0, poolParam: "0x" },
         slippageBps: SLIPPAGE_BPS,
         deadline,
-        lpPoolParam: poolParam,
+        poolParam: poolParam,
         stake: STAKE,
     };
 
@@ -206,9 +206,9 @@ async function main() {
     console.log("- Mint expected consumed:", mint.expected0.toString(), "/", mint.expected1.toString());
     console.log("- Deadline:", deadline.toString());
 
-    const openLpData = manager.interface.encodeFunctionData("openLp", [protocol, openParams]);
+    const openLpData = manager.interface.encodeFunctionData("open", [protocol, openParams]);
     if (DRY_RUN) {
-        console.log("\nDRY_RUN — openLp calldata:");
+        console.log("\nDRY_RUN — open calldata:");
         console.log(openLpData);
         return;
     }
@@ -265,8 +265,8 @@ async function main() {
     if (opened.length > 0) {
         const event = opened[opened.length - 1];
         console.log("PositionOpened — tokenId:", event.args.tokenId.toString());
-        console.log("- WETH to LP:", ethers.formatEther(event.args.amount0ToLp));
-        console.log("- USDC to LP:", ethers.formatUnits(event.args.amount1ToLp, 6));
+        console.log("- WETH to LP:", ethers.formatEther(event.args.used0));
+        console.log("- USDC to LP:", ethers.formatUnits(event.args.used1, 6));
         console.log("- Position value (USD):", ethers.formatUnits(event.args.currentValueUsd6, 6));
     } else {
         console.log("No PositionOpened event found in the confirmation block — check the tx on Basescan.");

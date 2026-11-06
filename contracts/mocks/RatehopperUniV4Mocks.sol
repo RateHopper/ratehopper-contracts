@@ -120,8 +120,8 @@ contract MockV4PositionManager {
         mintOwnerOverride = account;
     }
 
-    /// @dev Seed a position directly (for closeLp/collectLp tests that bypass
-    ///      openLp via a storage-overridden basis).
+    /// @dev Seed a position directly (for close/collect tests that bypass
+    ///      open via a storage-overridden basis).
     function seedPosition(
         uint256 tokenId,
         address owner,

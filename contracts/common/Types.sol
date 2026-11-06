@@ -22,6 +22,7 @@ enum DebtProtocol {
 uint8 constant YIELD_PROTOCOL_UNISWAP_V3 = 0;
 uint8 constant YIELD_PROTOCOL_AERODROME = 1;
 uint8 constant YIELD_PROTOCOL_UNISWAP_V4 = 2;
+uint8 constant YIELD_PROTOCOL_SKY_SAVINGS = 3;
 
 struct CollateralAsset {
     address asset;

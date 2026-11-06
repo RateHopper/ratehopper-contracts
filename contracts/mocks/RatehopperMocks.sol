@@ -2,12 +2,14 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {INonfungiblePositionManager} from "../interfaces/uniswapV3/INonfungiblePositionManager.sol";
 
 // ─────────────────────────────────────────────────────────────────────────
-//  Mocks for RatehopperUniV3Positions unit/branch-coverage tests.
+//  Mocks shared by the RatehopperUniV3Positions (openLp/closeLp/collectLp)
+//  and SafeYieldManager (open/close/collect) unit/branch-coverage tests.
 //
-//  These let the full openLp / closeLp / collectLp lifecycle — and every
+//  These let the full open / close / collect lifecycle of either module — and every
 //  defensive revert branch — run deterministically on a plain Hardhat network
 //  WITHOUT a forked Base mainnet, a real Gnosis Safe, or live Uniswap V3
 //  contracts. They are TEST-ONLY and never deployed to production.
@@ -248,6 +250,23 @@ contract MockLoudYieldHandler {
     }
 }
 
+/// @notice Handler stand-in whose `configure` calls whatever the admin's data
+///         names, from inside the manager's delegatecall context: the shape a
+///         handler's configuration code would take to re-enter the manager.
+contract MockReenteringYieldHandler {
+    uint8 public immutable PROTOCOL;
+
+    constructor(uint8 _protocol) {
+        PROTOCOL = _protocol;
+    }
+
+    function configure(bytes calldata data) external {
+        (address target, bytes memory callData) = abi.decode(data, (address, bytes));
+        (bool ok, bytes memory ret) = target.call(callData);
+        Address.verifyCallResult(ok, ret);
+    }
+}
+
 /// @notice Mirrors SwapRouter02's `exactInputSingle` selector (0x04e45aaf).
 ///         Pulls `amountIn` of `tokenIn` from the caller (the Safe) and pays a
 ///         configurable `output` of `tokenOut` to the recipient. `output == 0`
@@ -450,8 +469,8 @@ contract MockNonfungiblePositionManager {
         callbackData = data;
     }
 
-    /// @dev Seed a position directly (for collectLp/closeLp tests that bypass
-    ///      openLp via a storage-overridden basis).
+    /// @dev Seed a position directly (for collect/close tests of either module
+    ///      that bypass the open path via a storage-overridden basis).
     function seedPosition(
         uint256 tokenId,
         address owner,

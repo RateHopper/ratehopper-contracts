@@ -5,8 +5,11 @@ import {
     USDC_ADDRESS,
     WETH_ADDRESS,
     AERO_ADDRESS,
+    SPARK_PSM3_ADDRESS,
+    sUSDS_ADDRESS,
     YieldProtocol,
     encodeAerodromePoolParam,
+    encodeSkySavingsPoolParam,
     encodeUniV3PoolParam,
     encodeUniV4PoolParam,
 } from "../contractAddresses";
@@ -22,12 +25,14 @@ import { deployedManagerAddress } from "./lpSafeShared";
  * DEFAULT_ADMIN_ROLE or the call reverts.
  *
  * The pool param carries the pair and must be byte-identical to what callers
- * later pass as lpPoolParam / SwapLeg.poolParam:
+ * later pass as poolParam / SwapLeg.poolParam:
  *   - univ3:      abi.encode(token0, token1, uint24 feeTier)
  *   - aerodrome:  abi.encode(token0, token1, int24 tickSpacing)
  *   - univ4:      abi.encode(currency0, currency1, uint24 fee, int24 tickSpacing, address hooks)
+ *   - sky:        abi.encode(address psm3, address susds), the savings source's own immutables
  * token0/currency0 must be the lower-sorted address (native ETH = address(0)
- * always sorts first).
+ * always sorts first). The sky param carries no pair: poolTokens reports
+ * (USDC, USDC), so no TWAP reference is needed and TOKEN_A/TOKEN_B are ignored.
  *
  * Enabling fails closed unless every non-USDC side already has a live TWAP
  * reference. Native ETH uses the address(0) reference key; configure it to a
@@ -38,7 +43,7 @@ import { deployedManagerAddress } from "./lpSafeShared";
  */
 
 // ─── Configuration ───────────────────────────────────────────────────────
-const PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" = "aerodrome";
+const PROTOCOL_NAME: "aerodrome" | "univ3" | "univ4" | "sky" = "aerodrome";
 const ALLOWED = true;
 
 // Pair to allow-list. Defaults below build an AERO/USDC pool (the reward-swap
@@ -81,6 +86,9 @@ async function main() {
     } else if (PROTOCOL_NAME === "univ4") {
         protocol = YieldProtocol.UNISWAP_V4;
         poolParam = encodeUniV4PoolParam(t0, t1, V4_FEE_TIER, V4_TICK_SPACING, V4_HOOKS);
+    } else if (PROTOCOL_NAME === "sky") {
+        protocol = YieldProtocol.SKY_SAVINGS;
+        poolParam = encodeSkySavingsPoolParam(SPARK_PSM3_ADDRESS, sUSDS_ADDRESS);
     } else {
         protocol = YieldProtocol.UNISWAP_V3;
         poolParam = encodeUniV3PoolParam(t0, t1, FEE_TIER);
@@ -117,7 +125,7 @@ async function main() {
     console.log("- Signer:", admin.address, "| has DEFAULT_ADMIN_ROLE:", signerIsAdmin);
 
     if (!signerIsAdmin) throw new Error(`Signer ${admin.address} lacks DEFAULT_ADMIN_ROLE — the call would revert`);
-    if (ALLOWED) {
+    if (ALLOWED && PROTOCOL_NAME !== "sky") {
         for (const token of [t0, t1]) {
             if (token.toLowerCase() === USDC_ADDRESS.toLowerCase()) continue;
             const config = await manager.twapConfigOf(token);

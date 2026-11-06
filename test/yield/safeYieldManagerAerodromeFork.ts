@@ -292,18 +292,18 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
-            lpPoolParam: POOL_PARAM,
+            poolParam: POOL_PARAM,
             stake: false,
         };
 
         await expect(
-            manager.connect(operator).openLp(AERODROME, {
+            manager.connect(operator).open(AERODROME, {
                 ...openParams,
                 swap0: leg((expectedSwapOut * 2n * 9_900n) / 10_000n, POOL_PARAM),
             }),
         ).to.be.revertedWith("Too little received");
 
-        await expect(manager.connect(operator).openLp(AERODROME, openParams)).to.emit(manager, "PositionOpened");
+        await expect(manager.connect(operator).open(AERODROME, openParams)).to.emit(manager, "PositionOpened");
         const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
         const opened = openedEvents[openedEvents.length - 1];
         const tokenId = opened.args.tokenId;
@@ -313,7 +313,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         expect(initialBasis).to.be.greaterThan(0);
 
         await expect(
-            manager.connect(operator).collectLp(AERODROME, {
+            manager.connect(operator).collect(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 swapFeesToUsdc: false,
@@ -326,8 +326,8 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             }),
         ).to.emit(manager, "FeesCollected");
 
-        const wethToLp: bigint = opened.args.amount0ToLp;
-        const usdcToLp: bigint = opened.args.amount1ToLp;
+        const wethToLp: bigint = opened.args.used0;
+        const usdcToLp: bigint = opened.args.used1;
         // shareOfOriginalBps: fraction of the ORIGINAL position this close
         // removes, driving spot-price estimates of the swap and total output.
         const closeParams = (exitBps: number, shareOfOriginalBps: bigint) => {
@@ -354,7 +354,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const tickAfterManipulation = Number((await pool.slot0())[1]);
         expect(tickAfterManipulation).to.be.lessThan(tickBeforeManipulation - 300);
         await expect(
-            manager.connect(operator).closeLp(AERODROME, {
+            manager.connect(operator).close(AERODROME, {
                 ...closeParams(10_000, 10_000n),
                 swap0: leg(0, POOL_PARAM),
                 minUsdcOut: 0,
@@ -363,14 +363,14 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
         expect(await network.provider.send("evm_revert", [manipulationSnapshot])).to.equal(true);
 
-        await expect(manager.connect(operator).closeLp(AERODROME, closeParams(5_000, 5_000n))).to.emit(
+        await expect(manager.connect(operator).close(AERODROME, closeParams(5_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",
         );
         expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
         expect(await manager.residualBasisUsd6Of(AERODROME, tokenId)).to.be.lessThan(initialBasis);
 
-        await expect(manager.connect(operator).closeLp(AERODROME, closeParams(10_000, 5_000n))).to.emit(
+        await expect(manager.connect(operator).close(AERODROME, closeParams(10_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",
         );
@@ -406,11 +406,11 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
-            lpPoolParam: POOL_PARAM,
+            poolParam: POOL_PARAM,
             stake: true,
         };
 
-        await expect(manager.connect(operator).openLp(AERODROME, openParams)).to.emit(manager, "PositionOpened");
+        await expect(manager.connect(operator).open(AERODROME, openParams)).to.emit(manager, "PositionOpened");
         const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
         const opened = openedEvents[openedEvents.length - 1];
         const tokenId = opened.args.tokenId;
@@ -421,8 +421,8 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const initialBasis = await manager.residualBasisUsd6Of(AERODROME, tokenId);
         expect(initialBasis).to.be.greaterThan(0);
 
-        const wethToLp: bigint = opened.args.amount0ToLp;
-        const usdcToLp: bigint = opened.args.amount1ToLp;
+        const wethToLp: bigint = opened.args.used0;
+        const usdcToLp: bigint = opened.args.used1;
         const expectedOut = spotWethToUsdc(wethToLp);
         const closeParams = {
             onBehalfOf: safeAddress,
@@ -439,7 +439,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
 
         // The handler unstakes from the stakePool before running the normal close
         // flow, so a fully staked position closes exactly like an unstaked one.
-        await expect(manager.connect(operator).closeLp(AERODROME, closeParams)).to.emit(manager, "PositionClosed");
+        await expect(manager.connect(operator).close(AERODROME, closeParams)).to.emit(manager, "PositionClosed");
         expect(await manager.residualBasisUsd6Of(AERODROME, tokenId)).to.equal(0);
         await expect(npm.ownerOf(tokenId)).to.be.reverted;
         expect(await usdc.balanceOf(safeAddress)).to.be.greaterThan(0);
@@ -479,7 +479,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const expectedSwapOut = spotUsdcToWeth(input / 2n);
 
         await expect(
-            manager.connect(operator).openLp(AERODROME, {
+            manager.connect(operator).open(AERODROME, {
                 onBehalfOf: safeAddress,
                 usdcAmount: input,
                 tickLower: alignedTick - 1_000,
@@ -490,7 +490,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 swap1: ZERO_LEG,
                 slippageBps: 100,
                 deadline,
-                lpPoolParam: POOL_PARAM,
+                poolParam: POOL_PARAM,
                 stake: true,
             }),
         ).to.emit(manager, "PositionOpened");
@@ -533,7 +533,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         await warp();
         expect(await stakePool.earned(safeAddress, tokenId)).to.be.greaterThan(0n);
         await expectRewardFeeCharged(() =>
-            manager.connect(operator).collectLp(AERODROME, {
+            manager.connect(operator).collect(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 swapFeesToUsdc: false,
@@ -548,9 +548,9 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
 
         // Partial close: the gauge pays out on withdrawal, so that claim is taxed too.
         await warp();
-        const halfOut = spotWethToUsdc(opened.args.amount0ToLp / 2n);
+        const halfOut = spotWethToUsdc(opened.args.used0 / 2n);
         await expectRewardFeeCharged(() =>
-            manager.connect(operator).closeLp(AERODROME, {
+            manager.connect(operator).close(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps: 5_000,
@@ -566,9 +566,9 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
 
         // Still staked after the partial close, so it keeps accruing for the final exit.
         await warp();
-        const restOut = spotWethToUsdc(opened.args.amount0ToLp / 2n);
+        const restOut = spotWethToUsdc(opened.args.used0 / 2n);
         await expectRewardFeeCharged(() =>
-            manager.connect(operator).closeLp(AERODROME, {
+            manager.connect(operator).close(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps: 10_000,
@@ -602,7 +602,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const expectedSwapOut = spotUsdcToWeth(input / 2n);
 
         await expect(
-            manager.connect(operator).openLp(AERODROME, {
+            manager.connect(operator).open(AERODROME, {
                 onBehalfOf: safeAddress,
                 usdcAmount: input,
                 tickLower: alignedTick - 1_000,
@@ -613,7 +613,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 swap1: ZERO_LEG,
                 slippageBps: 100,
                 deadline,
-                lpPoolParam: POOL_PARAM,
+                poolParam: POOL_PARAM,
                 stake: true,
             }),
         ).to.emit(manager, "PositionOpened");
@@ -626,9 +626,9 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         expect(await manager.stakePoolOf(AERODROME, tokenId)).to.equal(stakePoolAddress);
         const liquidityBefore: bigint = (await npm.positions(tokenId))[7];
 
-        const halfWethOut = spotWethToUsdc(opened.args.amount0ToLp / 2n);
+        const halfWethOut = spotWethToUsdc(opened.args.used0 / 2n);
         await expect(
-            manager.connect(operator).closeLp(AERODROME, {
+            manager.connect(operator).close(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps: 5_000,
@@ -679,7 +679,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const deadline = BigInt(block!.timestamp + 3_600);
         const expectedSwapOut = spotUsdcToWeth(input / 2n);
 
-        await manager.connect(operator).openLp(AERODROME, {
+        await manager.connect(operator).open(AERODROME, {
             onBehalfOf: safeAddress,
             usdcAmount: input,
             tickLower: alignedTick - 1_000,
@@ -690,7 +690,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
-            lpPoolParam: POOL_PARAM,
+            poolParam: POOL_PARAM,
             stake: true,
         });
         const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
@@ -706,9 +706,9 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         await (await voter.connect(councilSigner).killGauge(stakePoolAddress)).wait();
         expect(await voter.isAlive(stakePoolAddress)).to.equal(false);
 
-        const halfWethOut = spotWethToUsdc(opened.args.amount0ToLp / 2n);
+        const halfWethOut = spotWethToUsdc(opened.args.used0 / 2n);
         const partialClose = (exitBps: number, minOut: bigint) =>
-            manager.connect(operator).closeLp(AERODROME, {
+            manager.connect(operator).close(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps,
@@ -734,7 +734,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         await expect(npm.ownerOf(tokenId)).to.be.reverted;
     });
 
-    it("collectLp on a staked position claims stakePool rewards only and leaves the NFT staked", async function () {
+    it("collect on a staked position claims stakePool rewards only and leaves the NFT staked", async function () {
         const { operator, safeAddress, manager } = await deployAeroStack();
         const { poolAddress, sqrtPriceX96, alignedTick } = await readAeroPool();
         const spotUsdcToWeth = (amount: bigint) => (amount << 192n) / (sqrtPriceX96 * sqrtPriceX96);
@@ -750,7 +750,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const expectedSwapOut = spotUsdcToWeth(input / 2n);
 
         await expect(
-            manager.connect(operator).openLp(AERODROME, {
+            manager.connect(operator).open(AERODROME, {
                 onBehalfOf: safeAddress,
                 usdcAmount: input,
                 tickLower: alignedTick - 1_000,
@@ -761,7 +761,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 swap1: ZERO_LEG,
                 slippageBps: 100,
                 deadline,
-                lpPoolParam: POOL_PARAM,
+                poolParam: POOL_PARAM,
                 stake: true,
             }),
         ).to.emit(manager, "PositionOpened");
@@ -772,13 +772,13 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         expect(await npm.ownerOf(tokenId)).to.equal(stakePoolAddress);
         const basisBefore = await manager.residualBasisUsd6Of(AERODROME, tokenId);
 
-        // collectLp on a STAKED position goes through the real stakePool with
+        // collect on a STAKED position goes through the real stakePool with
         // getReward ONLY: staked liquidity earns AERO emissions instead of
         // trading fees, so there is nothing to collect and no FeesCollected —
         // and, the assertion a mock can't prove, the NFT never leaves the
         // stakePool so the position keeps earning emissions.
         await expect(
-            manager.connect(operator).collectLp(AERODROME, {
+            manager.connect(operator).collect(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 swapFeesToUsdc: false,
@@ -832,7 +832,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const safeAeroBefore: bigint = await aero.balanceOf(safeAddress);
         const safeUsdcBefore: bigint = await usdc.balanceOf(safeAddress);
         await expect(
-            manager.connect(operator).collectLp(AERODROME, {
+            manager.connect(operator).collect(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 swapFeesToUsdc: false,
@@ -854,11 +854,11 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         expect(await npm.ownerOf(tokenId)).to.equal(stakePoolAddress);
 
         // A full close still works from the staked state (unstake → close).
-        const wethToLp: bigint = openedEvents[openedEvents.length - 1].args.amount0ToLp;
-        const usdcToLp: bigint = openedEvents[openedEvents.length - 1].args.amount1ToLp;
+        const wethToLp: bigint = openedEvents[openedEvents.length - 1].args.used0;
+        const usdcToLp: bigint = openedEvents[openedEvents.length - 1].args.used1;
         const expectedOut = (wethToLp * sqrtPriceX96 * sqrtPriceX96) >> 192n;
         await expect(
-            manager.connect(operator).closeLp(AERODROME, {
+            manager.connect(operator).close(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps: 10_000,
@@ -913,11 +913,11 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             swap1: leg((expectedSwapOut * 9_700n) / 10_000n, AERO_POOL_PARAM),
             slippageBps: 300,
             deadline,
-            lpPoolParam: AERO_POOL_PARAM,
+            poolParam: AERO_POOL_PARAM,
             stake: false,
         };
 
-        await expect(manager.connect(operator).openLp(AERODROME, openParams)).to.emit(manager, "PositionOpened");
+        await expect(manager.connect(operator).open(AERODROME, openParams)).to.emit(manager, "PositionOpened");
         const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
         const opened = openedEvents[openedEvents.length - 1];
         const tokenId = opened.args.tokenId;
@@ -929,7 +929,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const aeroDustAfterOpen: bigint = await aero.balanceOf(safeAddress);
 
         await expect(
-            manager.connect(operator).collectLp(AERODROME, {
+            manager.connect(operator).collect(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 swapFeesToUsdc: false,
@@ -942,8 +942,8 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             }),
         ).to.emit(manager, "FeesCollected");
 
-        const usdcToLp: bigint = opened.args.amount0ToLp;
-        const aeroToLp: bigint = opened.args.amount1ToLp;
+        const usdcToLp: bigint = opened.args.used0;
+        const aeroToLp: bigint = opened.args.used1;
         const closeParams = (exitBps: number, shareOfOriginalBps: bigint) => {
             const usdcShare = (usdcToLp * shareOfOriginalBps) / 10_000n;
             const aeroShare = (aeroToLp * shareOfOriginalBps) / 10_000n;
@@ -962,14 +962,14 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
             };
         };
 
-        await expect(manager.connect(operator).closeLp(AERODROME, closeParams(5_000, 5_000n))).to.emit(
+        await expect(manager.connect(operator).close(AERODROME, closeParams(5_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",
         );
         expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
         expect(await manager.residualBasisUsd6Of(AERODROME, tokenId)).to.be.lessThan(initialBasis);
 
-        await expect(manager.connect(operator).closeLp(AERODROME, closeParams(10_000, 5_000n))).to.emit(
+        await expect(manager.connect(operator).close(AERODROME, closeParams(10_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",
         );
@@ -996,7 +996,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         // A narrow in-range position so the Safe's liquidity earns a
         // meaningful share of the wash-trade fees below.
         await expect(
-            manager.connect(operator).openLp(AERODROME, {
+            manager.connect(operator).open(AERODROME, {
                 onBehalfOf: safeAddress,
                 usdcAmount: input,
                 tickLower: alignedTick - TICK_SPACING,
@@ -1007,7 +1007,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 swap1: ZERO_LEG,
                 slippageBps: 300,
                 deadline,
-                lpPoolParam: POOL_PARAM,
+                poolParam: POOL_PARAM,
                 stake: false,
             }),
         ).to.emit(manager, "PositionOpened");
@@ -1025,7 +1025,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         // The collected fee amounts are unknowable up front, so the legs carry
         // nominal floors; the assertions below pin the exact skim instead.
         await expect(
-            manager.connect(operator).collectLp(AERODROME, {
+            manager.connect(operator).collect(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 swapFeesToUsdc: true,
@@ -1082,7 +1082,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const deadline = BigInt(block!.timestamp + 3_600);
         const expectedSwapOut = spotUsdcToAero(input / 2n);
         await expect(
-            manager.connect(operator).openLp(AERODROME, {
+            manager.connect(operator).open(AERODROME, {
                 onBehalfOf: safeAddress,
                 usdcAmount: input,
                 tickLower: alignedTick - 2 * AERO_LP_TICK_SPACING,
@@ -1093,7 +1093,7 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
                 swap1: leg((expectedSwapOut * 9_700n) / 10_000n, AERO_POOL_PARAM),
                 slippageBps: 300,
                 deadline,
-                lpPoolParam: AERO_POOL_PARAM,
+                poolParam: AERO_POOL_PARAM,
                 stake: false,
             }),
         ).to.emit(manager, "PositionOpened");
@@ -1114,12 +1114,12 @@ describe("SafeYieldManager + Aerodrome - integration (Base fork)", function () {
         const [postSqrtRaw] = await aeroPool.slot0();
         const postSqrt = BigInt(postSqrtRaw);
         const spotAeroToUsdcPost = (amount: bigint) => (amount << 192n) / (postSqrt * postSqrt);
-        const usdcToLp: bigint = opened.args.amount0ToLp;
-        const aeroToLp: bigint = opened.args.amount1ToLp;
+        const usdcToLp: bigint = opened.args.used0;
+        const aeroToLp: bigint = opened.args.used1;
         const expectedOut = spotAeroToUsdcPost(aeroToLp);
         const closeBlock = await ethers.provider.getBlock("latest");
         await expect(
-            manager.connect(operator).closeLp(AERODROME, {
+            manager.connect(operator).close(AERODROME, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 exitBps: 10_000,

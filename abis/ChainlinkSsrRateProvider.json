@@ -1,0 +1,223 @@
+[
+    {
+        "inputs": [
+            {
+                "internalType": "contract IAggregatorV3",
+                "name": "_feed",
+                "type": "address"
+            },
+            {
+                "internalType": "contract ISSRRateProvider",
+                "name": "_ssrOracle",
+                "type": "address"
+            },
+            {
+                "internalType": "contract IERC20",
+                "name": "_shareToken",
+                "type": "address"
+            },
+            {
+                "internalType": "uint32",
+                "name": "_maxFeedAge",
+                "type": "uint32"
+            },
+            {
+                "internalType": "uint16",
+                "name": "_maxDisagreementBps",
+                "type": "uint16"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_maxRate",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+    },
+    {
+        "inputs": [],
+        "name": "InvalidConfig",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "InvalidRate",
+        "type": "error"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "chainlinkRate",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "ssrRate",
+                "type": "uint256"
+            }
+        ],
+        "name": "OracleDisagreement",
+        "type": "error"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "rate",
+                "type": "uint256"
+            }
+        ],
+        "name": "RateOutOfBounds",
+        "type": "error"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "updatedAt",
+                "type": "uint256"
+            }
+        ],
+        "name": "StaleRate",
+        "type": "error"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint8",
+                "name": "decimals",
+                "type": "uint8"
+            }
+        ],
+        "name": "WrongFeedDecimals",
+        "type": "error"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+            }
+        ],
+        "name": "WrongShareToken",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "ZeroAddress",
+        "type": "error"
+    },
+    {
+        "inputs": [],
+        "name": "FEED",
+        "outputs": [
+            {
+                "internalType": "contract IAggregatorV3",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "MAX_DISAGREEMENT_BPS",
+        "outputs": [
+            {
+                "internalType": "uint16",
+                "name": "",
+                "type": "uint16"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "MAX_FEED_AGE",
+        "outputs": [
+            {
+                "internalType": "uint32",
+                "name": "",
+                "type": "uint32"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "MAX_RATE",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "SHARE_TOKEN",
+        "outputs": [
+            {
+                "internalType": "contract IERC20",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "SSR_ORACLE",
+        "outputs": [
+            {
+                "internalType": "contract ISSRRateProvider",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
+            }
+        ],
+        "name": "rate",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "r",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "shareToken",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    }
+]
