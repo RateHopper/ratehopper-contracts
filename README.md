@@ -474,9 +474,9 @@ rollover.
 
 ### Monitoring and incident response
 
-`docs/MONITORING.md` is the alert policy for admin and role changes and
-`scripts/watchAdminEvents.ts` its reference implementation (`yarn watch:admin`,
-read-only, cron or loop). `docs/INCIDENT_RESPONSE.md` is the runbook: roles
+`docs/MONITORING.md` is the alert policy for admin and role changes: which
+event on which contract pages whom, and how to set the rules up in Tenderly.
+`docs/INCIDENT_RESPONSE.md` is the runbook: roles
 and powers, severity, playbooks for a bad handler, an oracle outage, a drained
 venue and a lost or leaked key, with the exit users keep in each case.
 

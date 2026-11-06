@@ -1,11 +1,10 @@
 # Monitoring: admin and role changes
 
 `docs/SECURITY_MODEL.md` says "alert on it" for every switch flip and every
-handler retune. This document is the alert policy behind that sentence, and
-`scripts/watchAdminEvents.ts` is a reference implementation of it: the event
-catalogue in that script is the single source of truth, and
-`test/scripts/watchAdminEvents.ts` fails whenever a watched contract gains an
-event the catalogue does not classify.
+handler retune. This document is the alert policy behind that sentence. The
+alerts themselves are configured in Tenderly (below); the tables here are the
+source of truth for which rules must exist, and a change that adds an event to
+a watched contract updates both in the same pull request.
 
 ## What is watched
 
@@ -19,10 +18,17 @@ Four contracts hold privileged state. Their addresses come from
 | `ProtocolRegistry`   | the operator address every module trusts, the swap router, the whitelist       |
 | `SafeDebtManager`    | debt handler registration, fees, emergency sweeps                              |
 
-Position activity (`PositionOpened`, `PositionClosed`, `PositionSwitched`,
-`FeesCollected`, `DebtSwapped`, ...) is normal operation and is never an
-alert. It is listed explicitly in the script's `ACTIVITY_EVENTS` so that the
-choice is reviewed, not accidental.
+Position activity is normal operation and is never an alert. The list is
+explicit so that the choice is reviewed, not accidental:
+
+| Contract             | Not alerted                                                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SafeYieldManager`   | `PositionOpened`, `PositionClosed`, `PositionWithdrawn`, `PositionSwitched`, `FeesCollected`, `RestakeSkipped`, `StakedRewardCollected`, `SwapSkippedBelowFloor`, `SwitchResidueSettled` |
+| `TimelockController` | `CallSalt` (accompanies every `CallScheduled`)                                                                                                               |
+| `SafeDebtManager`    | `DebtSwapped`, `DebtPositionExited`                                                                                                                          |
+
+Every other event the four ABIs declare is in the catalogue below. When a
+contract gains an event, it goes in one of the two lists.
 
 ## Severity and response
 
@@ -97,35 +103,32 @@ Timelock changes are two alerts 48 h apart: `CallScheduled` (high) is the
 moment to cancel a queued change nobody announced; `CallExecuted` (critical)
 confirms it ran.
 
-## Running the watcher
+## Setting up the alerts in Tenderly
 
-The watcher needs an RPC URL and nothing else: no keys, no write access.
+1. Add the four contracts to the Tenderly project on Base, at the addresses in
+   `deployments/base.json`. They are verified on Basescan (`yarn verify`), so
+   Tenderly decodes their events; if a fresh deployment is not verified yet,
+   verify first rather than uploading an ABI by hand.
+2. Create one "Event Emitted" alert per row of the catalogue, named
+   `<severity>-<Contract>.<Event>` so the destination and the policy row are
+   recognisable from the alert title. Group destinations by severity:
+   `critical` to the on-call channel that pages (PagerDuty or the on-call
+   Telegram group), `high` to the operations channel, `info` to a log-only
+   destination (email digest or a muted channel).
+3. For the timelock, `CallScheduled` is the alert that needs a human within
+   48 hours; make sure it reaches the people who can cancel.
+4. Prove delivery before relying on it, and again after every change to the
+   rules: send an `info` change that is a no-op (for example
+   `setMinPositionLiquidity` to its current value emits
+   `MinPositionLiquidityUpdated`) and confirm the alert arrives on the log-only
+   destination. A silent monitor and a quiet contract look identical from the
+   outside; this is the only way to tell them apart. Repeat quarterly.
+5. After a redeploy (new manager, new handler build), add the new addresses
+   and retire the old ones in the same change that journals the deployment.
 
-```bash
-# one pass, for cron (every 5 minutes is plenty: the timelock delay is 48 h)
-ONCE=true ALERT_WEBHOOK_URL=https://hooks.example/... yarn watch:admin
-
-# or a long-running loop
-POLL_INTERVAL_MS=60000 ALERT_WEBHOOK_URL=https://hooks.example/... yarn watch:admin
-```
-
-- It remembers the last block it saw in `STATE_FILE` (default
-  `.watch-admin-events.json`, gitignored) and resumes from there, so a missed
-  cron tick is not a missed alert. The first run starts at the head unless
-  `START_BLOCK` says otherwise.
-- `ALERT_WEBHOOK_URL` receives `{ "text": "<one line per alert>" }`, which
-  Slack incoming webhooks accept directly; Telegram and PagerDuty need a small
-  relay. Without it the alerts go to stdout only.
-- `MIN_SEVERITY=high` drops the info lines from the channel.
-- `MANIFEST` points it at another deployment manifest (an Ignition
-  `deployed_addresses.json` works too).
-
-Every alert line names the severity, contract, event, decoded arguments,
-block and transaction link, for example:
-
-```
-[CRITICAL] SafeYieldManager.PauserUpdated — the pauser key changed | previousPauser=0x... newPauser=0x... | block 1234 https://basescan.org/tx/0x...
-```
+Plan limits: Tenderly caps the number of alerts per plan. The catalogue needs
+about forty rules; check the plan before setup rather than silently dropping
+the `info` rows.
 
 ## Not covered here
 

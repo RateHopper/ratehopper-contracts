@@ -38,7 +38,7 @@ price references, the fees or the operator.
 | ----- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | SEV-1 | user funds at risk, or a privileged change nobody announced                                                   | a handler misbehaves on real positions; `RoleGranted` / `YieldHandlerUpdated` / `PauserUpdated` with no ticket; operator key leaked |
 | SEV-2 | exits through the module degraded, funds safe                                                                  | oracle stale or disagreeing (closes revert), PSM3 pocket drained, treasury rejecting fees on every exit     |
-| SEV-3 | entries degraded or observability lost                                                                         | opens reverting on a tolerance that drifted, watcher down, fee transfers failing occasionally              |
+| SEV-3 | entries degraded or observability lost                                                                         | opens reverting on a tolerance that drifted, alerts not delivering, fee transfers failing occasionally              |
 
 Decision owner per level: see Contacts. One person declares the level and
 owns the timeline; everyone else executes.
@@ -50,10 +50,10 @@ owns the timeline; everyone else executes.
 2. Capture state before changing anything:
    ```bash
    ACTION=status npx hardhat run scripts/savingsBySafe.ts --network base   # per affected Safe
-   ONCE=true yarn watch:admin                                             # replay what changed
    ```
-   Save the output with the ticket. The watcher's state file and the
-   transaction links are the timeline.
+   and the Tenderly alert history for the four contracts (or their event
+   logs on Basescan). Save the output with the ticket: together with the
+   transaction links it is the timeline.
 3. Decide the first lever by what is at risk, not by what is convenient:
    - handler code or an unannounced privileged change → playbook A or B now;
    - price or venue → playbook C or D (no lever needed: the contracts already
@@ -227,8 +227,8 @@ property every playbook preserves, and the one users ask about.
 
 ## After the incident
 
-Within three working days: timeline from the watcher log and transaction
-links, root cause, what each role did, what the playbook got wrong, and the
+Within three working days: timeline from the Tenderly alert history and the
+transaction links, root cause, what each role did, what the playbook got wrong, and the
 list of changes with owners. Any contract change that came out of it goes
 through a dedicated security review before deployment and through the launch
 checklist (bytecode match, journal, canary) again.

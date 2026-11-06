@@ -31,7 +31,6 @@
         "verify": "npx hardhat run scripts/verifyAll.ts --network base",
         "check:bytecode": "npx hardhat run scripts/checkDeployedBytecode.ts --network base",
         "canary:savings": "npx hardhat run scripts/canarySavings.ts --network base",
-        "watch:admin": "npx hardhat run scripts/watchAdminEvents.ts --network base",
         "wipe:all": "rm -rf ignition/deployments/chain-8453",
         "wipe:leveraged-position": "npx hardhat ignition wipe chain-8453 DeployCore#LeveragedPosition",
         "wipe:safe-debt-manager": "npx hardhat ignition wipe chain-8453 DeployCore#SafeDebtManager",

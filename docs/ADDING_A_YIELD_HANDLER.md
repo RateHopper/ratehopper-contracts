@@ -139,8 +139,8 @@ such a manager):
 6. Canary before anyone else uses it: one small open and close through the
    live wiring (`yarn canary:savings` for the savings source; an LP handler
    needs the equivalent `openLpBySafe.ts` / `closeLpBySafe.ts` pass), then
-   add the handler's admin events to `docs/MONITORING.md` and the watcher
-   catalogue if it declares new ones.
+   add any admin event the handler declares to `docs/MONITORING.md` and to the
+   Tenderly rules.
 7. Rolling a build under an id already in use is the same `setYieldHandler`,
    the pauser re-enabling opens, then `switchPosition(id, id)` per position (in
    kind, no price read for a savings source).
