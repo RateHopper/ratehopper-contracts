@@ -271,7 +271,7 @@ The project uses:
 
 ## Testing
 
-Comprehensive tests are available in the `/test` directory, organized by area (`test/debt/`, `test/yield/`, `test/registry/`, `test/legacy/`, plus shared fixtures in `test/helpers/`), covering:
+Comprehensive tests are available in the `/test` directory, organized by area (`test/debt/`, `test/yield/`, `test/registry/`, `test/legacy/`, `test/scripts/` for the operations scripts, plus shared fixtures in `test/helpers/`), covering:
 
 - Individual debt protocol handlers
 - Cross-protocol debt switching flows
@@ -451,6 +451,54 @@ This script:
 3. **Checks** each contract via the Etherscan V2 API (skips already-verified)
 4. **Submits** unverified contracts via `hardhat verify`
 5. **Polls** the V2 API with retries (5 attempts, 10s apart) to confirm verification despite the plugin bug
+
+### Bytecode match against the audited build
+
+Explorer verification proves a source matches; the launch control is that the
+code live on chain is the code the auditors signed off. `scripts/checkDeployedBytecode.ts`
+compares `eth_getCode` of every contract in `deployments/base.json` with the
+artifact this checkout compiles to, masking the immutables (constructor
+arguments) and setting the CBOR metadata tail apart:
+
+```bash
+git checkout <audited tag>
+yarn compile
+AUDITED_COMMIT=<sha> yarn check:bytecode
+```
+
+`EXACT` means code and metadata both match (this checkout is the deployed
+build). `RUNTIME` means the code matches but the source text or compiler
+settings drifted (a comment, a path); explain it or fail the launch.
+`MISMATCH` names the first differing byte. `CONTRACTS=SafeYieldManager,SkySavingsYieldHandler`
+narrows the run; `MANIFEST=` points it at an Ignition `deployed_addresses.json`.
+Run it after every deploy, before the addresses are journaled.
+
+### First-deploy canary
+
+`scripts/canarySavings.ts` drives one small open and one full close of the
+savings source through the deployed manager, the registry operator and the
+live PSM3, and judges the result from balances, records and events:
+
+```bash
+IGNITION_DEPLOYMENT_ID=<id> CALLER=operator yarn canary:savings                 # preflight only (DRY_RUN=true)
+IGNITION_DEPLOYMENT_ID=<id> CALLER=operator DRY_RUN=false USDC_AMOUNT=1 yarn canary:savings
+```
+
+Preflight (build registered, both switches on, pool param allow-listed,
+module enabled on the Safe, oracle answering, PSM3 and the Safe funded) stops
+the run before any transaction. A failed open is left in place for inspection,
+and a run interrupted after a transaction was sent says what may be open and
+how to close it.
+Run it before the pauser re-enables opens for a new build, and after every
+rollover.
+
+### Monitoring and incident response
+
+`docs/MONITORING.md` is the alert policy for admin and role changes: which
+event on which contract pages whom, and how to set the rules up in Tenderly.
+`docs/INCIDENT_RESPONSE.md` is the runbook: roles
+and powers, severity, playbooks for a bad handler, an oracle outage, a drained
+venue and a lost or leaked key, with the exit users keep in each case.
 
 ### Timelock Operations
 
