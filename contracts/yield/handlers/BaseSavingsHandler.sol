@@ -245,16 +245,16 @@ abstract contract BaseSavingsHandler is IYieldHandler, YieldStorage, SavingsStor
     ///         it bounds a redemption, not a record release. So the record can
     ///         be cleared while the feed is down with the caller's routine
     ///         floor in place; the event then reports a rate of zero.
-    function close(
-        CloseParams calldata p,
-        uint128 basisForExit
-    ) external onlyDelegatecall returns (uint128 currentValueUsd6) {
+    function close(CloseParams calldata p, uint128) external onlyDelegatecall returns (uint128 currentValueUsd6) {
         _requireTolerance(p.slippageBps);
         _requirePosition(p.onBehalfOf, p.tokenId);
         SavingsLayout storage $ = _savingsStorage();
         uint256 tracked = _reconcileShares($, p.onBehalfOf, p.tokenId);
         uint256 toRedeem = p.exitBps == BPS ? tracked : Math.mulDiv(tracked, p.exitBps, BPS);
-        if (p.exitBps != BPS && basisForExit > 0 && toRedeem == 0) revert InvalidExitBps();
+        // A partial close that redeems nothing must not stand: the manager has
+        // already taken this slice of basis and carry, and would charge a fee
+        // on the carry with no shares leaving.
+        if (p.exitBps != BPS && toRedeem == 0) revert InvalidExitBps();
 
         uint256 rate = toRedeem > 0 ? _rate() : 0;
         uint256 minOut = toRedeem > 0 ? _minUsdcOut(toRedeem, rate, p.slippageBps, p.minUsdcOut) : 0;

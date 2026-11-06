@@ -195,10 +195,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
     }
 
     /// @inheritdoc IYieldHandler
-    function close(
-        CloseParams calldata p,
-        uint128 basisForExit
-    ) external onlyDelegatecall returns (uint128 currentValueUsd6) {
+    function close(CloseParams calldata p, uint128) external onlyDelegatecall returns (uint128 currentValueUsd6) {
         (PoolKey memory key, ) = POSITION_MANAGER.getPoolAndPositionInfo(p.tokenId);
         uint128 liquidity = POSITION_MANAGER.getPositionLiquidity(p.tokenId);
         _validateSwapLeg(key.currency0, p.swap0, p.slippageBps);
@@ -219,11 +216,10 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
             ? liquidity
             : Math.mulDiv(uint256(liquidity), uint256(p.exitBps), 10_000).toUint128();
 
-        // Do not let the manager's basis decrement stand when rounding
-        // removes zero liquidity (basis would shrink while principal stays).
-        if (p.exitBps != 10_000 && basisForExit > 0 && liquidityToRemove == 0) {
-            revert InvalidExitBps();
-        }
+        // A partial close that removes no liquidity must not stand: the
+        // manager has already taken this slice of basis and carry, and would
+        // charge a fee on the carry with nothing leaving the pool.
+        if (p.exitBps != 10_000 && liquidityToRemove == 0) revert InvalidExitBps();
 
         if (p.exitBps == 10_000) {
             bytes[] memory params = new bytes[](2);
@@ -241,7 +237,7 @@ contract UniV4YieldHandler is IYieldHandler, YieldStorage {
                 p.deadline,
                 62
             );
-        } else if (liquidityToRemove > 0) {
+        } else {
             bytes[] memory params = new bytes[](2);
             params[0] = abi.encode(
                 p.tokenId,

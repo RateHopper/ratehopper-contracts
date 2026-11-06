@@ -2182,6 +2182,32 @@ describe("SafeYieldManager", function () {
             ).to.be.revertedWithCustomError(manager, "InvalidExitBps");
         });
 
+        it("reverts InvalidExitBps on a zero-liquidity partial close even when the basis slice is zero", async function () {
+            const { manager, operatorEOA, safeAddr, uniNpm } = await loadFixture(deployYieldManagerHarness);
+            await (await uniNpm.setMintLiquidity(1)).wait();
+            await (await manager.connect(operatorEOA).open(UNISWAP_V3, openParams(safeAddr, FEE_TIER))).wait();
+
+            const managerAddr = await manager.getAddress();
+            const baseSlot = BigInt("0x53ba738b9a2829dfda910cf4e864fcd3f84e03854b49244f3d159a473ee6a400");
+            const slotOf = (field: bigint) =>
+                ethers.keccak256(
+                    abi.encode(
+                        ["uint256", "bytes32"],
+                        [1, ethers.keccak256(abi.encode(["uint256", "uint256"], [UNISWAP_V3, baseSlot + field]))],
+                    ),
+                );
+            await ethers.provider.send("hardhat_setStorageAt", [managerAddr, slotOf(1n), ethers.ZeroHash]);
+            await ethers.provider.send("hardhat_setStorageAt", [managerAddr, slotOf(8n), ethers.toBeHex(1_000n, 32)]);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V3, 1)).to.equal(0n);
+
+            await expect(
+                manager
+                    .connect(operatorEOA)
+                    .close(UNISWAP_V3, closeParams(safeAddr, 1, FEE_TIER, { exitBps: 5_000 })),
+            ).to.be.revertedWithCustomError(manager, "InvalidExitBps");
+            expect(await manager.carryProfitUsd6Of(UNISWAP_V3, 1)).to.equal(1_000n);
+        });
+
         it("full-closes a zero-liquidity position without decrease or swap and charges no fee", async function () {
             const { manager, operatorEOA, safeAddr, uniNpm } = await loadFixture(deployYieldManagerHarness);
             await (await uniNpm.setMintLiquidity(0)).wait();

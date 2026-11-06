@@ -1176,11 +1176,12 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
     });
 
     describe("partial close with zero rounded liquidity and zero basis slice", function () {
-        it("skips the decrease and settles at zero value without reverting", async function () {
-            const { manager, operatorEOA, safeAddr, universalRouter, usdcAddr, v4Pm } =
+        it("reverts InvalidExitBps instead of consuming carry with nothing leaving the pool", async function () {
+            const { manager, operatorEOA, safeAddr, v4Handler, universalRouter, usdcAddr, v4Pm } =
                 await loadFixture(deployUniV4Harness);
             // Full-range mint => liquidity (~4000) below basis (8000); exitBps=1
-            // rounds BOTH the liquidity and the basis slice to zero.
+            // rounds BOTH the liquidity and the basis slice to zero, while the
+            // carry slice (10 of 100_000) does not.
             await manager.connect(operatorEOA).open(
                 UNISWAP_V4,
                 openParams(safeAddr, V4_KEY, {
@@ -1191,15 +1192,28 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
             );
             await (await universalRouter.setOutputFor(usdcAddr, CLOSE_OUT)).wait();
             const liquidityBefore = await v4Pm.getPositionLiquidity(1);
+            const abi = ethers.AbiCoder.defaultAbiCoder();
+            const baseSlot = BigInt("0x53ba738b9a2829dfda910cf4e864fcd3f84e03854b49244f3d159a473ee6a400");
+            const carrySlot = ethers.keccak256(
+                abi.encode(
+                    ["uint256", "bytes32"],
+                    [1, ethers.keccak256(abi.encode(["uint256", "uint256"], [UNISWAP_V4, baseSlot + 8n]))],
+                ),
+            );
+            await network.provider.send("hardhat_setStorageAt", [
+                await manager.getAddress(),
+                carrySlot,
+                ethers.toBeHex(100_000n, 32),
+            ]);
+            expect(await manager.carryProfitUsd6Of(UNISWAP_V4, 1)).to.equal(100_000n);
 
             await expect(
                 manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { exitBps: 1 })),
-            )
-                .to.emit(manager, "PositionClosed")
-                .withArgs(safeAddr, UNISWAP_V4, 1n, 0n, 0n, 0n, 1, 0n);
+            ).to.be.revertedWithCustomError(v4Handler, "InvalidExitBps");
 
             expect(await v4Pm.getPositionLiquidity(1)).to.equal(liquidityBefore);
             expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(8_000n);
+            expect(await manager.carryProfitUsd6Of(UNISWAP_V4, 1)).to.equal(100_000n);
         });
     });
 

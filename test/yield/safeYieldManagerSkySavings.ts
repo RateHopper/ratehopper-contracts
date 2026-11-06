@@ -513,6 +513,23 @@ describe("SafeYieldManager + savings handlers", function () {
                     );
                 });
 
+                it("reverts InvalidExitBps when a partial close would consume carry without shares leaving", async function () {
+                    const f = await loadFixture(deployRegistered);
+                    const { manager, managerAddr, safeAddr } = f;
+                    const tokenId = tokenIdOf(safeAddr);
+                    await (await open(f, src)).wait();
+                    await setSlot(managerAddr, await src.handler(f).savingsSharesSlot(tokenId), 1n);
+                    await setSlot(managerAddr, yieldSlot(YIELD_FIELD.residualBasis, src.protocol, tokenId), 0n);
+                    await setSlot(managerAddr, yieldSlot(YIELD_FIELD.carry, src.protocol, tokenId), 1_000n);
+                    expect(await manager.residualBasisUsd6Of(src.protocol, tokenId)).to.equal(0);
+
+                    await expect(close(f, src, safeAddr, { exitBps: 5_000 })).to.be.revertedWithCustomError(
+                        src.handler(f),
+                        "InvalidExitBps",
+                    );
+                    expect(await manager.carryProfitUsd6Of(src.protocol, tokenId)).to.equal(1_000n);
+                });
+
                 it("fails closed when the redeem floor rounds to zero and the caller sets none", async function () {
                     const f = await loadFixture(deployRegistered);
                     const { managerAddr, safeAddr } = f;

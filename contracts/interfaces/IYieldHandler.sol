@@ -151,8 +151,12 @@ interface IYieldHandler {
     ) external returns (uint256 tokenId, uint128 basisUsd6, uint128 used0, uint128 used1);
 
     /// @param basisForExit The manager-computed (exitBps-prorated) basis for
-    ///                     this close; used only for the zero-liquidity
-    ///                     rounding guard, never trusted from the caller.
+    ///                     this close, never trusted from the caller. Kept in
+    ///                     the ABI for the pinned-handler call path; no shipped
+    ///                     handler reads it any more, because a partial close
+    ///                     that removes nothing reverts `InvalidExitBps`
+    ///                     whatever the basis slice (the manager has already
+    ///                     taken the exit's share of basis and carry).
     /// @return currentValueUsd6 Gross realized USDC credited to the Safe.
     function close(CloseParams calldata params, uint128 basisForExit) external returns (uint128 currentValueUsd6);
 

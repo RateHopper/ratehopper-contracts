@@ -1206,7 +1206,7 @@
             },
             {
                 "internalType": "uint128",
-                "name": "basisForExit",
+                "name": "",
                 "type": "uint128"
             }
         ],

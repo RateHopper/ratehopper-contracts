@@ -337,10 +337,15 @@ replacement may still have substantial liquidity. Reverting whenever
 `basisForExit == 0 && liquidityToRemove > 0`, as suggested in L-2, would disable
 every partial close of such a position.
 
-The existing inverse guard remains: a partial close reverts when
-`basisForExit > 0 && liquidityToRemove == 0`, preventing a basis reduction with
-no liquidity removed. Full closes consume the entire remaining basis and
-liquidity. L-2 is therefore **acknowledged / accepted**, not reported as fixed.
+The inverse guard remains, and since the November 2026 review (L-3) it is
+unconditional: a partial close reverts `InvalidExitBps` whenever
+`liquidityToRemove == 0` (no shares to redeem, for a savings source), whatever
+the basis slice. The earlier `basisForExit > 0` conjunct let a no-op partial
+close stand on exactly the zero-basis position described above: nothing left
+the pool, but `SafeYieldManager.close` had already taken the exit's share of
+`carryProfitUsd6Of` and charged the performance fee on it. Full closes consume
+the entire remaining basis, carry and liquidity. L-2 is therefore
+**acknowledged / accepted**, not reported as fixed.
 
 ## M-01 — No router call is left without a floor
 
