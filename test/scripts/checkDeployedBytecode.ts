@@ -67,6 +67,20 @@ describe("scripts/checkDeployedBytecode", function () {
         expect(compareRuntime(expected, "0x", refs).status).to.equal("NO_CODE");
     });
 
+    it("fails loudly when a CONTRACTS filter names nothing in the manifest", async function () {
+        const address = await deployLoud(3);
+        const rows = await checkManifest(
+            { "Mock#MockLoudYieldHandler": address },
+            ethers.provider,
+            artifacts,
+            new Set(["MockLoudYieldHandler", "SafeYeldManager"]),
+        );
+        expect(rows.map((r) => [r.name, r.status])).to.deep.equal([
+            ["MockLoudYieldHandler", "EXACT"],
+            ["SafeYeldManager", "NOT_IN_MANIFEST"],
+        ]);
+    });
+
     it("walks a deployments manifest keyed Module#Contract and flags unknown artifacts", async function () {
         const address = await deployLoud(3);
         const rows = await checkManifest(

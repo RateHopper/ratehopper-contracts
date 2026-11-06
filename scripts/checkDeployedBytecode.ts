@@ -23,6 +23,7 @@ import type { Artifact, Artifacts } from "hardhat/types";
  *   MISMATCH    the code differs; the detail names the first offset
  *   NO_CODE     nothing deployed at the address
  *   NO_ARTIFACT the manifest names a contract this checkout does not build
+ *   NOT_IN_MANIFEST  CONTRACTS names a contract the manifest does not list
  *
  * Run it at the audited commit (tag), against the manifest the deploy wrote:
  *   AUDITED_COMMIT=<sha> npx hardhat run scripts/checkDeployedBytecode.ts --network base
@@ -32,7 +33,7 @@ import type { Artifact, Artifacts } from "hardhat/types";
  * (treat RUNTIME as a pass). Exit code 1 unless every checked contract passes.
  */
 
-export type Status = "EXACT" | "RUNTIME" | "MISMATCH" | "NO_CODE" | "NO_ARTIFACT";
+export type Status = "EXACT" | "RUNTIME" | "MISMATCH" | "NO_CODE" | "NO_ARTIFACT" | "NOT_IN_MANIFEST";
 
 export interface ImmutableRef {
     start: number;
@@ -155,6 +156,20 @@ export async function checkManifest(
         const comparison = compareRuntime(artifact.deployedBytecode, await provider.getCode(address), refs);
         rows.push({ key, name, address, immutableSlots: refs.length, ...comparison });
     }
+    for (const name of only ?? []) {
+        if (rows.some((row) => row.name === name)) continue;
+        rows.push({
+            key: name,
+            name,
+            address: "",
+            status: "NOT_IN_MANIFEST",
+            metadataMatches: false,
+            expectedLength: 0,
+            onchainLength: 0,
+            immutableSlots: 0,
+            detail: "CONTRACTS names a contract the manifest does not list",
+        });
+    }
     return rows;
 }
 
@@ -192,8 +207,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<void> 
 
     const rows = await checkManifest(readManifest(manifestPath), hre.ethers.provider, hre.artifacts, only);
     for (const row of rows) {
-        const size =
-            row.status === "NO_ARTIFACT" ? "" : ` (${row.expectedLength} bytes, ${row.immutableSlots} immutable slots)`;
+        const size = row.expectedLength ? ` (${row.expectedLength} bytes, ${row.immutableSlots} immutable slots)` : "";
         console.log(`${row.status.padEnd(11)} ${row.name.padEnd(26)} ${row.address}${size}`);
         if (row.status !== "EXACT") console.log(`            ${row.detail}`);
     }
