@@ -241,8 +241,10 @@ abstract contract BaseSavingsHandler is IYieldHandler, YieldStorage, SavingsStor
     /// @dev    A Safe that moved shares out around the module redeems what is
     ///         left (`SavingsSharesShortfall`); the manager still prorates
     ///         and charges against the full basis. With nothing left to redeem
-    ///         no price is read, so the record can be cleared while the feed is
-    ///         down; the event then reports a rate of zero.
+    ///         no price is read and no floor applies, `minUsdcOut` included:
+    ///         it bounds a redemption, not a record release. So the record can
+    ///         be cleared while the feed is down with the caller's routine
+    ///         floor in place; the event then reports a rate of zero.
     function close(
         CloseParams calldata p,
         uint128 basisForExit
@@ -255,7 +257,7 @@ abstract contract BaseSavingsHandler is IYieldHandler, YieldStorage, SavingsStor
         if (p.exitBps != BPS && basisForExit > 0 && toRedeem == 0) revert InvalidExitBps();
 
         uint256 rate = toRedeem > 0 ? _rate() : 0;
-        uint256 minOut = _minUsdcOut(toRedeem, rate, p.slippageBps, p.minUsdcOut);
+        uint256 minOut = toRedeem > 0 ? _minUsdcOut(toRedeem, rate, p.slippageBps, p.minUsdcOut) : 0;
         uint256 usdcBefore = USDC.balanceOf(p.onBehalfOf);
         if (toRedeem > 0) _redeemShares(p.onBehalfOf, toRedeem, minOut);
         uint256 received = USDC.balanceOf(p.onBehalfOf) - usdcBefore;
@@ -435,7 +437,7 @@ abstract contract BaseSavingsHandler is IYieldHandler, YieldStorage, SavingsStor
         uint256 expected = Math.mulDiv(shares, rate, SHARES_TIMES_RATE_TO_USDC);
         uint256 floor = Math.mulDiv(expected, BPS - toleranceBps, BPS);
         minOut = floor > callerMin ? floor : callerMin;
-        if (shares > 0 && minOut == 0) revert InvalidSwapAmountOutMin();
+        if (minOut == 0) revert InvalidSwapAmountOutMin();
     }
 
     /// @dev Caps one deposit at what the venue can pay out right now. A cap on

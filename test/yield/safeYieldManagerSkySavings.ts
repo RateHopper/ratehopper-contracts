@@ -578,6 +578,23 @@ describe("SafeYieldManager + savings handlers", function () {
                     await expectZeroResidue(f);
                 });
 
+                it("clears a zero-share record with the feed down whatever minUsdcOut the caller passes", async function () {
+                    const f = await loadFixture(deployRegistered);
+                    const { manager, managerEvents, stranger, safeAddr } = f;
+                    const share = src.shareToken(f);
+                    const tokenId = tokenIdOf(safeAddr);
+                    await (await open(f, src)).wait();
+                    const shares = sharesFor(DEPOSIT, RATE);
+                    await (await share.connect(await safeSigner(safeAddr)).transfer(stranger.address, shares)).wait();
+                    await src.breakPricing(f);
+
+                    await expect(close(f, src, safeAddr, { minUsdcOut: USDC(1) }))
+                        .to.emit(managerEvents, "SavingsRedeemed")
+                        .withArgs(safeAddr, tokenId, 0, 0, 0, 10_000);
+                    expect(await sharesOf(f, src)).to.equal(0);
+                    expect(await manager.positionHandlerOf(src.protocol, tokenId)).to.equal(ZERO);
+                });
+
                 it("bubbles the venue's USDC revert and leaves storage untouched", async function () {
                     const f = await loadFixture(deployRegistered);
                     const { manager, usdc, safe, safeAddr, safe2Addr } = f;

@@ -270,9 +270,11 @@ balances; the on-chain rail catches a single runaway deposit.
 **`withdraw` and the rollover never depend on the oracle or the venue.**
 `withdraw` releases the record with no Safe call and no price read; the sUSDS stays on the Safe, where
 the owner can redeem it at PSM3 or anywhere else. A full `close` with every
-share already moved out around the module reads no price either, so a record
-can be cleared while the feed is down. If PSM3's pocket is drained a redemption
-reverts inside PSM3's own USDC transfer and `withdraw` still works; if the feed
+share already moved out around the module reads no price either and applies no
+floor, the caller's `minUsdcOut` included (it bounds a redemption, not a
+release; Shred November 2026 L-2), so a record can be cleared while the feed is
+down by the same call the backend routinely sends. If PSM3's pocket is drained a
+redemption reverts inside PSM3's own USDC transfer and `withdraw` still works; if the feed
 and PSM3 are both down the same-id rollover still works, because neither leg
 touches them. The property of I-03 holds here as it does for LP positions:
 **no configuration of any role can trap a savings position.**
