@@ -4,6 +4,6 @@
         "no-console": "off",
         "avoid-low-level-calls": "off",
         "func-visibility": "off",
-        "custom-errors": "off"
+        "gas-custom-errors": "off"
     }
 }
