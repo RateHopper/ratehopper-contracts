@@ -3,8 +3,8 @@
 The mechanics of every emergency power are in `docs/SECURITY_MODEL.md` (I-03
 and "Protocol 3 prices from Chainlink"). This runbook turns them into
 playbooks: who acts, with which call, in which order, and what users can do
-in the meantime. Fill in the contacts table before the protocol-3 launch and
-keep it current.
+in the meantime. Who the people are lives in the internal operations
+document (see Contacts and ownership), not here.
 
 Two facts shape every playbook:
 
@@ -40,8 +40,8 @@ price references, the fees or the operator.
 | SEV-2 | exits through the module degraded, funds safe                                                                  | oracle stale or disagreeing (closes revert), PSM3 pocket drained, treasury rejecting fees on every exit     |
 | SEV-3 | entries degraded or observability lost                                                                         | opens reverting on a tolerance that drifted, alerts not delivering, fee transfers failing occasionally              |
 
-Decision owner per level: see Contacts. One person declares the level and
-owns the timeline; everyone else executes.
+Decision owner per level: see Contacts and ownership. One person declares
+the level and owns the timeline; everyone else executes.
 
 ## First fifteen minutes
 
@@ -242,12 +242,16 @@ paths, so the drill is the humans and the keys, not the code.
 
 ## Contacts and ownership
 
-| Role / decision                     | Who (fill in)      | Reach                | Backup   |
-| ----------------------------------- | ------------------ | -------------------- | -------- |
-| Declares severity, owns the timeline | TODO               | TODO                 | TODO     |
-| Pauser multisig signers              | TODO (n of m)      | TODO                 | TODO     |
-| Admin multisig signers               | TODO (n of m)      | TODO                 | TODO     |
-| Timelock proposer / executor / canceller | TODO           | TODO                 | TODO     |
-| Backend / operator key owner         | TODO               | TODO                 | TODO     |
-| User communications                  | TODO               | TODO                 | TODO     |
-| Auditor contact (re-review)          | Shred Security     | shredsecurity.io     |          |
+Names, signer sets and how to reach people are not kept in this public
+repository. The internal operations document (linked from the team's
+operations channel) holds, and must keep current:
+
+- who declares severity and owns the timeline, per level;
+- the pauser and admin multisig signer sets and quorums;
+- the timelock proposer, executor and canceller holders;
+- the backend / operator key owner;
+- who writes user communications;
+- the auditor contact for a re-review (Shred Security, shredsecurity.io).
+
+Review that document together with this runbook before the protocol-3
+launch and after every key rotation.
