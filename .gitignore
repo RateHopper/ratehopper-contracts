@@ -32,3 +32,4 @@ yarn-error.log
 eth-sdk/abis/*
 .claude
 ignition/deployments/local-operator-yield-v3/
+.watch-admin-events.json
