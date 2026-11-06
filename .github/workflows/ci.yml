@@ -57,3 +57,56 @@ jobs:
 
       - name: Enforce branch-coverage gate
         run: yarn coverage:check
+
+  slither:
+    name: Slither static analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack (Yarn 4)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      # Compile with the project's own Hardhat toolchain so Slither reads the
+      # same build-info the tests use (ignore-compile below).
+      - name: Compile
+        run: yarn compile
+
+      # Two runs on the same build-info. The report run excludes nothing and
+      # uploads every finding to Security > Code scanning. The gate run fails
+      # the job on a High finding, minus three detectors that flag this
+      # architecture by design (see README "Continuous integration").
+      - name: Run Slither (full report)
+        id: slither-report
+        uses: crytic/slither-action@b52cc1cbfee9ca3e8722dd5224299d16c9a6b80f # v0.4.2
+        with:
+          ignore-compile: true
+          slither-config: slither.config.json
+          fail-on: none
+          sarif: results.sarif
+
+      - name: Upload Slither SARIF
+        if: steps.slither-report.outputs.sarif != ''
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: ${{ steps.slither-report.outputs.sarif }}
+
+      - name: Run Slither (gate)
+        uses: crytic/slither-action@b52cc1cbfee9ca3e8722dd5224299d16c9a6b80f # v0.4.2
+        with:
+          ignore-compile: true
+          slither-config: slither.config.json
+          slither-args: --exclude controlled-delegatecall,arbitrary-send-erc20,reentrancy-balance
+          fail-on: high

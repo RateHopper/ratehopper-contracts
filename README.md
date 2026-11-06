@@ -289,6 +289,24 @@ Run tests with:
 yarn test
 ```
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request: solhint, prettier, compile, the 95% branch-coverage gate (`yarn coverage:gated` + `yarn coverage:check`), and Slither as a separate job. Actions are pinned to commit SHAs and `.github/dependabot.yml` opens weekly update PRs for npm packages and for those pins (the exact-pinned Uniswap V4 packages are excluded, see CLAUDE.md).
+
+Slither reads the Hardhat build-info; `slither.config.json` filters `node_modules`, the frozen `contracts/legacy` module and `contracts/mocks`. It runs twice:
+
+- **Report run**: no exclusions, every finding is uploaded as SARIF to Security → Code scanning. The backlog it shows today is mostly medium findings (`unused-return`, `reentrancy-no-eth`, `incorrect-equality`, `uninitialized-local`, `divide-before-multiply`) that still need a triage pass with inline `slither-disable` comments before the gate can be raised to medium.
+- **Gate run**: fails the job on a High finding. Three High detectors are excluded because they flag this architecture by design: `controlled-delegatecall` (the debt and yield managers delegatecall handlers that only the registry or the timelock can set), `arbitrary-send-erc20` (handlers pull tokens from the Safe they act for, under the module authorization checked at the entry point) and `reentrancy-balance` (every handler measures Safe balance deltas around a venue call; the managers' entry points are `nonReentrant`).
+
+To run it locally without installing Slither:
+
+```bash
+yarn compile
+docker run --rm -v "$PWD":/src -w /src ghcr.io/crytic/slither:latest \
+  slither /src --ignore-compile --config-file /src/slither.config.json \
+  --exclude controlled-delegatecall,arbitrary-send-erc20,reentrancy-balance --fail-high
+```
+
 ## Deployment
 
 The contracts use [Hardhat Ignition](https://hardhat.org/ignition) for declarative deployments. Make sure you complete the sections Environment Variables and Setup and Development and make sure all tests pass before deploying.

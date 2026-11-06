@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.28;
 
-import {Structs as AdminModuleStructs} from "../adminModule/structs.sol";
+import {AdminModuleStructs} from "../adminModule/structs.sol";
 
-abstract contract Structs {
+abstract contract FluidLiquidityResolverStructs {
     struct RateData {
         uint256 version;
         AdminModuleStructs.RateDataV1Params rateDataV1;

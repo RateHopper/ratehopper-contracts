@@ -1,0 +1,4 @@
+{
+    "filter_paths": "node_modules|contracts/legacy|contracts/mocks",
+    "exclude_dependencies": true
+}

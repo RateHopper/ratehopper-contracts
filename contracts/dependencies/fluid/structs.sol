@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {IFluidVault} from "../../interfaces/fluid/IFluidVault.sol";
-import {Structs as FluidLiquidityResolverStructs} from "./liquidity/structs.sol";
+import {FluidLiquidityResolverStructs} from "./liquidity/structs.sol";
 
 // @dev Amounts are always in token amount for normal col / normal debt or in
 // shares for Dex smart col / smart debt.
