@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {INonfungiblePositionManager} from "../interfaces/uniswapV3/INonfungiblePositionManager.sol";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -246,6 +247,23 @@ contract MockLoudYieldHandler {
 
     function poolParamHasHooks(bytes calldata) external pure returns (bool) {
         revert("loud handler");
+    }
+}
+
+/// @notice Handler stand-in whose `configure` calls whatever the admin's data
+///         names, from inside the manager's delegatecall context: the shape a
+///         handler's configuration code would take to re-enter the manager.
+contract MockReenteringYieldHandler {
+    uint8 public immutable PROTOCOL;
+
+    constructor(uint8 _protocol) {
+        PROTOCOL = _protocol;
+    }
+
+    function configure(bytes calldata data) external {
+        (address target, bytes memory callData) = abi.decode(data, (address, bytes));
+        (bool ok, bytes memory ret) = target.call(callData);
+        Address.verifyCallResult(ok, ret);
     }
 }
 

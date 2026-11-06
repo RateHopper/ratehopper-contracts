@@ -2435,6 +2435,31 @@ describe("SafeYieldManager", function () {
             ).to.be.revertedWithCustomError(manager, "ReentrancyGuardReentrantCall");
         });
 
+        it("blocks reentrant calls from a handler's configure", async function () {
+            const { manager, deployer, pauser, timelock, safeAddr } = await loadFixture(deployYieldManagerHarness);
+            const managerAddr = await manager.getAddress();
+            const Reentering = await ethers.getContractFactory("MockReenteringYieldHandler");
+            const reentering = await Reentering.deploy(3);
+            await reentering.waitForDeployment();
+            await (await timelockCall(timelock, manager, "setYieldHandler", [3, await reentering.getAddress()])).wait();
+            await (await manager.connect(pauser).setProtocolEnabledForOpen(3, true)).wait();
+
+            const reenter = (calldata: string) => abi.encode(["address", "bytes"], [managerAddr, calldata]);
+            await expect(
+                manager
+                    .connect(deployer)
+                    .configureHandler(
+                        3,
+                        reenter(manager.interface.encodeFunctionData("open", [UNISWAP_V3, openParams(safeAddr, FEE_TIER)])),
+                    ),
+            ).to.be.revertedWithCustomError(manager, "ReentrancyGuardReentrantCall");
+            await expect(
+                manager
+                    .connect(deployer)
+                    .configureHandler(3, reenter(manager.interface.encodeFunctionData("configureHandler", [3, "0x"]))),
+            ).to.be.revertedWithCustomError(manager, "ReentrancyGuardReentrantCall");
+        });
+
         it("treats empty transfer returndata as fee-transfer success", async function () {
             const { manager, operatorEOA, safeAddr, safe, usdcAddr, uniRouter } =
                 await loadFixture(deployYieldManagerHarness);

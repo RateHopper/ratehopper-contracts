@@ -846,8 +846,9 @@ contract SafeYieldManager is AccessControl, ReentrancyGuard, Pausable, YieldStor
     ///         pinned to. Handlers without parameters revert
     ///         `ConfigureNotSupported`. Refused while opens are disabled for
     ///         the id, so a freshly registered build's code never runs before
-    ///         the pauser has activated it.
-    function configureHandler(uint8 protocol, bytes calldata data) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    ///         the pauser has activated it. `nonReentrant` like every other
+    ///         entry point that runs handler code in this contract's context.
+    function configureHandler(uint8 protocol, bytes calldata data) external nonReentrant onlyRole(DEFAULT_ADMIN_ROLE) {
         address handler = yieldHandlers[protocol];
         if (handler == address(0)) revert HandlerNotSet();
         if (!protocolEnabledForOpen[protocol]) revert ProtocolDisabled();
