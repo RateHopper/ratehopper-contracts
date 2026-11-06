@@ -13,9 +13,9 @@ Two facts shape every playbook:
   price read and no venue call, and a Safe can always act on its own NFT or
   sUSDS directly at the venue. The module can delay exits (the close switch);
   it cannot prevent them.
-- **Pause is exit-only mode.** `pause()` stops opens and switches. Closes,
-  withdrawals and collects keep running through the handler each position is
-  pinned to. The per-protocol close switch is the only thing that stops exits
+- **Pause is exit-only mode.** `pause()` stops opens and switches. Closes and
+  withdrawals keep running through the handler each position is pinned to
+  (and collects, for LP positions; a savings position has nothing to collect). The per-protocol close switch is the only thing that stops exits
   through the module, and it exists for one case: a handler we no longer trust.
 
 ## Roles and powers
