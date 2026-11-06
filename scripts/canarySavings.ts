@@ -31,8 +31,10 @@ import {
  *              shares are worth the deposit at the oracle rate.
  *   close      the record is cleared, the shares left, the USDC came back
  *              within CANARY_TOLERANCE_BPS of the deposit.
- * An open whose checks fail is left in place for inspection (close it with
- * savingsBySafe.ts ACTION=close); the run reports FAIL either way.
+ * An open whose checks fail is left in place for inspection, and a run that
+ * throws after a transaction was sent says so: the result's `note` names what
+ * may be open and how to close it (savingsBySafe.ts ACTION=close). The run
+ * reports FAIL either way.
  *
  * Usage (DRY_RUN=true runs preflight only and prints the open calldata):
  *   IGNITION_DEPLOYMENT_ID=<id> CALLER=operator DRY_RUN=false USDC_AMOUNT=1 \
@@ -87,7 +89,12 @@ export interface CanaryResult {
     ok: boolean;
     stage: "preflight" | "open" | "close";
     checks: Check[];
+    /** What to do about a position the run may have left open; absent when nothing is open. */
+    note?: string;
 }
+
+const CLOSE_HINT = "close it with savingsBySafe.ts ACTION=close";
+const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function readCanaryConfig(env: NodeJS.ProcessEnv = process.env): CanaryConfig {
     const base = readConfig({ ...env, ACTION: "open", USDC_AMOUNT: env.USDC_AMOUNT || "1" });
@@ -225,36 +232,65 @@ export async function runCanary(cfg: CanaryConfig, sender: Sender): Promise<Cana
 
     const c = await contractsFor(cfg);
     const before = await snapshot(c, cfg);
-    const openReceipt = await waitForReceipt(
-        c.provider,
-        await sender(cfg, await buildAction({ ...cfg, action: "open" })),
-    );
-    const rate = await rateVia(await c.manager.yieldHandlers(PROTOCOL));
-    const afterOpen = await snapshot(c, cfg);
-    const openChecks = evaluateOpen({
-        before,
-        after: afterOpen,
-        amount: cfg.usdcAmount,
-        rate,
-        events: eventNames(c, cfg, openReceipt.logs),
-        toleranceBps: cfg.toleranceBps,
-    });
-    checks.push(...openChecks);
-    if (openChecks.some((x) => !x.ok)) return { ok: false, stage: "open", checks };
+    let openHash: string | undefined;
+    let afterOpen: Snapshot;
+    try {
+        openHash = await sender(cfg, await buildAction({ ...cfg, action: "open" }));
+        const openReceipt = await waitForReceipt(c.provider, openHash);
+        const rate = await rateVia(await c.manager.yieldHandlers(PROTOCOL));
+        afterOpen = await snapshot(c, cfg);
+        checks.push(check("open confirmed", true, `tx ${openHash} in block ${openReceipt.blockNumber}`));
+        checks.push(
+            ...evaluateOpen({
+                before,
+                after: afterOpen,
+                amount: cfg.usdcAmount,
+                rate,
+                events: eventNames(c, cfg, openReceipt.logs),
+                toleranceBps: cfg.toleranceBps,
+            }),
+        );
+    } catch (error) {
+        checks.push(check("open confirmed", false, `${openHash ? `tx ${openHash}: ` : ""}${describe(error)}`));
+        return {
+            ok: false,
+            stage: "open",
+            checks,
+            note: openHash
+                ? `tx ${openHash} was sent; check with ACTION=status whether a position is open, then ${CLOSE_HINT}`
+                : "no transaction was confirmed; nothing to clean up",
+        };
+    }
+    if (checks.some((x) => !x.ok)) {
+        return { ok: false, stage: "open", checks, note: `the position was left open for inspection; ${CLOSE_HINT}` };
+    }
 
     const floor = (cfg.usdcAmount * (BPS - BigInt(cfg.toleranceBps))) / BPS;
     const closeCfg: SavingsConfig = { ...cfg, action: "close", exitBps: 10_000, minUsdcOut: floor, ownerMinSet: true };
-    const closeReceipt = await waitForReceipt(c.provider, await sender(closeCfg, await buildAction(closeCfg)));
-    const afterClose = await snapshot(c, cfg);
-    checks.push(
-        ...evaluateClose({
-            before: afterOpen,
-            after: afterClose,
-            amount: cfg.usdcAmount,
-            events: eventNames(c, cfg, closeReceipt.logs),
-            toleranceBps: cfg.toleranceBps,
-        }),
-    );
+    let closeHash: string | undefined;
+    try {
+        closeHash = await sender(closeCfg, await buildAction(closeCfg));
+        const closeReceipt = await waitForReceipt(c.provider, closeHash);
+        const afterClose = await snapshot(c, cfg);
+        checks.push(check("close confirmed", true, `tx ${closeHash} in block ${closeReceipt.blockNumber}`));
+        checks.push(
+            ...evaluateClose({
+                before: afterOpen,
+                after: afterClose,
+                amount: cfg.usdcAmount,
+                events: eventNames(c, cfg, closeReceipt.logs),
+                toleranceBps: cfg.toleranceBps,
+            }),
+        );
+    } catch (error) {
+        checks.push(check("close confirmed", false, `${closeHash ? `tx ${closeHash}: ` : ""}${describe(error)}`));
+        return {
+            ok: false,
+            stage: "close",
+            checks,
+            note: `the position is still open${closeHash ? ` unless tx ${closeHash} confirmed (ACTION=status)` : ""}; ${CLOSE_HINT}`,
+        };
+    }
     return { ok: checks.every((x) => x.ok), stage: "close", checks };
 }
 
@@ -283,8 +319,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<void> 
     console.log(
         `\n${result.ok ? "PASS" : `FAIL at ${result.stage}`}: ${result.checks.filter((x) => x.ok).length}/${result.checks.length} checks`,
     );
-    if (!result.ok && result.stage === "open")
-        console.log("The position was left open for inspection; close it with savingsBySafe.ts ACTION=close");
+    if (result.note) console.log(`Note: ${result.note}`);
     if (!result.ok) process.exitCode = 1;
 }
 

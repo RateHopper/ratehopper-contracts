@@ -138,6 +138,34 @@ describe("scripts/canarySavings", function () {
             expect(await f.manager.positionHandlerOf(SKY, BigInt(f.safeAddr))).to.equal(ethers.ZeroAddress);
         });
 
+        it("reports a sender failure before any transaction as a failed open with nothing to clean up", async function () {
+            const f = await loadFixture(deployStack);
+            const result = await runCanary(readCanaryConfig(envFor(f)), async () => {
+                throw new Error("rpc down");
+            });
+            expect(result.ok).to.equal(false);
+            expect(result.stage).to.equal("open");
+            expect(result.checks.at(-1)).to.include({ name: "open confirmed", ok: false });
+            expect(result.note).to.include("no transaction");
+            expect(await f.manager.positionHandlerOf(SKY, BigInt(f.safeAddr))).to.equal(ethers.ZeroAddress);
+        });
+
+        it("reports a close failure after a confirmed open and says the position is still open", async function () {
+            const f = await loadFixture(deployStack);
+            let calls = 0;
+            const sender = async (_cfg: unknown, built: { target: string; data: string }) => {
+                calls += 1;
+                if (calls === 2) throw new Error("rpc down");
+                return (await f.operator.sendTransaction({ to: built.target, data: built.data })).hash;
+            };
+            const result = await runCanary(readCanaryConfig(envFor(f)), sender);
+            expect(result.ok).to.equal(false);
+            expect(result.stage).to.equal("close");
+            expect(result.checks.at(-1)).to.include({ name: "close confirmed", ok: false });
+            expect(result.note).to.include("still open");
+            expect(await f.manager.positionHandlerOf(SKY, BigInt(f.safeAddr))).to.not.equal(ethers.ZeroAddress);
+        });
+
         it("stops at preflight and sends nothing while opens are disabled", async function () {
             const f = await loadFixture(deployStack);
             await (await f.manager.connect(f.pauser).setProtocolEnabledForOpen(SKY, false)).wait();

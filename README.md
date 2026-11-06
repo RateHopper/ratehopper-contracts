@@ -468,7 +468,9 @@ IGNITION_DEPLOYMENT_ID=<id> CALLER=operator DRY_RUN=false USDC_AMOUNT=1 yarn can
 
 Preflight (build registered, both switches on, pool param allow-listed,
 module enabled on the Safe, oracle answering, PSM3 and the Safe funded) stops
-the run before any transaction. A failed open is left in place for inspection.
+the run before any transaction. A failed open is left in place for inspection,
+and a run interrupted after a transaction was sent says what may be open and
+how to close it.
 Run it before the pauser re-enables opens for a new build, and after every
 rollover.
 
