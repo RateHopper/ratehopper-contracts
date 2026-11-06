@@ -136,7 +136,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): SavingsConfig 
     };
 }
 
-async function contractsFor(cfg: SavingsConfig) {
+export async function contractsFor(cfg: SavingsConfig) {
     const provider = ethers.provider;
     return {
         provider,
@@ -150,17 +150,17 @@ async function contractsFor(cfg: SavingsConfig) {
         tokenId: BigInt(cfg.safeAddress),
     };
 }
-type Contracts = Awaited<ReturnType<typeof contractsFor>>;
+export type Contracts = Awaited<ReturnType<typeof contractsFor>>;
 
 /** The record the manager keeps for this Safe, read through the build it is pinned to. */
-async function trackedSharesVia(c: Contracts, cfg: SavingsConfig, build: string): Promise<bigint> {
+export async function trackedSharesVia(c: Contracts, cfg: SavingsConfig, build: string): Promise<bigint> {
     const handler = await ethers.getContractAt("SkySavingsYieldHandler", build);
     const slot: string = await handler.savingsSharesSlot(c.tokenId);
     return BigInt(await c.provider.getStorage(cfg.managerAddress, slot));
 }
 
 /** USDC per sUSDS (18 dp) from the rate provider the given build prices with. */
-async function rateVia(build: string): Promise<bigint> {
+export async function rateVia(build: string): Promise<bigint> {
     const handler = await ethers.getContractAt("SkySavingsYieldHandler", build);
     const rateProvider = await ethers.getContractAt("ChainlinkSsrRateProvider", await handler.RATE_PROVIDER());
     return rateProvider.rate(sUSDS_ADDRESS);
@@ -414,7 +414,7 @@ export async function buildAction(cfg: SavingsConfig): Promise<BuiltAction> {
     throw new Error(`ACTION ${cfg.action} builds no transaction`);
 }
 
-async function send(cfg: SavingsConfig, built: BuiltAction): Promise<string> {
+export async function send(cfg: SavingsConfig, built: BuiltAction): Promise<string> {
     const c = await contractsFor(cfg);
     const rpcUrl = (network.config as { url?: string }).url;
     if (!rpcUrl) throw new Error(`Network ${network.name} has no RPC url — run with --network base`);
