@@ -56,12 +56,13 @@ RateHopper Contracts is a DeFi smart contract system enabling automated debt pos
 
 - Handlers: `<Protocol>DebtHandler.sol` (debt) / `<Protocol>YieldHandler.sol` (yield)
 - Interfaces: `I<ContractName>.sol`
-- Tests: `test/<area>/<feature>.ts` — areas: `debt/`, `registry/`, `yield/`, `legacy/` (deployed standalone modules), `helpers/` (fixtures/utils, no tests)
+- Tests: `test/<area>/<feature>.ts` — areas: `debt/`, `registry/`, `yield/`, `legacy/` (deployed standalone modules), `scripts/` (operations scripts), `helpers/` (fixtures/utils, no tests)
 
 ## Key Files
 
 - `contractAddresses.ts`: Token and protocol addresses
-- `docs/ADDING_A_YIELD_HANDLER.md`: checklist for a new yield handler; `docs/SECURITY_MODEL.md`: the invariants a change must keep
+- `docs/ADDING_A_YIELD_HANDLER.md`: checklist for a new yield handler; `docs/SECURITY_MODEL.md`: the invariants a change must keep; `docs/MONITORING.md`: which events page whom; `docs/INCIDENT_RESPONSE.md`: playbooks per incident
+- Launch controls: `yarn check:bytecode` (deployed code vs the audited checkout), `yarn canary:savings` (first open/close through the live wiring), `yarn watch:admin` (admin/role change alerts)
 - `test/helpers/constants.ts`, `test/helpers/utils.ts`, `test/helpers/deployUtils.ts`: Test helpers
 
 ## Security Requirements

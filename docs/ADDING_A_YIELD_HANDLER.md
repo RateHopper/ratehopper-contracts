@@ -119,7 +119,9 @@ run on a manager that still speaks `openLp`/`closeLp`; the script below refuses
 such a manager):
 
 1. Deploy the handler (and its rate provider) with its own Ignition module or
-   `hardhat run`, verify on Basescan.
+   `hardhat run`, verify on Basescan, and prove the live code is the reviewed
+   checkout: `AUDITED_COMMIT=<sha> yarn check:bytecode` (README, "Bytecode
+   match against the audited build").
 2. `scripts/timelockSetYieldHandler.ts`: schedule
    `setYieldHandler(protocol, handler)` through the TimelockController, wait
    `getMinDelay()` (48 h on Base), execute. `setYieldHandler` checks
@@ -134,7 +136,12 @@ such a manager):
    "sky"` for the savings source); for a source,
    `scripts/configureSavingsHandler.ts` if the constructor defaults need
    retuning.
-6. Rolling a build under an id already in use is the same `setYieldHandler`,
+6. Canary before anyone else uses it: one small open and close through the
+   live wiring (`yarn canary:savings` for the savings source; an LP handler
+   needs the equivalent `openLpBySafe.ts` / `closeLpBySafe.ts` pass), then
+   add the handler's admin events to `docs/MONITORING.md` and the watcher
+   catalogue if it declares new ones.
+7. Rolling a build under an id already in use is the same `setYieldHandler`,
    the pauser re-enabling opens, then `switchPosition(id, id)` per position (in
    kind, no price read for a savings source).
 
