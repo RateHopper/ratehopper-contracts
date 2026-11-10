@@ -778,6 +778,28 @@ describe("RatehopperUniV3Positions - mock harness (no fork)", function () {
         expect(await ctx.usdc.balanceOf(ctx.treasury.address)).to.equal(0n);
     });
 
+    for (const returndata of ["0x", "0x01", `0x${"01".repeat(31)}`]) {
+        it(`closeLp handles Safe transfer returndata of ${(returndata.length - 2) / 2} bytes`, async function () {
+            const ctx = await loadFixture(deployMockHarness);
+            const tokenId = await openLp(ctx);
+            await ctx.router.setOutput(1_000_000n);
+            // The Safe stub supplies the exact return shape without calling the token.
+            await ctx.safe.setFailData(returndata);
+            await ctx.safe.setFail(ctx.usdcAddr, 3);
+            const tx = closeLpCall(ctx, tokenId);
+            if (returndata === "0x") {
+                await expect(tx).not.to.emit(ctx.rhp, "FeeTransferFailed");
+            } else {
+                await expect(tx).to.emit(ctx.rhp, "FeeTransferFailed").withArgs(ctx.safeAddr, tokenId, 50_000n);
+            }
+            const ev = (await ctx.rhp.queryFilter(ctx.rhp.filters.PositionClosed(ctx.safeAddr, tokenId), -5)).slice(
+                -1,
+            )[0].args;
+            expect(ev.feeUsd6).to.equal(returndata === "0x" ? 50_000n : 0n);
+            expect(await ctx.rhp.residualBasisUsd6Of(tokenId)).to.equal(0n);
+        });
+    }
+
     it("collectLp surfaces CollectFeeTransferFailed (catch branch) when the fee transfer reverts", async function () {
         const ctx = await loadFixture(deployMockHarness);
         const tokenId = await openLp(ctx);

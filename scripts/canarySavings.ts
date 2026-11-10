@@ -98,7 +98,20 @@ const describe = (error: unknown) => (error instanceof Error ? error.message : S
 
 export function readCanaryConfig(env: NodeJS.ProcessEnv = process.env): CanaryConfig {
     const base = readConfig({ ...env, ACTION: "open", USDC_AMOUNT: env.USDC_AMOUNT || "1" });
-    return { ...base, toleranceBps: Number(env.CANARY_TOLERANCE_BPS || "50") };
+    const toleranceBps = Number(env.CANARY_TOLERANCE_BPS || "50");
+    validateTolerance(toleranceBps);
+    validateAmount(base.usdcAmount);
+    return { ...base, toleranceBps };
+}
+
+function validateTolerance(value: number): void {
+    if (!Number.isInteger(value) || value < 0 || value > 300)
+        throw new Error("CANARY_TOLERANCE_BPS must be an integer between 0 and 300");
+}
+
+function validateAmount(value: bigint): void {
+    if (value <= 0n || value >= 1n << 128n)
+        throw new Error("USDC_AMOUNT must be positive and fit in uint128 USDC units");
 }
 
 const usdc = (v: bigint) => `${ethers.formatUnits(v, 6)} USDC`;
@@ -184,6 +197,7 @@ export async function preflight(cfg: CanaryConfig): Promise<Check[]> {
     const registered: string = await c.manager.yieldHandlers(PROTOCOL).catch(() => ethers.ZeroAddress);
     const yes = (v: boolean) => [v, String(v)] as [boolean, string];
     return Promise.all([
+        read("manager unpaused", c.manager.paused(), (v: boolean) => [!v, `paused=${v}`]),
         read("handler registered", Promise.resolve(registered), (v) => [v !== ethers.ZeroAddress, v]),
         read("opens enabled", c.manager.protocolEnabledForOpen(PROTOCOL), yes),
         read("closes enabled", c.manager.protocolEnabledForClose(PROTOCOL), yes),
@@ -226,17 +240,27 @@ function eventNames(
     return names;
 }
 
-export async function runCanary(cfg: CanaryConfig, sender: Sender): Promise<CanaryResult> {
+export async function runCanary(
+    cfg: CanaryConfig,
+    sender: Sender,
+    receiptReader = waitForReceipt,
+): Promise<CanaryResult> {
+    validateTolerance(cfg.toleranceBps);
+    validateAmount(cfg.usdcAmount);
     const checks = await preflight(cfg);
     if (checks.some((c) => !c.ok)) return { ok: false, stage: "preflight", checks };
 
     const c = await contractsFor(cfg);
     const before = await snapshot(c, cfg);
     let openHash: string | undefined;
+    let openAttempted = false;
     let afterOpen: Snapshot;
     try {
-        openHash = await sender(cfg, await buildAction({ ...cfg, action: "open" }));
-        const openReceipt = await waitForReceipt(c.provider, openHash);
+        const built = await buildAction({ ...cfg, action: "open" });
+        openAttempted = true;
+        openHash = await sender(cfg, built);
+        console.log("Open submitted:", openHash);
+        const openReceipt = await receiptReader(c.provider, openHash);
         const rate = await rateVia(await c.manager.yieldHandlers(PROTOCOL));
         afterOpen = await snapshot(c, cfg);
         checks.push(check("open confirmed", true, `tx ${openHash} in block ${openReceipt.blockNumber}`));
@@ -256,9 +280,9 @@ export async function runCanary(cfg: CanaryConfig, sender: Sender): Promise<Cana
             ok: false,
             stage: "open",
             checks,
-            note: openHash
-                ? `tx ${openHash} was sent; check with ACTION=status whether a position is open, then ${CLOSE_HINT}`
-                : "no transaction was confirmed; nothing to clean up",
+            note: openAttempted
+                ? `Open outcome unknown${openHash ? ` (tx ${openHash})` : " (sender returned no hash)"}. A transaction may be pending or confirmed. Do not retry the open until its receipt and sender nonce are reconciled. Check ACTION=status; if a position is confirmed open, ${CLOSE_HINT}.`
+                : "Open preparation failed before calling the sender; this run submitted no transaction.",
         };
     }
     if (checks.some((x) => !x.ok)) {
@@ -268,9 +292,13 @@ export async function runCanary(cfg: CanaryConfig, sender: Sender): Promise<Cana
     const floor = (cfg.usdcAmount * (BPS - BigInt(cfg.toleranceBps))) / BPS;
     const closeCfg: SavingsConfig = { ...cfg, action: "close", exitBps: 10_000, minUsdcOut: floor, ownerMinSet: true };
     let closeHash: string | undefined;
+    let closeAttempted = false;
     try {
-        closeHash = await sender(closeCfg, await buildAction(closeCfg));
-        const closeReceipt = await waitForReceipt(c.provider, closeHash);
+        const built = await buildAction(closeCfg);
+        closeAttempted = true;
+        closeHash = await sender(closeCfg, built);
+        console.log("Close submitted:", closeHash);
+        const closeReceipt = await receiptReader(c.provider, closeHash);
         const afterClose = await snapshot(c, cfg);
         checks.push(check("close confirmed", true, `tx ${closeHash} in block ${closeReceipt.blockNumber}`));
         checks.push(
@@ -288,7 +316,9 @@ export async function runCanary(cfg: CanaryConfig, sender: Sender): Promise<Cana
             ok: false,
             stage: "close",
             checks,
-            note: `the position is still open${closeHash ? ` unless tx ${closeHash} confirmed (ACTION=status)` : ""}; ${CLOSE_HINT}`,
+            note: closeAttempted
+                ? `Close outcome unknown${closeHash ? ` (tx ${closeHash})` : " (sender returned no hash)"}. It may be pending or confirmed. Reconcile the receipt, sender nonce and ACTION=status before retrying. If still open and no transaction is pending, ${CLOSE_HINT}.`
+                : `Close preparation failed before calling the sender; inspect the confirmed open, then ${CLOSE_HINT}.`,
         };
     }
     return { ok: checks.every((x) => x.ok), stage: "close", checks };

@@ -960,6 +960,106 @@ describe("SafeYieldManager + UniV4YieldHandler", function () {
         });
     });
 
+    describe("exit edge cases", function () {
+        it("withdraws a zero-native payout without wrapping or spending pre-existing balances", async function () {
+            const { manager, operatorEOA, deployer, safeAddr, safe, v4Pm, weth, wethAddr, usdc, usdcAddr } =
+                await loadFixture(deployUniV4Harness);
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_NATIVE_KEY));
+            await v4Pm.seedPosition(
+                1,
+                safeAddr,
+                { currency0: ZERO, currency1: usdcAddr, fee: 500, tickSpacing: 10, hooks: ZERO },
+                1_000_000n,
+                0n,
+                HALF,
+            );
+            await deployer.sendTransaction({ to: safeAddr, value: 123n });
+            await weth.mint(safeAddr, 456n);
+            await safe.setFail(wethAddr, 1);
+            const nativeBefore = await ethers.provider.getBalance(safeAddr);
+            const usdcBefore = await usdc.balanceOf(safeAddr);
+            await expect(
+                manager.connect(operatorEOA).withdraw(UNISWAP_V4, {
+                    onBehalfOf: safeAddr,
+                    tokenId: 1,
+                    decreaseAmount0Min: 0,
+                    decreaseAmount1Min: HALF,
+                    deadline: DEADLINE,
+                }),
+            )
+                .to.emit(manager, "PositionWithdrawn")
+                .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, 0n, 0n, HALF);
+            expect(await ethers.provider.getBalance(safeAddr)).to.equal(nativeBefore);
+            expect(await weth.balanceOf(safeAddr)).to.equal(456n);
+            expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore + HALF);
+            expect(await manager.positionHandlerOf(UNISWAP_V4, 1)).to.equal(ZERO);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(0n);
+            await expect(v4Pm.ownerOf(1)).to.be.revertedWith("ERC721: invalid token");
+        });
+
+        it("skips a zero close swap delta and preserves existing non-USDC funds", async function () {
+            const { manager, operatorEOA, safeAddr, v4Pm, weth, wethAddr, usdc, usdcAddr, universalRouter } =
+                await loadFixture(deployUniV4Harness);
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            await v4Pm.seedPosition(
+                1,
+                safeAddr,
+                { currency0: wethAddr, currency1: usdcAddr, fee: 500, tickSpacing: 10, hooks: ZERO },
+                1_000_000n,
+                0n,
+                HALF,
+            );
+            await weth.mint(safeAddr, 456n);
+            const callsBefore = await universalRouter.callCount();
+            const usdcBefore = await usdc.balanceOf(safeAddr);
+            await expect(
+                manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY, { minUsdcOut: HALF })),
+            )
+                .to.emit(manager, "PositionClosed")
+                .withArgs(safeAddr, UNISWAP_V4, 1n, USDC_AMOUNT, HALF, 0n, 10_000, 0n);
+            expect(await universalRouter.callCount()).to.equal(callsBefore);
+            expect(await weth.balanceOf(safeAddr)).to.equal(456n);
+            expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore + HALF);
+            expect(await manager.positionHandlerOf(UNISWAP_V4, 1)).to.equal(ZERO);
+        });
+
+        it("rolls back close on a missing TWAP reference while retaining the in-kind exit", async function () {
+            const { manager, operatorEOA, safeAddr, v4Pm, v4Handler, weth, wethAddr, usdc, universalRouter } =
+                await loadFixture(deployUniV4Harness);
+            await manager.connect(operatorEOA).open(UNISWAP_V4, openParams(safeAddr, V4_KEY));
+            // Fault injection: public configuration forbids deleting a live reference.
+            const namespace = BigInt("0x53ba738b9a2829dfda910cf4e864fcd3f84e03854b49244f3d159a473ee6a400");
+            const slot = ethers.keccak256(
+                ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [wethAddr, namespace + 7n]),
+            );
+            await ethers.provider.send("hardhat_setStorageAt", [await manager.getAddress(), slot, ethers.ZeroHash]);
+            expect((await manager.twapConfigOf(wethAddr)).pool).to.equal(ZERO);
+            const usdcBefore = await usdc.balanceOf(safeAddr);
+            const wethBefore = await weth.balanceOf(safeAddr);
+            const callsBefore = await universalRouter.callCount();
+            await expect(manager.connect(operatorEOA).close(UNISWAP_V4, closeParams(safeAddr, 1, V4_KEY)))
+                .to.be.revertedWithCustomError(v4Handler, "TwapNotConfigured")
+                .withArgs(wethAddr);
+            expect(await v4Pm.ownerOf(1)).to.equal(safeAddr);
+            expect(await manager.residualBasisUsd6Of(UNISWAP_V4, 1)).to.equal(USDC_AMOUNT);
+            expect(await manager.positionHandlerOf(UNISWAP_V4, 1)).to.equal(await v4Handler.getAddress());
+            expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore);
+            expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore);
+            expect(await universalRouter.callCount()).to.equal(callsBefore);
+            await expect(
+                manager.connect(operatorEOA).withdraw(UNISWAP_V4, {
+                    onBehalfOf: safeAddr,
+                    tokenId: 1,
+                    decreaseAmount0Min: 0,
+                    decreaseAmount1Min: 0,
+                    deadline: DEADLINE,
+                }),
+            ).to.emit(manager, "PositionWithdrawn");
+            expect(await weth.balanceOf(safeAddr)).to.equal(wethBefore + WETH_OUT);
+            expect(await usdc.balanceOf(safeAddr)).to.equal(usdcBefore + HALF);
+        });
+    });
+
     describe("close (native ETH pair)", function () {
         async function openedNativeFixture() {
             const ctx = await loadFixture(deployUniV4Harness);

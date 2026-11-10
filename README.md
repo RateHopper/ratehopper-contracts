@@ -445,15 +445,40 @@ arguments) and setting the CBOR metadata tail apart:
 ```bash
 git checkout <audited tag>
 yarn compile
-AUDITED_COMMIT=<sha> yarn check:bytecode
+AUDITED_COMMIT=<full-40-character-sha> RELEASE_CONFIG=/path/to/reviewed-config.json yarn check:bytecode
 ```
 
-`EXACT` means code and metadata both match (this checkout is the deployed
-build). `RUNTIME` means the code matches but the source text or compiler
-settings drifted (a comment, a path); explain it or fail the launch.
-`MISMATCH` names the first differing byte. `CONTRACTS=SafeYieldManager,SkySavingsYieldHandler`
-narrows the run; `MANIFEST=` points it at an Ignition `deployed_addresses.json`.
-Run it after every deploy, before the addresses are journaled.
+`EXACT` means the runtime template and metadata match; it does not verify
+immutable values. Release mode also requires a clean audited checkout, a
+fresh forced compile, Base chain 8453, all three savings contracts, and the
+reviewed immutable values, live savings limits, switches, fees, operator and
+wiring. It rejects partial `CONTRACTS` filters
+and metadata drift. `RUNTIME` indicates matching runtime with different
+metadata; `MISMATCH` names the first differing byte.
+
+`RELEASE_CONFIG` is a JSON object with `chainId: 8453` and `contracts`, keyed
+by `SafeYieldManager`, `SkySavingsYieldHandler`, and `ChainlinkSsrRateProvider`.
+Each contract entry maps every getter in `RELEASE_GETTERS` in
+`scripts/checkDeployedBytecode.ts` to its reviewed expected value as a string
+(addresses, decimal integers or `"true"`/`"false"`). The top-level `operator`
+is the approved registry operator address. The required `savings` object has
+`maxToleranceBps` and `maxExposureBps` as decimal strings for the effective
+limits, and `opensEnabled`, `closesEnabled`, `poolAllowed` as booleans for
+the intended rollout stage. Review these values independently against
+the approved deployment parameters; copying live reads would not validate
+the intended configuration. Signer roles, Safe enablement, other protocols'
+configuration and alert delivery still need the rollout checks and canary.
+
+For a diagnostic template comparison, use `CHECK_MODE=code-only`; only that
+mode supports `CONTRACTS` and `ALLOW_METADATA_DRIFT`. It is not a release
+approval. `MANIFEST` may point to the deployment's Ignition journal. Run
+release verification after every deploy, before adopting its addresses.
+
+The savings owner script preserves revocation during recovery. `withdraw`
+and `redeem-direct` never enable the manager. A disabled manager also blocks
+`close`. Only explicit onboarding with `ACTION=open CALLER=safe
+ENABLE_MODULE=true` may prepend `enableModule`; dry-run prints that same
+transaction bundle and identifies the authority grant.
 
 ### First-deploy canary
 
@@ -471,8 +496,12 @@ module enabled on the Safe, oracle answering, PSM3 and the Safe funded) stops
 the run before any transaction. A failed open is left in place for inspection,
 and a run interrupted after a transaction was sent says what may be open and
 how to close it.
-Run it before the pauser re-enables opens for a new build, and after every
-rollover.
+Run it after the pauser enables both protocol switches and unpauses, with
+backend schedulers stopped, then after every rollover. These permissions are
+global; there is no canary-only allow-list. Disable opens again on failure.
+Treat a sender error or receipt timeout as an unknown transaction outcome,
+even without a returned hash. Reconcile receipts, sender nonce and position
+state before retrying.
 
 ### Monitoring and incident response
 

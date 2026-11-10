@@ -8,11 +8,13 @@ document (see Contacts and ownership), not here.
 
 Two facts shape every playbook:
 
-- **No role can trap a position.** Custody stays in the Safe. `withdraw`
-  releases an LP position in kind and a savings position as sUSDS with no
-  price read and no venue call, and a Safe can always act on its own NFT or
-  sUSDS directly at the venue. The module can delay exits (the close switch);
-  it cannot prevent them.
+- **Owner recovery is separate from module recovery.** The close switch
+  blocks `withdraw` as well as `close`. An LP withdrawal also calls its
+  position manager or staking pool. Savings withdrawal releases bookkeeping
+  without a venue or price read. Owners can use direct venue exits, subject
+  to that venue's availability. Untrusted delegatecalled code can spend Safe
+  assets while the manager remains enabled; do not promise funds are safe
+  merely because custody starts in the Safe.
 - **Pause is exit-only mode.** `pause()` stops opens and switches. Closes and
   withdrawals keep running through the handler each position is pinned to
   (and collects, for LP positions; a savings position has nothing to collect). The per-protocol close switch is the only thing that stops exits
@@ -94,8 +96,8 @@ announcement, or a `CallScheduled` nobody filed.
    reviewed build with `scripts/timelockSetYieldHandler.ts`). Meanwhile
    treat the deployed change as playbook B if it touched a handler.
 
-Users keep: every exit. Nothing on the admin or pauser rows can stop
-`withdraw`.
+Users keep: owner-controlled direct venue exits. The pauser can stop module
+`withdraw` with the close switch.
 
 ### B. Handler compromised or malfunctioning
 
@@ -118,14 +120,22 @@ handler we did not review.
    EXECUTE=true OPERATION_ID=... TIMELOCK_ADDRESS=0x... PROTOCOL_ID=<id> HANDLER_ADDRESS=0x... MANAGER_ADDRESS=0x... \
    npx hardhat run scripts/timelockSetYieldHandler.ts --network base
    ```
-   Registration turns opens for the id off by itself; the pauser re-enables
-   them only after the canary (`yarn canary:savings` for protocol 3) passes
-   against the new build.
-4. Pauser: `setProtocolEnabledForClose(id, true)`. Existing positions still
-   exit through the build they are pinned to; if the pinned build is the bad
-   one, roll each position with `switchPosition(id, id)` (operator) onto the
-   fixed build before re-enabling closes, or tell those users to use the
-   direct exit.
+   Registration turns opens for the id off. Existing positions retain their
+   old handler pin; registration does not replace the code used to exit them.
+4. If the old pinned handler is untrusted, keep module exits disabled and
+   have owners revoke the manager (`disableModule`) and exit directly at the
+   venue. Do not use `withdraw` or `switchPosition` to escape untrusted code:
+   both execute that old handler. Savings `ACTION=redeem-direct` calls the
+   share token and PSM3 directly and preserves manager revocation. A stale
+   bookkeeping pin may remain; do not execute the untrusted handler to clear it.
+5. Only for a reviewed old handler whose withdrawal remains safe: stop the
+   backend schedulers, set closes enabled, set opens enabled, and unpause
+   before the canary on a separate funded Safe. These are global permissions,
+   not a canary allow-list. If the canary fails, disable opens again and
+   reconcile any pending transaction before retrying. If it passes, roll
+   positions with `switchPosition(id, id)`, verify balances and pins, then
+   resume the schedulers. Switching requires old closes, new opens and an
+   unpaused manager throughout the transaction.
 
 Users keep: direct action on their own assets. An LP NFT is owned by the
 Safe (decrease and collect at the position manager); sUSDS is in the Safe
@@ -140,8 +150,8 @@ without a round, `OracleDisagreement` beyond 50 bps against the SSR oracle,
 protocol-3 open and close reverts; `ACTION=status` prints the rate as
 unavailable.
 
-1. Nothing to flip. The contracts fail closed by design and the exposure is
-   zero: sUSDS keeps accruing in the Safe.
+1. The oracle-dependent paths fail closed. Existing sUSDS exposure remains;
+   confirm the underlying venue and token are healthy before giving assurances.
 2. Tell users exits are available in kind:
    `ACTION=withdraw` (releases the sUSDS record, no price read), then
    `ACTION=redeem-direct` if they want USDC now (PSM3 quote, or their own
@@ -152,7 +162,7 @@ unavailable.
    either.
 4. If the feed is retired rather than paused, deploy a build with another
    `ChainlinkSsrRateProvider` and roll positions onto it (`switchPosition(3, 3)`
-   needs neither oracle nor venue) through playbook B steps 3 and 4.
+   needs neither oracle nor venue) through playbook B's trusted-handler sequence.
 
 Users keep: `withdraw` and the direct PSM3 redemption.
 
@@ -209,21 +219,24 @@ secret.
    covers entries for that window and the floors cover exits.
 3. Rotate the backend secret and the `TESTING_SAFE_OPERATOR_KEY` /
    `OPERATOR_PRIVATE_KEY` env on every host; revoke the old key's RPC access.
-4. `unpause()` after the new operator executes and the canary passes.
+4. After the registry rotation executes, verify the old operator is rejected.
+   Keep backend schedulers stopped, enable the required protocol switches and
+   `unpause()`, then run the canary with the new operator. These permissions
+   are global. Re-pause on failure; reconcile any uncertain broadcast before
+   retrying. Resume schedulers only after the canary passes.
 
 Users keep: every exit, and `disableModule(manager)` on their Safe if they
 want no operator at all.
 
 ## User notice template
 
-> **[Product] — [SEV-n] — [short title]**
+> **[Product] - [SEV-n] - [short title]**
 > Since [time UTC], [what is affected: opening / closing / nothing but
-> entries]. Your funds are in your Safe and are not at risk.
+> entries]. Verified balances and risks: [state only what has been confirmed].
 > What you can do now: [withdraw in kind / redeem at PSM3 / nothing needed].
 > Next update: [time]. Ticket: [link].
 
-Repeat the "funds are in your Safe" line in every update. It is the one
-property every playbook preserves, and the one users ask about.
+Update the verified balances, risks and available exits as evidence changes.
 
 ## After the incident
 
@@ -237,7 +250,9 @@ checklist (bytecode match, journal, canary) again.
 
 Twice a year, rehearse playbooks B and C on a Base fork:
 `test/yield/safeYieldManagerSkySavingsFork.ts` and
-`test/scripts/savingsBySafe.ts` already script the fail-closed and in-kind
+`test/scripts/savingsRecovery.ts` rehearse trusted-handler migration, revoked
+manager recovery and direct exit with an unusable pinned handler.
+`test/scripts/savingsBySafe.ts` also scripts the fail-closed and in-kind
 paths, so the drill is the humans and the keys, not the code.
 
 ## Contacts and ownership

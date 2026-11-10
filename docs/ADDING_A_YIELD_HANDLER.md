@@ -120,13 +120,18 @@ such a manager):
 
 1. Deploy the handler (and its rate provider) with its own Ignition module or
    `hardhat run`, verify on Basescan, and prove the live code is the reviewed
-   checkout: `AUDITED_COMMIT=<sha> yarn check:bytecode` (README, "Bytecode
-   match against the audited build").
+   checkout. Before registration, `CHECK_MODE=code-only yarn check:bytecode`
+   compares runtime templates; separately review the constructor parameters
+   printed by the registration script. This diagnostic does not approve a
+   release. See README, "Bytecode match against the audited build".
 2. `scripts/timelockSetYieldHandler.ts`: schedule
    `setYieldHandler(protocol, handler)` through the TimelockController, wait
    `getMinDelay()` (48 h on Base), execute. `setYieldHandler` checks
    `PROTOCOL()` and code, then turns opens for the id off: a first registration
    starts with both switches off, a replacement build keeps closes on.
+   For the savings release, before enabling opens, run
+   `AUDITED_COMMIT=<full-sha> RELEASE_CONFIG=/path/to/reviewed-config.json yarn check:bytecode`.
+   This checks the registered wiring as well as the reviewed immutable values.
 3. If a pool param needs a non-USDC reference, `setTwapConfig` goes through the
    same timelock first.
 4. Pauser: `setProtocolEnabledForClose(protocol, true)` (first registration),

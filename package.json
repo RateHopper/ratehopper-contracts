@@ -10,6 +10,8 @@
         "test": "node --max-old-space-size=12288 --expose-gc --optimize-for-size ./node_modules/.bin/hardhat test",
         "test:memory": "node --max-old-space-size=4096 ./node_modules/.bin/hardhat test",
         "test:single": "node --max-old-space-size=4096 ./node_modules/.bin/hardhat test --grep",
+        "test:scripts": "node scripts/runSecurityTests.js scripts",
+        "test:yield-fork": "node scripts/runSecurityTests.js yield-fork",
         "trace": "node --max-old-space-size=8192 ./node_modules/.bin/hardhat test --v",
         "fulltrace": "node --max-old-space-size=8192 ./node_modules/.bin/hardhat test --vvv",
         "compile": "npx hardhat compile",

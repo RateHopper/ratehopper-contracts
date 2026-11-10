@@ -1193,6 +1193,12 @@ describe("SafeYieldManager", function () {
             );
             expect(await manager.yieldHandlers(200)).to.equal(ZERO);
             expect(await manager.isPoolParamAllowed(200, FEE_TIER)).to.equal(false);
+            expect(await manager.protocolEnabledForOpen(200)).to.equal(false);
+            expect(await manager.protocolEnabledForClose(200)).to.equal(false);
+            await expect(manager.connect(pauser).setProtocolEnabledForOpen(200, false)).to.be.revertedWithCustomError(
+                manager,
+                "HandlerNotSet",
+            );
         });
 
         it("rejects registering a handler whose PROTOCOL id mismatches the target id", async function () {
@@ -2051,6 +2057,16 @@ describe("SafeYieldManager", function () {
                 f.manager,
                 "InvalidTimelock",
             );
+        });
+
+        it("rejects a contract whose getMinDelay call reverts", async function () {
+            const f = await loadFixture(deployYieldManagerHarness);
+            const Manager = await ethers.getContractFactory("SafeYieldManager");
+            const Reverting = await ethers.getContractFactory("MockRevertingYieldHandler");
+            const reverting = await Reverting.deploy(3);
+            const args = await baseArgs(f);
+            args[14] = await reverting.getAddress();
+            await expect((Manager as any).deploy(...args)).to.be.revertedWithCustomError(f.manager, "InvalidTimelock");
         });
 
         // The invariant the seeded references exist to hold: a deployment

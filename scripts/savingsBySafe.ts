@@ -31,7 +31,7 @@ import { ERC20_ABI, deployedManagerAddress, resolveOwnerKey, waitForReceipt } fr
  *
  * Caller paths (CALLER env):
  *   safe      (default) the Safe owner executes through protocol-kit, threshold
- *             must be 1; `enableModule(manager)` is prepended when needed.
+ *             must be 1. Only open with ENABLE_MODULE=true may grant module authority.
  *             Key: TESTING_SAFE_OWNER_KEY / SAFE_OWNER_PRIVATE_KEY / DEPLOYER_PRIVATE_KEY.
  *   operator  the registry operator calls the manager directly.
  *             Key: TESTING_SAFE_OPERATOR_KEY / OPERATOR_PRIVATE_KEY.
@@ -65,6 +65,7 @@ export interface SavingsConfig {
     minUsdcOut: bigint;
     /** MIN_USDC_OUT was given explicitly (redeem-direct takes it over PSM3's quote). */
     ownerMinSet: boolean;
+    enableModule: boolean;
 }
 
 export interface BuiltAction {
@@ -122,6 +123,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): SavingsConfig 
     const safeAddress = get("SAFE_ADDRESS", get("TESTING_SAFE_WALLET_ADDRESS"));
     if (!ethers.isAddress(safeAddress)) throw new Error("Set SAFE_ADDRESS (or TESTING_SAFE_WALLET_ADDRESS)");
     const ownerMin = get("MIN_USDC_OUT");
+    const enableModule = get("ENABLE_MODULE", "false");
+    if (enableModule !== "true" && enableModule !== "false") throw new Error("ENABLE_MODULE must be true or false");
+    if (enableModule === "true" && (action !== "open" || caller !== "safe"))
+        throw new Error("ENABLE_MODULE=true is only supported for explicit owner onboarding (ACTION=open CALLER=safe)");
     return {
         action: action as Action,
         caller,
@@ -133,6 +138,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): SavingsConfig 
         usdcAmount: ethers.parseUnits(get("USDC_AMOUNT", "0.5"), 6),
         minUsdcOut: ethers.parseUnits(ownerMin || "0", 6),
         ownerMinSet: ownerMin !== "",
+        enableModule: enableModule === "true",
     };
 }
 
@@ -173,10 +179,13 @@ export async function printStatus(cfg: SavingsConfig): Promise<void> {
         settle<string>(c.manager.positionHandlerOf(PROTOCOL, c.tokenId)),
         settle<string>(c.manager.yieldHandlers(PROTOCOL)),
     ]);
-    const build = pinned.ok && pinned.value !== ethers.ZeroAddress ? pinned.value : registered.ok ? registered.value : "";
+    const build =
+        pinned.ok && pinned.value !== ethers.ZeroAddress ? pinned.value : registered.ok ? registered.value : "";
     const hasBuild = build !== "" && build !== ethers.ZeroAddress;
     const [rate, pocket, tracked, basis, openOn, closeOn, allowed, moduleOn, safeUsdc, safeSusds] = await Promise.all([
-        hasBuild ? settle<bigint>(rateVia(build)) : Promise.resolve({ ok: false, error: "no build" } as Settled<bigint>),
+        hasBuild
+            ? settle<bigint>(rateVia(build))
+            : Promise.resolve({ ok: false, error: "no build" } as Settled<bigint>),
         settle<bigint>(c.psm3.pocket().then((pocket: string) => c.usdc.balanceOf(pocket))),
         hasBuild
             ? settle<bigint>(trackedSharesVia(c, cfg, build))
@@ -260,7 +269,8 @@ export async function buildAction(cfg: SavingsConfig): Promise<BuiltAction> {
         // cannot be rehearsed without it.
         const rate = await rateVia(registered);
         const quoted: bigint = await c.psm3.previewSwapExactIn(USDC_ADDRESS, sUSDS_ADDRESS, cfg.usdcAmount);
-        const floor = (((cfg.usdcAmount * 10n ** 12n * 10n ** 18n) / rate) * BigInt(10_000 - cfg.slippageBps)) / 10_000n;
+        const floor =
+            (((cfg.usdcAmount * 10n ** 12n * 10n ** 18n) / rate) * BigInt(10_000 - cfg.slippageBps)) / 10_000n;
         console.log(
             "open:",
             ethers.formatUnits(cfg.usdcAmount, 6),
@@ -414,18 +424,38 @@ export async function buildAction(cfg: SavingsConfig): Promise<BuiltAction> {
     throw new Error(`ACTION ${cfg.action} builds no transaction`);
 }
 
-export async function send(cfg: SavingsConfig, built: BuiltAction): Promise<string> {
-    const c = await contractsFor(cfg);
+export async function prepareTransactions(cfg: SavingsConfig, built: BuiltAction): Promise<MetaTransactionData[]> {
+    const transactions: MetaTransactionData[] = [];
+    if (cfg.action === "open" || cfg.action === "close") {
+        const c = await contractsFor(cfg);
+        if (!(await c.safeView.isModuleEnabled(cfg.managerAddress))) {
+            if (cfg.action !== "open" || cfg.caller !== "safe" || !cfg.enableModule)
+                throw new Error(
+                    "Manager module is disabled. Recovery does not restore authority; use withdraw or redeem-direct. Owner onboarding requires ACTION=open ENABLE_MODULE=true.",
+                );
+            const safeIface = new ethers.Interface(["function enableModule(address)"]);
+            transactions.push({
+                to: cfg.safeAddress,
+                value: "0",
+                data: safeIface.encodeFunctionData("enableModule", [cfg.managerAddress]),
+                operation: OperationType.Call,
+            });
+        }
+    }
+    transactions.push(
+        { to: built.target, value: "0", data: built.data, operation: OperationType.Call },
+        ...built.extra,
+    );
+    return transactions;
+}
+
+export async function send(cfg: SavingsConfig, built: BuiltAction, prepared?: MetaTransactionData[]): Promise<string> {
+    const transactions = prepared ?? (await prepareTransactions(cfg, built));
     const rpcUrl = (network.config as { url?: string }).url;
     if (!rpcUrl) throw new Error(`Network ${network.name} has no RPC url — run with --network base`);
-    // The one Safe read a send depends on: whether the manager may act for this Safe.
-    const moduleOn: boolean = await c.safeView.isModuleEnabled(cfg.managerAddress);
-
     if (cfg.caller === "operator") {
         const key = process.env.TESTING_SAFE_OPERATOR_KEY || process.env.OPERATOR_PRIVATE_KEY || "";
         if (!key) throw new Error("Set TESTING_SAFE_OPERATOR_KEY (or OPERATOR_PRIVATE_KEY)");
-        if (!moduleOn)
-            throw new Error("The manager is not enabled as a module on this Safe; run once with CALLER=safe first");
         const operator = new ethers.Wallet(key, new ethers.JsonRpcProvider(rpcUrl));
         return (await operator.sendTransaction({ to: built.target, data: built.data })).hash;
     }
@@ -435,18 +465,6 @@ export async function send(cfg: SavingsConfig, built: BuiltAction): Promise<stri
     const safeWallet = await Safe.init({ provider: rpcUrl, signer: ownerKey, safeAddress: cfg.safeAddress });
     if ((await safeWallet.getThreshold()) > 1)
         throw new Error("Safe threshold > 1: propose the printed calldata through the Safe UI instead");
-    const transactions: MetaTransactionData[] = [];
-    if (!moduleOn && built.target === cfg.managerAddress) {
-        console.log("Manager not enabled as a module — prepending enableModule");
-        const safeIface = new ethers.Interface(["function enableModule(address)"]);
-        transactions.push({
-            to: cfg.safeAddress,
-            value: "0",
-            data: safeIface.encodeFunctionData("enableModule", [cfg.managerAddress]),
-            operation: OperationType.Call,
-        });
-    }
-    transactions.push({ to: built.target, value: "0", data: built.data, operation: OperationType.Call }, ...built.extra);
     return (await safeWallet.executeTransaction(await safeWallet.createTransaction({ transactions }))).hash;
 }
 
@@ -454,7 +472,10 @@ export async function send(cfg: SavingsConfig, built: BuiltAction): Promise<stri
  *  receipt is reported, never turned into a failed exit. */
 export async function reportReceipt(
     cfg: SavingsConfig,
-    receipt: { blockNumber: number; logs: ReadonlyArray<{ address: string; topics: ReadonlyArray<string>; data: string }> },
+    receipt: {
+        blockNumber: number;
+        logs: ReadonlyArray<{ address: string; topics: ReadonlyArray<string>; data: string }>;
+    },
 ): Promise<void> {
     const c = await contractsFor(cfg);
     console.log("Confirmed in block", receipt.blockNumber);
@@ -473,7 +494,10 @@ export async function reportReceipt(
     try {
         await printStatus(cfg);
     } catch (error) {
-        console.log("Diagnostics after the transaction failed; the transaction itself is confirmed:", describeError(error));
+        console.log(
+            "Diagnostics after the transaction failed; the transaction itself is confirmed:",
+            describeError(error),
+        );
     }
 }
 
@@ -485,17 +509,19 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<void> 
     }
     // The action first, from the reads it needs; the diagnostics after, and only best-effort.
     const built = await buildAction(cfg);
+    const transactions = await prepareTransactions(cfg, built);
+    console.log("Transaction bundle:", JSON.stringify(transactions));
+    if (transactions.length > built.extra.length + 1)
+        console.log("ENABLE_MODULE=true: this bundle grants the manager authority to spend Safe funds.");
     console.log("\nBefore:");
     await printStatus(cfg);
 
     if (cfg.dryRun) {
-        console.log(`\nDRY_RUN — ${cfg.action} calldata to ${built.target}:`);
-        console.log(built.data);
-        for (const tx of built.extra) console.log(`then to ${tx.to}:`, tx.data);
+        console.log(`\nDRY_RUN - ${cfg.action}: the bundle above was not sent.`);
         return;
     }
 
-    const hash = await send(cfg, built);
+    const hash = await send(cfg, built, transactions);
     console.log("Submitted:", hash);
     const receipt = await waitForReceipt(ethers.provider, hash);
     await reportReceipt(cfg, receipt);

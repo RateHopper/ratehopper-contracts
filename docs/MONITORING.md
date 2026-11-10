@@ -123,8 +123,11 @@ confirms it ran.
    `MinPositionLiquidityUpdated`) and confirm the alert arrives on the log-only
    destination. A silent monitor and a quiet contract look identical from the
    outside; this is the only way to tell them apart. Repeat quarterly.
-5. After a redeploy (new manager, new handler build), add the new addresses
-   and retire the old ones in the same change that journals the deployment.
+5. After a redeploy, add the new manager and handler addresses when journaling
+   the deployment. Keep the old addresses monitored while any Safe still
+   enables the old manager or any position remains pinned to an old handler.
+   Retire alerts only after verifying both authority revocation and position
+   reconciliation; a new journal alone does not complete migration.
 
 Plan limits: Tenderly caps the number of alerts per plan. The catalogue needs
 about forty rules; check the plan before setup rather than silently dropping

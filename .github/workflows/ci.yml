@@ -53,7 +53,33 @@ jobs:
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           BASE_FORK_BLOCK_NUMBER: "49470000"
-        run: yarn coverage:gated
+        run: |
+          node -e 'require("fs").rmSync("coverage.json", { force: true })'
+          yarn coverage:gated
 
       - name: Enforce branch-coverage gate
         run: yarn coverage:check
+
+  security-integration:
+    name: Security tests (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [scripts, yield-fork]
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      BASE_FORK_BLOCK_NUMBER: "49470000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: corepack enable
+      - run: yarn install --immutable
+      - name: Require archive RPC
+        run: node -e 'if (!process.env.BASE_RPC_URL) throw new Error("BASE_RPC_URL is required")'
+      - run: yarn compile
+      - name: Run every suite in an isolated process
+        run: yarn test:${{ matrix.suite }}
