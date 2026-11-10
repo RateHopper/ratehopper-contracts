@@ -69,7 +69,9 @@ jobs:
       matrix:
         suite: [scripts, yield-fork]
     env:
-      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      # Match hardhat.config.ts: a dedicated RPC is preferred, but the public
+      # Base endpoint also serves the pinned historical state used by these tests.
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL || 'https://mainnet.base.org' }}
       BASE_FORK_BLOCK_NUMBER: "49470000"
     steps:
       - uses: actions/checkout@v4
@@ -78,8 +80,6 @@ jobs:
           node-version: "22"
       - run: corepack enable
       - run: yarn install --immutable
-      - name: Require archive RPC
-        run: node -e 'if (!process.env.BASE_RPC_URL) throw new Error("BASE_RPC_URL is required")'
       - run: yarn compile
       - name: Run every suite in an isolated process
         run: yarn test:${{ matrix.suite }}

@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 import {
     UNISWAP_V3_FACTORY_ADDRESS,
     UNISWAP_V3_NPM_ADDRESS,
@@ -249,6 +250,7 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
         await pushUniV3SpotDown(ethers.parseEther("1000"));
         const tickAfterManipulation = Number((await pool.slot0())[1]);
         expect(tickAfterManipulation).to.be.lessThan(tickBeforeManipulation - 300);
+        await time.setNextBlockTimestamp((await time.latest()) + 1);
         await expect(
             manager.connect(operator).close(UNISWAP_V3, {
                 ...closeParams(10_000, 10_000n),
@@ -259,6 +261,9 @@ describe("SafeYieldManager + Uniswap V3 - integration (Base fork)", function () 
         expect(await npm.ownerOf(tokenId)).to.equal(safeAddress);
         expect(await network.provider.send("evm_revert", [manipulationSnapshot])).to.equal(true);
 
+        // Reverting state does not erase wall-clock time spent fetching cold fork data.
+        // Resume from the restored block so RPC latency cannot age the reference oracle.
+        await time.setNextBlockTimestamp((await time.latest()) + 1);
         await expect(manager.connect(operator).close(UNISWAP_V3, closeParams(5_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",

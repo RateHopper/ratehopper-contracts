@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 import {
     PERMIT2_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
@@ -269,6 +270,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         await pushV4NativeSpotDown(ethers.parseEther("1000"));
         const tickAfterManipulation = Number((await stateView.getSlot0(POOL_ID))[1]);
         expect(tickAfterManipulation).to.be.lessThan(tickBeforeManipulation - 300);
+        await time.setNextBlockTimestamp((await time.latest()) + 1);
         await expect(
             manager.connect(operator).close(UNISWAP_V4, {
                 ...closeParams(10_000, 10_000n),
@@ -279,6 +281,8 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         expect(await pm.ownerOf(tokenId)).to.equal(safeAddress);
         expect(await network.provider.send("evm_revert", [manipulationSnapshot])).to.equal(true);
 
+        // Resume the restored chain clock, independent of cold-fork RPC latency.
+        await time.setNextBlockTimestamp((await time.latest()) + 1);
         await expect(manager.connect(operator).close(UNISWAP_V4, closeParams(5_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",

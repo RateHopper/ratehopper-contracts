@@ -6,7 +6,7 @@ It did not run the operations scripts or the five yield fork suites.
 
 ## Verification results
 
-Verified locally in the isolated safeclaw container on November 10, 2026:
+Verified locally in the isolated safeclaw container on November 10-11, 2026:
 
 | Check | Result |
 | --- | --- |
@@ -14,6 +14,7 @@ Verified locally in the isolated safeclaw container on November 10, 2026:
 | Gated branch coverage | 893/894, or 99.89%, up from 99.33%; all 13 contracts present |
 | Operations-script suites | 108 passing |
 | Five yield integration suites | 24 passing |
+| Public RPC fallback | 108 script and 24 fork tests passed without an RPC secret; corrected V3/V4 suites rerun with an empty fork cache |
 | Real Safe recovery suite, including submitted batch versus preview | 12 passing, included in the script total |
 | Repository-wide TypeScript check | 23 pre-existing diagnostics remain; the unchanged baseline had 25. The two canary `Array.at` compatibility errors were fixed. No remaining diagnostics are in the edited files. |
 | CI YAML and whitespace checks | Passed |
@@ -72,9 +73,16 @@ contract regressions. CI removes any old report first, then runs
 `yarn test:scripts` discovers every TypeScript test in `test/scripts`.
 `yarn test:yield-fork` discovers all five `safeYieldManager*Fork.ts` suites.
 Both use one Hardhat process per file to isolate fork resets and fixtures.
-They require `BASE_RPC_URL` pointing to an archive RPC. LP fork suites run at
+The runner requires `BASE_RPC_URL` pointing to an archive RPC. CI uses the
+repository secret when available and otherwise `https://mainnet.base.org`,
+matching the existing Hardhat fallback. The public endpoint is rate-limited;
+a dedicated archive RPC is preferred for reliability. RPC failures still fail
+the tests rather than skip them. LP fork suites run at
 block 49,470,000; savings integration and script suites run at 53,100,000.
 They use local signers and must not receive production signing credentials.
+The V3/V4 manipulation tests explicitly resume the restored block's clock after
+snapshot rollback so slow RPC reads cannot turn the subsequent normal close
+into an unintended stale-oracle test. Contract freshness limits are unchanged.
 
 CI runs both commands as failing jobs, without `continue-on-error`. Repository
 branch protection must require the new `Security tests (scripts)` and
