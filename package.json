@@ -37,7 +37,8 @@
         "wipe:leveraged-position": "npx hardhat ignition wipe chain-8453 DeployCore#LeveragedPosition",
         "wipe:safe-debt-manager": "npx hardhat ignition wipe chain-8453 DeployCore#SafeDebtManager",
         "wipe:safe-wrapper": "npx hardhat ignition wipe chain-8453 DeployCore#SafeExecTransactionWrapper",
-        "wipe:yield-manager": "npx hardhat ignition wipe chain-8453 DeployYieldManager#SafeYieldManager"
+        "wipe:yield-manager": "npx hardhat ignition wipe chain-8453 DeployYieldManager#SafeYieldManager",
+        "wipe:yield-stack": "node scripts/wipeYieldStack.js"
     },
     "author": "Ratehopper AI",
     "license": "BUSL-1.1",
