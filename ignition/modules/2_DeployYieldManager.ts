@@ -24,6 +24,12 @@ import {
     TWAP_WINDOW,
     TWAP_CARDINALITY,
     AERO_ADDRESS,
+    CHAINLINK_SUSDS_USDS_FEED,
+    OSERO_REFERRAL_CODE,
+    SPARK_PSM3_ADDRESS,
+    SPARK_SSR_ORACLE_ADDRESS,
+    encodeSkySavingsPoolParam,
+    sUSDS_ADDRESS,
 } from "../../contractAddresses";
 import { envBigInt, envNumber, envString, makeRequireAddress } from "./deployHelpers";
 
@@ -32,6 +38,7 @@ const requireAddress = makeRequireAddress("DeployYieldManager");
 const UNISWAP_V3 = YieldProtocol.UNISWAP_V3;
 const AERODROME = YieldProtocol.AERODROME;
 const UNISWAP_V4 = YieldProtocol.UNISWAP_V4;
+const SKY_SAVINGS = YieldProtocol.SKY_SAVINGS;
 
 const NATIVE = "0x0000000000000000000000000000000000000000";
 
@@ -68,6 +75,7 @@ const AERODROME_POOL_PARAMS = [100, 200].map((tickSpacing) =>
     encodeAerodromePoolParam(WETH_ADDRESS, USDC_ADDRESS, tickSpacing),
 );
 const UNIV4_POOL_PARAMS = [encodeUniV4PoolParam(NATIVE, USDC_ADDRESS, 500, 10, NATIVE)];
+const SKY_SAVINGS_POOL_PARAMS = [encodeSkySavingsPoolParam(SPARK_PSM3_ADDRESS, sUSDS_ADDRESS)];
 
 const twapSeed = (token: string, pool: string) => ({
     token,
@@ -82,7 +90,7 @@ const TWAP_SEEDS = [
 /**
  * Deployment module for the yield adapter stack (AP-4817):
  *   UniV3YieldHandler + AerodromeYieldHandler + UniV4YieldHandler
- *   + SafeYieldManager.
+ *   + ChainlinkSsrRateProvider + SkySavingsYieldHandler + SafeYieldManager.
  *
  * SafeYieldManager is the ONLY contract users enable as a Safe module; the
  * handlers are stateless delegatecall targets registered in its constructor
@@ -115,6 +123,17 @@ const TWAP_SEEDS = [
  *  - SYM_PERMIT2 / PERMIT2:                               Permit2 (Base uses
  *                                                         0x...B43aC78BA3).
  *  - SYM_UNIV4_STATE_VIEW / UNIV4_STATE_VIEW:             StateView lens.
+ *  - SYM_SAVINGS_MAX_FEED_AGE:        Oldest Chainlink round accepted (s). Default 129600 (36h).
+ *  - SYM_SAVINGS_MAX_DISAGREEMENT_BPS: Chainlink vs SSR oracle veto. Default 50.
+ *  - SYM_SAVINGS_MAX_RATE:            Ceiling on the sUSDS rate (18 dp). Default 2e18.
+ *  - SYM_SAVINGS_MAX_TOLERANCE_BPS:   Default oracle tolerance ceiling. Default 50
+ *                                     (admin retunes through configureHandler).
+ *  - SYM_SAVINGS_MAX_EXPOSURE_BPS:    Default share of the PSM3 pocket the book may
+ *                                     reach. Default 10000 (admin retunes likewise).
+ *  - SYM_SAVINGS_REFERRAL_CODE:       PSM3 referral code. Default 3014 (Osero).
+ *                                     TODO before the production deploy: keep Osero's
+ *                                     code or use one Spark issues to Ratehopper
+ *                                     (attribution only, immutable on the handler build).
  *
  * Usage:
  *   npx hardhat ignition deploy ignition/modules/2_DeployYieldManager.ts \
@@ -192,6 +211,28 @@ export default buildModule("DeployYieldManager", (m) => {
     const permit2 = m.getParameter<string>("permit2", permit2Addr);
     const stateView = m.getParameter<string>("stateView", stateViewAddr);
 
+    // Sky savings (protocol 3): the Chainlink sUSDS/USDS feed vetoed by Spark's
+    // SSR oracle, and PSM3 as the source. The two ceilings are build defaults;
+    // the admin retunes them later through `configureHandler`.
+    const savingsMaxFeedAge = m.getParameter<number>("savingsMaxFeedAge", envNumber(129_600, "SYM_SAVINGS_MAX_FEED_AGE"));
+    const savingsMaxDisagreementBps = m.getParameter<number>(
+        "savingsMaxDisagreementBps",
+        envNumber(50, "SYM_SAVINGS_MAX_DISAGREEMENT_BPS"),
+    );
+    const savingsMaxRate = m.getParameter<bigint>("savingsMaxRate", envBigInt(2n * 10n ** 18n, "SYM_SAVINGS_MAX_RATE"));
+    const savingsMaxToleranceBps = m.getParameter<number>(
+        "savingsMaxToleranceBps",
+        envNumber(50, "SYM_SAVINGS_MAX_TOLERANCE_BPS"),
+    );
+    const savingsMaxExposureBps = m.getParameter<number>(
+        "savingsMaxExposureBps",
+        envNumber(10_000, "SYM_SAVINGS_MAX_EXPOSURE_BPS"),
+    );
+    const savingsReferralCode = m.getParameter<bigint>(
+        "savingsReferralCode",
+        envBigInt(OSERO_REFERRAL_CODE, "SYM_SAVINGS_REFERRAL_CODE"),
+    );
+
     const uniV3YieldHandler = m.contract("UniV3YieldHandler", [
         UNISWAP_V3_NPM_ADDRESS,
         USDC_ADDRESS,
@@ -216,17 +257,36 @@ export default buildModule("DeployYieldManager", (m) => {
         WETH_ADDRESS,
     ]);
 
+    const chainlinkSsrRateProvider = m.contract("ChainlinkSsrRateProvider", [
+        CHAINLINK_SUSDS_USDS_FEED,
+        SPARK_SSR_ORACLE_ADDRESS,
+        sUSDS_ADDRESS,
+        savingsMaxFeedAge,
+        savingsMaxDisagreementBps,
+        savingsMaxRate,
+    ]);
+
+    const skySavingsYieldHandler = m.contract("SkySavingsYieldHandler", [
+        USDC_ADDRESS,
+        chainlinkSsrRateProvider,
+        savingsMaxToleranceBps,
+        savingsMaxExposureBps,
+        SPARK_PSM3_ADDRESS,
+        sUSDS_ADDRESS,
+        savingsReferralCode,
+    ]);
+
     const safeYieldManager = m.contract(
         "SafeYieldManager",
         [
             registry,
             USDC_ADDRESS,
             WETH_ADDRESS,
-            [UNISWAP_V3, AERODROME, UNISWAP_V4],
-            [uniV3YieldHandler, aerodromeYieldHandler, uniV4YieldHandler],
-            [UNIV3_POOL_PARAMS, AERODROME_POOL_PARAMS, UNIV4_POOL_PARAMS],
-            [uniV3MinPoolLiquidity, aerodromeMinPoolLiquidity, uniV4MinPoolLiquidity],
-            [uniV3MinPositionLiquidity, aerodromeMinPositionLiquidity, uniV4MinPositionLiquidity],
+            [UNISWAP_V3, AERODROME, UNISWAP_V4, SKY_SAVINGS],
+            [uniV3YieldHandler, aerodromeYieldHandler, uniV4YieldHandler, skySavingsYieldHandler],
+            [UNIV3_POOL_PARAMS, AERODROME_POOL_PARAMS, UNIV4_POOL_PARAMS, SKY_SAVINGS_POOL_PARAMS],
+            [uniV3MinPoolLiquidity, aerodromeMinPoolLiquidity, uniV4MinPoolLiquidity, 0n],
+            [uniV3MinPositionLiquidity, aerodromeMinPositionLiquidity, uniV4MinPositionLiquidity, 0n],
             TWAP_SEEDS,
             treasury,
             performanceFeeBps,
@@ -243,6 +303,8 @@ export default buildModule("DeployYieldManager", (m) => {
         uniV3YieldHandler,
         aerodromeYieldHandler,
         uniV4YieldHandler,
+        chainlinkSsrRateProvider,
+        skySavingsYieldHandler,
         safeYieldManager,
         ...(timelock ? { timelock } : {}),
     };

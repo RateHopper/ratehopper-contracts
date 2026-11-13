@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 /// @notice Minimal interface exposing the ProtocolRegistry surface the yield
 ///         stack needs: the `safeOperator` getter used to authorize callers
-///         and the token whitelist gating openLp pool tokens.
+///         and the token whitelist gating the pool tokens an `open` may use.
 interface IProtocolRegistry {
     function safeOperator() external view returns (address);
 

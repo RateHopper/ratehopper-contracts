@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 import {
     PERMIT2_ADDRESS,
     UNISWAP_V3_FACTORY_ADDRESS,
@@ -193,19 +194,19 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
-            lpPoolParam: POOL_PARAM,
+            poolParam: POOL_PARAM,
             stake: false,
         };
 
         // Router-level min-out (TAKE_ALL floor) must fire on an impossible quote.
         await expect(
-            manager.connect(operator).openLp(UNISWAP_V4, {
+            manager.connect(operator).open(UNISWAP_V4, {
                 ...openParams,
                 swap0: leg((expectedSwapOut * 2n * 9_900n) / 10_000n, POOL_PARAM),
             }),
         ).to.be.reverted;
 
-        await expect(manager.connect(operator).openLp(UNISWAP_V4, openParams)).to.emit(manager, "PositionOpened");
+        await expect(manager.connect(operator).open(UNISWAP_V4, openParams)).to.emit(manager, "PositionOpened");
         const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
         const opened = openedEvents[openedEvents.length - 1];
         const tokenId = opened.args.tokenId;
@@ -228,7 +229,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         expect(await usdc.allowance(safeAddress, PERMIT2_ADDRESS)).to.equal(0);
 
         await expect(
-            manager.connect(operator).collectLp(UNISWAP_V4, {
+            manager.connect(operator).collect(UNISWAP_V4, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 swapFeesToUsdc: false,
@@ -241,8 +242,8 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             }),
         ).to.emit(manager, "FeesCollected");
 
-        const ethToLp: bigint = opened.args.amount0ToLp;
-        const usdcToLp: bigint = opened.args.amount1ToLp;
+        const ethToLp: bigint = opened.args.used0;
+        const usdcToLp: bigint = opened.args.used1;
         const closeParams = (exitBps: number, shareOfOriginalBps: bigint) => {
             const ethShare = (ethToLp * shareOfOriginalBps) / 10_000n;
             const usdcShare = (usdcToLp * shareOfOriginalBps) / 10_000n;
@@ -269,8 +270,9 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         await pushV4NativeSpotDown(ethers.parseEther("1000"));
         const tickAfterManipulation = Number((await stateView.getSlot0(POOL_ID))[1]);
         expect(tickAfterManipulation).to.be.lessThan(tickBeforeManipulation - 300);
+        await time.setNextBlockTimestamp((await time.latest()) + 1);
         await expect(
-            manager.connect(operator).closeLp(UNISWAP_V4, {
+            manager.connect(operator).close(UNISWAP_V4, {
                 ...closeParams(10_000, 10_000n),
                 swap0: leg(0, POOL_PARAM),
                 minUsdcOut: 0,
@@ -279,14 +281,16 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         expect(await pm.ownerOf(tokenId)).to.equal(safeAddress);
         expect(await network.provider.send("evm_revert", [manipulationSnapshot])).to.equal(true);
 
-        await expect(manager.connect(operator).closeLp(UNISWAP_V4, closeParams(5_000, 5_000n))).to.emit(
+        // Resume the restored chain clock, independent of cold-fork RPC latency.
+        await time.setNextBlockTimestamp((await time.latest()) + 1);
+        await expect(manager.connect(operator).close(UNISWAP_V4, closeParams(5_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",
         );
         expect(await pm.ownerOf(tokenId)).to.equal(safeAddress);
         expect(await manager.residualBasisUsd6Of(UNISWAP_V4, tokenId)).to.be.lessThan(initialBasis);
 
-        await expect(manager.connect(operator).closeLp(UNISWAP_V4, closeParams(10_000, 5_000n))).to.emit(
+        await expect(manager.connect(operator).close(UNISWAP_V4, closeParams(10_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",
         );
@@ -392,11 +396,11 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             swap1: ZERO_LEG,
             slippageBps: 100,
             deadline,
-            lpPoolParam: WETH_POOL_PARAM,
+            poolParam: WETH_POOL_PARAM,
             stake: false,
         };
 
-        await expect(manager.connect(operator).openLp(UNISWAP_V4, openParams)).to.emit(manager, "PositionOpened");
+        await expect(manager.connect(operator).open(UNISWAP_V4, openParams)).to.emit(manager, "PositionOpened");
         const openedEvents = await manager.queryFilter(manager.filters.PositionOpened(safeAddress), -5);
         const opened = openedEvents[openedEvents.length - 1];
         const tokenId = opened.args.tokenId;
@@ -432,7 +436,7 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
         expect(await usdc.allowance(safeAddress, PERMIT2_ADDRESS)).to.equal(0);
 
         await expect(
-            manager.connect(operator).collectLp(UNISWAP_V4, {
+            manager.connect(operator).collect(UNISWAP_V4, {
                 onBehalfOf: safeAddress,
                 tokenId,
                 swapFeesToUsdc: false,
@@ -445,8 +449,8 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             }),
         ).to.emit(manager, "FeesCollected");
 
-        const wethToLp: bigint = opened.args.amount0ToLp;
-        const usdcToLp: bigint = opened.args.amount1ToLp;
+        const wethToLp: bigint = opened.args.used0;
+        const usdcToLp: bigint = opened.args.used1;
         const closeParams = (exitBps: number, shareOfOriginalBps: bigint) => {
             const wethShare = (wethToLp * shareOfOriginalBps) / 10_000n;
             const usdcShare = (usdcToLp * shareOfOriginalBps) / 10_000n;
@@ -468,14 +472,14 @@ describe("SafeYieldManager + Uniswap V4 - integration (Base fork)", function () 
             };
         };
 
-        await expect(manager.connect(operator).closeLp(UNISWAP_V4, closeParams(5_000, 5_000n))).to.emit(
+        await expect(manager.connect(operator).close(UNISWAP_V4, closeParams(5_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",
         );
         expect(await pm.ownerOf(tokenId)).to.equal(safeAddress);
         expect(await manager.residualBasisUsd6Of(UNISWAP_V4, tokenId)).to.be.lessThan(initialBasis);
 
-        await expect(manager.connect(operator).closeLp(UNISWAP_V4, closeParams(10_000, 5_000n))).to.emit(
+        await expect(manager.connect(operator).close(UNISWAP_V4, closeParams(10_000, 5_000n))).to.emit(
             manager,
             "PositionClosed",
         );
