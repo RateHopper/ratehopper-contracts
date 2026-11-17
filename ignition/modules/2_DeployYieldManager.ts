@@ -128,8 +128,10 @@ const TWAP_SEEDS = [
  *  - SYM_SAVINGS_MAX_RATE:            Ceiling on the sUSDS rate (18 dp). Default 2e18.
  *  - SYM_SAVINGS_MAX_TOLERANCE_BPS:   Default oracle tolerance ceiling. Default 50
  *                                     (admin retunes through configureHandler).
- *  - SYM_SAVINGS_MAX_EXPOSURE_BPS:    Default share of the PSM3 pocket the book may
- *                                     reach. Default 10000 (admin retunes likewise).
+ *  - SYM_SAVINGS_MAX_EXPOSURE_BPS:    Default per-deposit cap: one open reverts if it
+ *                                     alone exceeds this share of the USDC in PSM3's
+ *                                     pocket at that moment. Not a cap on the total
+ *                                     book. Default 10000 (admin retunes likewise).
  *  - SYM_SAVINGS_REFERRAL_CODE:       PSM3 referral code. Default 3014 (Osero).
  *                                     TODO before the production deploy: keep Osero's
  *                                     code or use one Spark issues to Ratehopper

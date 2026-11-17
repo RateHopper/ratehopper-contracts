@@ -63,6 +63,14 @@ was modified. Coverage exclusions and the 95% threshold were not relaxed.
 - `test/scripts/checkCoverage.ts` covers every missing gated file, empty and
   malformed reports, truncated or invalid counters, duplicate paths, genuine
   branchless contracts and per-file threshold failure.
+- `test/scripts/wipeYieldStack.ts` covers the wipe order (manager before
+  handlers, savings handler before its rate provider), skipping wiped futures,
+  leaving the timelock and debt futures alone, and refusing an unordered yield
+  future.
+- `test/scripts/syncDeploymentAddresses.ts` covers replacing the manifest from
+  the default journal, merging a non-default journal without dropping the debt
+  contracts, and refusing duplicate contract names, a missing manifest or
+  another chain.
 
 ## CI execution
 

@@ -111,7 +111,15 @@ handler, pool params and floors in the manager constructor arrays, env or module
 parameters for its tunables, a TWAP seed for every non-USDC side of its pool
 params). Dry-run against a local forked node (`npx hardhat node`, then
 `--network localhost --deployment-id <tmp>`); the in-process `--network hardhat`
-simulation cannot be used. Always pass `--deployment-id`.
+simulation cannot be used. Always pass `--deployment-id` for the dry run, so
+it never writes into the production journal.
+
+On Base, deploy into the existing `chain-8453` journal: back it up,
+`CONFIRM=true yarn wipe:yield-stack`, then `yarn deploy:2_yield_manager`
+(README, "Redeploying the yield stack"). A new deployment id on Base deploys a
+second timelock unless `SYM_TIMELOCK` is set. A new manager is a new module
+address: every user Safe has to `enableModule` it, which is a backend and
+product migration, not a contracts step.
 
 **Existing manager** (one deployed from this API generation: the manager
 delegatecalls handlers by selector, so a handler built from this branch cannot
@@ -155,10 +163,16 @@ such a manager):
 - `scripts/exportAbis.js`: add the handler (and provider) so `abis/` carries the
   events and slot views the backend decodes.
 - `deployments/base.json` is written by `scripts/syncDeploymentAddresses.js`
-  from the Ignition journal (`IGNITION_DEPLOYMENT_ID`).
+  from the Ignition journal (`IGNITION_DEPLOYMENT_ID`; a non-default id is
+  merged over the existing manifest).
 - Downstream, in order: operator-key-signing policy (manager address and
   selectors), monorepo backend (ABI copies, encoders, handler build registry,
   `check:contract-authority`), frontend.
+- The gateway bounds SafeYieldManager arguments from a table keyed by
+  selector, and a selector missing from that table is signed without argument
+  checks. When a manager function is renamed or retyped, or a protocol id is
+  added, the gateway needs a code change to that table, not only a new policy
+  file, before its policy lists the new manager.
 
 ### 6. Documents
 

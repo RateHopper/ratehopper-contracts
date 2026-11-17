@@ -225,7 +225,7 @@ SYM_SAVINGS_MAX_FEED_AGE=129600        # Oldest Chainlink round accepted (s). De
 SYM_SAVINGS_MAX_DISAGREEMENT_BPS=50    # Chainlink vs SSR oracle veto (bps). Default 50
 SYM_SAVINGS_MAX_RATE=2000000000000000000  # Ceiling on the sUSDS rate (18 dp). Default 2e18
 SYM_SAVINGS_MAX_TOLERANCE_BPS=50       # Default oracle tolerance ceiling (bps). Default 50, admin max 300
-SYM_SAVINGS_MAX_EXPOSURE_BPS=10000     # Default share of the PSM3 pocket the book may reach. Default 100%
+SYM_SAVINGS_MAX_EXPOSURE_BPS=10000     # Default per-deposit cap: one open may not exceed this share of PSM3's USDC pocket at that moment (not a cap on the total book). Default 100%
 # TODO before the production deploy: decide the referral code. 3014 is Osero's and
 # only tags PSM3's Swap event (no on-chain effect); a Ratehopper-own code is issued
 # by Spark. It is an immutable on the handler build, so a later change means a new
@@ -369,6 +369,25 @@ The module by default deploys:
 
 Coexistence note: the standalone `RatehopperUniV3Positions` deployment keeps serving positions opened through it. `SafeYieldManager` rejects those tokenIds (`UnknownPosition`) and vice versa — there is no basis migration; legacy positions drain naturally via the legacy module.
 
+A freshly deployed manager is live at once: every protocol in the constructor is enabled for open and close, the contract is not paused, and the seeded pool params are allow-listed. Nothing reaches it until a Safe enables it as a module and the operator-key-signing policy allows its selectors, but pause it with the pauser if it must stay dark until the release checks pass.
+
+#### Redeploying the yield stack (a new manager generation)
+
+When the manager's code changes, a new `SafeYieldManager` is a new address: every user Safe has to enable it as a module (`enableModule`, owner-signed), and positions on the old manager keep exiting there. Deploy the new generation into the same `chain-8453` journal, not under a new `--deployment-id`:
+
+```bash
+cp -R ignition/deployments/chain-8453 ~/ignition-chain-8453-backup   # gitignored, the only copy
+yarn wipe:yield-stack                  # lists the yield futures it would clear
+CONFIRM=true yarn wipe:yield-stack     # backs up the journal again, then wipes them
+yarn deploy:2_yield_manager
+```
+
+- Without the wipe, the deploy stops with "Artifact bytecodes have been changed": Ignition will not reuse a completed future whose code changed.
+- `wipe:yield-stack` wipes only the `DeployYieldManager#*` futures the journal holds, manager first (Ignition refuses to wipe a future others depend on, or one with no state). `wipe:yield-manager` alone clears only the manager. The timelock is never wiped, so the new manager reuses the live one.
+- Wiping does not edit `deployed_addresses.json`; the deploy overwrites each key as its contract lands. If the deploy fails partway, that file mixes old and new addresses until a re-run completes. `deployments/base.json` is only synced after a successful deploy.
+- A new `--deployment-id` instead would deploy a second `TimelockController` unless `SYM_TIMELOCK` names the live one, and its journal holds only the yield contracts (see Deployment Output for how the manifest is merged).
+- Rehearse first against a local fork: `npx hardhat node`, copy the journal to a scratch id, run `IGNITION_DEPLOYMENT_ID=<scratch> CONFIRM=true yarn wipe:yield-stack`, then `npx hardhat ignition deploy ignition/modules/2_DeployYieldManager.ts --network localhost --deployment-id <scratch>`. Check that no new timelock was deployed, then delete the scratch directory.
+
 ### Deployment Output
 
 After deployment, Ignition saves state to:
@@ -395,6 +414,11 @@ Ignition directory. It can also be refreshed manually with:
 yarn deployments:sync
 ```
 
+The default journal (`chain-8453`) replaces the manifest. A journal named by
+`IGNITION_DEPLOYMENT_ID` is merged over the existing manifest instead, so a
+deploy under a separate id does not drop the debt contracts; the merge refuses
+to list one contract name under two keys.
+
 ### Wiping Deployments
 
 Use `wipe:all` when you want to clear all local Ignition state for Base and redeploy everything from scratch:
@@ -412,6 +436,7 @@ yarn wipe:leveraged-position
 yarn wipe:safe-debt-manager
 yarn wipe:safe-wrapper
 yarn wipe:yield-manager
+yarn wipe:yield-stack    # every yield future, in dependency order (see Redeploying the yield stack)
 ```
 
 In short: use `wipe:all` for a clean redeploy of the whole Base deployment, and use `wipe` or a `wipe:*` shortcut only when you intentionally want to rerun one named future.
@@ -428,7 +453,7 @@ npx hardhat run scripts/verifyAll.ts --network base
 
 This script:
 
-1. **Reads** deployed addresses from `ignition/deployments/chain-<chainId>/deployed_addresses.json`
+1. **Reads** deployed addresses from `ignition/deployments/chain-<chainId>/deployed_addresses.json` (or the journal named by `IGNITION_DEPLOYMENT_ID`)
 2. **Reads** constructor args from `journal.jsonl` (no hardcoding needed)
 3. **Checks** each contract via the Etherscan V2 API (skips already-verified)
 4. **Submits** unverified contracts via `hardhat verify`
@@ -469,6 +494,19 @@ the approved deployment parameters; copying live reads would not validate
 the intended configuration. Signer roles, Safe enablement, other protocols'
 configuration and alert delivery still need the rollout checks and canary.
 
+Two things trip the release run after a yield redeploy:
+
+- Point `MANIFEST` at a file listing only the contracts of this release (the
+  new manager, handlers and rate provider). Release mode accepts no `CONTRACTS`
+  filter, and the full `deployments/base.json` also lists the debt contracts,
+  whose live metadata differs from later checkouts (source text changed, code
+  did not), so they report `RUNTIME` and fail the run.
+- The deploy rewrites `deployments/base.json` (and possibly `abis/`), so the
+  deploy checkout is dirty. Run the check from a clean worktree at the audited
+  commit with the manifest outside it:
+  `git worktree add ../rh-audit <full-sha>`, `yarn install --immutable` there,
+  then `AUDITED_COMMIT=<full-sha> MANIFEST=/abs/path/release-manifest.json RELEASE_CONFIG=... yarn check:bytecode`.
+
 For a diagnostic template comparison, use `CHECK_MODE=code-only`; only that
 mode supports `CONTRACTS` and `ALLOW_METADATA_DRIFT`. It is not a release
 approval. `MANIFEST` may point to the deployment's Ignition journal. Run
@@ -496,8 +534,13 @@ module enabled on the Safe, oracle answering, PSM3 and the Safe funded) stops
 the run before any transaction. A failed open is left in place for inspection,
 and a run interrupted after a transaction was sent says what may be open and
 how to close it.
-Run it after the pauser enables both protocol switches and unpauses, with
-backend schedulers stopped, then after every rollover. These permissions are
+Run it with backend schedulers stopped once both protocol switches are on and
+the manager is unpaused: after the pauser enables them for a build registered
+through `setYieldHandler`, or, for a freshly deployed manager (already on),
+after the release checks, unpausing first if it was paused. Run it again after
+every rollover. `CALLER=operator` needs the registry operator's key in this
+environment; where that key lives only behind the signing gateway, use
+`CALLER=safe` with a team Safe that enabled the new manager. These permissions are
 global; there is no canary-only allow-list. Disable opens again on failure.
 Treat a sender error or receipt timeout as an unknown transaction outcome,
 even without a returned hash. Reconcile receipts, sender nonce and position

@@ -14,6 +14,9 @@
  *
  * Environment Variables Required:
  *   - EXPLORER_KEY: Etherscan / Basescan API key
+ * Optional:
+ *   - IGNITION_DEPLOYMENT_ID: journal to read (default chain-<chainId>), for a
+ *     deploy made with a non-default --deployment-id
  */
 import hre from "hardhat";
 import fs from "fs";
@@ -100,7 +103,8 @@ async function main() {
     }
 
     // Read deployed addresses and constructor args from Ignition state
-    const deploymentDir = path.join(__dirname, "..", "ignition", "deployments", `chain-${chainId}`);
+    const deploymentId = process.env.IGNITION_DEPLOYMENT_ID || `chain-${chainId}`;
+    const deploymentDir = path.join(__dirname, "..", "ignition", "deployments", deploymentId);
     const addressesFile = path.join(deploymentDir, "deployed_addresses.json");
     const journalFile = path.join(deploymentDir, "journal.jsonl");
 
