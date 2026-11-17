@@ -225,7 +225,7 @@ SYM_SAVINGS_MAX_FEED_AGE=129600        # Oldest Chainlink round accepted (s). De
 SYM_SAVINGS_MAX_DISAGREEMENT_BPS=50    # Chainlink vs SSR oracle veto (bps). Default 50
 SYM_SAVINGS_MAX_RATE=2000000000000000000  # Ceiling on the sUSDS rate (18 dp). Default 2e18
 SYM_SAVINGS_MAX_TOLERANCE_BPS=50       # Default oracle tolerance ceiling (bps). Default 50, admin max 300
-SYM_SAVINGS_MAX_EXPOSURE_BPS=10000     # Default share of the PSM3 pocket the book may reach. Default 100%
+SYM_SAVINGS_MAX_EXPOSURE_BPS=10000     # Default per-deposit cap: one open may not exceed this share of PSM3's USDC pocket at that moment (not a cap on the total book). Default 100%
 # TODO before the production deploy: decide the referral code. 3014 is Osero's and
 # only tags PSM3's Swap event (no on-chain effect); a Ratehopper-own code is issued
 # by Spark. It is an immutable on the handler build, so a later change means a new
