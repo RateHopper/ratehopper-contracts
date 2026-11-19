@@ -12,9 +12,11 @@
     "DeployCore#SafeDebtManager": "0x01442908D719FAac386Cd02527B51887389CBbF5",
     "DeployCore#LeveragedPosition": "0x9b96462B20Ee71aA42c87b84d06a95d1f6316319",
     "DeployCore#SafeExecTransactionWrapper": "0x0e1450DF577001dBD31C4b6025D97F46Ba48F44f",
-    "DeployYieldManager#AerodromeYieldHandler": "0xa413081aeA40f0aD46E05374533efC92D6316A34",
-    "DeployYieldManager#UniV3YieldHandler": "0x8E85b45534eD7bcA1D0DaC1c3976d83106A44F7b",
-    "DeployYieldManager#UniV4YieldHandler": "0x36c6825fE8122Dc1859f7dB6Cb5c3cB532ad0c35",
-    "DeployYieldManager#SafeYieldManager": "0x8a569BffA5141D6551383F8575Ce4C03dfdBD1Bc"
+    "DeployYieldManager#AerodromeYieldHandler": "0x22Df39617193D60F8e916bc998d80663f1A2f758",
+    "DeployYieldManager#UniV3YieldHandler": "0x9b44e6483846268F0d121970A0FED92a2395b5d5",
+    "DeployYieldManager#UniV4YieldHandler": "0xB537036035d6A07F79753E61a6E945b5d5C4E827",
+    "DeployYieldManager#SafeYieldManager": "0xA1de862Ab2d05Ce1E6d73689545B5C56c2b7C8bB",
+    "DeployYieldManager#ChainlinkSsrRateProvider": "0x8f1725ABE02afBbf62d3A573e5b7b36AAfE68A22",
+    "DeployYieldManager#SkySavingsYieldHandler": "0x40a4Ebb4dB06b9213e28FFdEd4028D1Cca145633"
   }
 }
